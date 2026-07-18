@@ -32,6 +32,8 @@ pub struct ContextManager {
     pub history: Vec<LlmMessage>,
     /// 纯展示消息列表 (label, content)，用于 split-pane UI 渲染，不参与 LLM 上下文。
     pub display_messages: Vec<(String, String)>,
+    /// history 中当前 turn 的起始索引，get_display_messages 只显示从该位置开始的消息。
+    pub history_display_start: usize,
     pub system_prompt: String,
     pub max_tokens: usize,
     pub used_tokens: usize,
@@ -46,6 +48,7 @@ impl ContextManager {
         Self {
             history: Vec::new(),
             display_messages: Vec::new(),
+            history_display_start: 0,
             system_prompt,
             max_tokens,
             used_tokens: 0,
@@ -66,8 +69,9 @@ impl ContextManager {
 
     /// Extract display messages from conversation history.
     /// Returns Vec of (role_label, content) for the UI.
-    /// Deduplicates: if a display message has the same content as a history
-    /// message, only the display version is shown (it has the correct label).
+    /// Order: conversation history first, then status messages — chronological like a log.
+    /// Deduplicates: if a history message has the same content as a display message,
+    /// only the history version is shown (it has the richer role label).
     pub fn get_display_messages(&self) -> Vec<(String, String)> {
         // Build a set of content strings already present in display_messages
         let display_contents: std::collections::HashSet<String> = self
@@ -76,21 +80,15 @@ impl ContextManager {
             .map(|(_, content)| content.clone())
             .collect();
 
-        // 先添加纯展示消息（系统状态消息等）
-        let mut result: Vec<(String, String)> = self
-            .display_messages
-            .iter()
-            .map(|(label, content)| (format!("▸ {}", label), content.clone()))
-            .collect();
-
-        // 再添加对话历史中的消息（跳过已在 display_messages 中出现的）
-        for msg in &self.history {
+        // 先添加对话历史（按时间顺序）
+        let mut result: Vec<(String, String)> = Vec::new();
+        for msg in &self.history[self.history_display_start..] {
             if msg.role == "system" {
-                continue; // Don't show system messages
+                continue;
             }
             let content = msg.content.as_deref().unwrap_or("").to_string();
             if display_contents.contains(&content) {
-                continue; // Already shown via display_messages
+                continue; // 已通过 display_messages 显示（例如 finish 结果）
             }
             let role = match msg.role.as_str() {
                 "user" => "▸ 你".to_string(),
@@ -99,6 +97,11 @@ impl ContextManager {
                 other => other.to_string(),
             };
             result.push((role, content));
+        }
+
+        // 再添加纯展示消息（工具执行状态等）
+        for (label, content) in &self.display_messages {
+            result.push((format!("▸ {}", label), content.clone()));
         }
 
         result

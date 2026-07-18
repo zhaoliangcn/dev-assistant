@@ -204,6 +204,7 @@ async fn main() -> Result<(), AppError> {
                 // Clear stale display messages from the previous session so the
                 // UI doesn't show duplicate or outdated status messages.
                 ctx.display_messages.clear();
+                ctx.history_display_start = ctx.history.len();
 
                 // Inject a system-level directive after restart so the LLM
                 // knows a restart just occurred and must not call restart again.
@@ -288,6 +289,7 @@ async fn main() -> Result<(), AppError> {
 
             if input == "/clear" {
                 agent.context.display_messages.clear();
+                agent.context.history_display_start = agent.context.history.len();
                 continue;
             }
 
@@ -298,6 +300,8 @@ async fn main() -> Result<(), AppError> {
             // Clear stale display messages from previous turn so they
             // don't accumulate and stack on each render.
             agent.context.display_messages.clear();
+            // 记录当前 history 位置，get_display_messages 只显示此后的消息
+            agent.context.history_display_start = agent.context.history.len();
 
             // Clear the screen before agent execution so that any tracing
             // logs (which go to stderr) don't appear inside the split-pane UI.
@@ -369,19 +373,6 @@ async fn main() -> Result<(), AppError> {
                 None,
             );
             session_log.log_assistant(&result.message);
-
-            // Also add as a display message for the status section
-            if result.success {
-                agent.context.add_display_message(
-                    MessageLevel::Success,
-                    &result.message,
-                );
-            } else {
-                agent.context.add_display_message(
-                    MessageLevel::Error,
-                    &result.message,
-                );
-            }
 
             // Handle restart request
             if result.restart_requested {

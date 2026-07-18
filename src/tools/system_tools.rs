@@ -53,7 +53,7 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
 
     let working_dir = context.working_dir.clone();
     let timeout = command_timeout_secs();
-    debug!(command = %command, args = ?extra_args, cwd = %working_dir.display(), timeout = %timeout, "exec_command");
+    debug!(command = %command, args = ?extra_args, cwd = %working_dir.display(), timeout_secs = %timeout, "exec_command");
 
     // Build display string for the result
     let args_for_display = if extra_args.is_empty() {
@@ -68,6 +68,22 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         .current_dir(working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // SECURITY: On Unix, create a new process group for the child so that
+    // we can kill the entire group (including grandchildren) on timeout.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            cmd.pre_exec(|| {
+                // Create a new process group. The PGID equals the child PID.
+                if libc::setpgid(0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
 
     let child = cmd.spawn().map_err(|e| {
         AppError::Llm(format!(
@@ -141,11 +157,10 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         }
         Ok(Err(e)) => Err(AppError::Llm(format!("Command wait failed: {}", e))),
         Err(_) => {
-            // Timeout — kill the child process by PID to prevent resource leak.
-            // We use PID-based kill because the Child object is consumed by
-            // wait_with_output() in the waiter thread.
-            debug!(command = %command, pid = %pid, timeout_secs = %timeout, "Command timed out, killing process");
-            let _killed = kill_process(pid);
+            // Timeout — kill the entire process group (Unix) or process tree (Windows)
+            // to prevent resource leaks from grandchildren.
+            debug!(command = %command, pid = %pid, timeout_secs = %timeout, "Command timed out, killing process group");
+            let _killed = kill_process_tree(pid);
 
             Ok(ToolResult {
                 success: false,
@@ -160,16 +175,18 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
     }
 }
 
-/// Attempt to kill a process by PID. Returns true if the kill signal was sent.
+/// Attempt to kill an entire process group (Unix) or process tree (Windows).
+/// Returns true if the kill signal was sent successfully.
 #[cfg(unix)]
-fn kill_process(pid: u32) -> bool {
-    unsafe { libc::kill(pid as i32, libc::SIGKILL) == 0 }
+fn kill_process_tree(pid: u32) -> bool {
+    // Negative PID = process group, which kills the process and all its children.
+    unsafe { libc::killpg(pid as i32, libc::SIGKILL) == 0 }
 }
 
 #[cfg(not(unix))]
-fn kill_process(pid: u32) -> bool {
+fn kill_process_tree(pid: u32) -> bool {
     std::process::Command::new("taskkill")
-        .args(&["/F", "/PID", &pid.to_string()])
+        .args(&["/F", "/T", "/PID", &pid.to_string()])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)

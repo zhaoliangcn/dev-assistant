@@ -87,23 +87,33 @@ pub fn render(
 
     // ── 工具面板（工具执行状态）──
     if !status.is_empty() {
-        writeln!(stdout, "{}", "─".repeat(term_width))?;
-        writeln!(stdout, "│ 工具面板")?;
-        writeln!(stdout, "{}", "─".repeat(term_width))?;
+        // 非 verbose 模式下只显示成功/错误/警告，隐藏信息/调试
+        let status_visible: Vec<&(String, String)> = status.iter()
+            .filter(|(role, _)| {
+                if verbose { return true; }
+                role == "成功" || role == "错误" || role == "警告"
+            })
+            .collect();
 
-        for (role, content) in status {
-            let prefix = role_prefix(role);
-            let pw = prefix_width(prefix);
-            for (i, line) in content.lines().enumerate() {
-                if line.is_empty() {
-                    writeln!(stdout, "│")?;
-                } else if i == 0 {
-                    writeln!(stdout, "│ {} │ {}", prefix, line)?;
-                } else {
-                    writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
+        if !status_visible.is_empty() {
+            writeln!(stdout, "{}", "─".repeat(term_width))?;
+            writeln!(stdout, "│ 工具面板")?;
+            writeln!(stdout, "{}", "─".repeat(term_width))?;
+
+            for (role, content) in status_visible {
+                let prefix = role_prefix(role);
+                let pw = prefix_width(prefix);
+                for (i, line) in content.lines().enumerate() {
+                    if line.is_empty() {
+                        writeln!(stdout, "│")?;
+                    } else if i == 0 {
+                        writeln!(stdout, "│ {} │ {}", prefix, line)?;
+                    } else {
+                        writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
+                    }
                 }
+                writeln!(stdout, "│")?;
             }
-            writeln!(stdout, "│")?;
         }
     }
 

@@ -7,14 +7,14 @@ use unicode_width::UnicodeWidthStr;
 // ── 前缀标签 ──────────────────────────────────────────────────────────
 
 fn role_prefix(role: &str) -> &'static str {
-    if role.starts_with("▸ 你")       { "👤 你" }
-    else if role.starts_with("◂ 助手") { "🤖 助手" }
-    else if role.starts_with("⚙ 工具") { "🔧 工具" }
-    else if role.starts_with("▸ 成功") { "✅ 成功" }
-    else if role.starts_with("▸ 错误") { "❌ 错误" }
-    else if role.starts_with("▸ 警告") { "⚠️ 警告" }
-    else if role.starts_with("▸ 调试") { "🐛 调试" }
-    else if role.starts_with("▸ 信息") { "ℹ️ 信息" }
+    if role.starts_with("▸ 你") || role == "你"       { "👤 你" }
+    else if role.starts_with("◂ 助手") || role == "助手" { "🤖 助手" }
+    else if role.starts_with("⚙ 工具") || role == "工具" { "🔧 工具" }
+    else if role.starts_with("▸ 成功") || role == "成功" { "✅ 成功" }
+    else if role.starts_with("▸ 错误") || role == "错误" { "❌ 错误" }
+    else if role.starts_with("▸ 警告") || role == "警告" { "⚠️ 警告" }
+    else if role.starts_with("▸ 调试") || role == "调试" { "🐛 调试" }
+    else if role.starts_with("▸ 信息") || role == "信息" { "ℹ️ 信息" }
     else                               { "📝 消息" }
 }
 
@@ -25,12 +25,18 @@ fn prefix_width(prefix: &str) -> usize {
 
 // ── 主渲染函数 ────────────────────────────────────────────────────────
 
-/// Render the full UI with two panels:
-///   - 输出面板 (output panel): message history
+/// Render the full UI with three panels:
+///   - 输出面板 (conversation panel): message history
+///   - 工具面板 (tool status panel): tool execution status
 ///   - 输入面板 (input panel): current input or status
 ///
 /// `verbose` — when false, only show user messages and assistant responses
-pub fn render(messages: &[(String, String)], status_line: Option<&str>, verbose: bool) -> io::Result<()> {
+pub fn render(
+    conversation: &[(String, String)],
+    status: &[(String, String)],
+    status_line: Option<&str>,
+    verbose: bool,
+) -> io::Result<()> {
     let mut stdout = io::stdout();
     let term_width = get_terminal_width().unwrap_or(80);
 
@@ -43,12 +49,12 @@ pub fn render(messages: &[(String, String)], status_line: Option<&str>, verbose:
     writeln!(stdout, "  Dev-Assistant — 消息窗口")?;
     writeln!(stdout, "{}", "═".repeat(term_width))?;
 
-    // ── 输出面板 ──
+    // ── 输出面板（对话历史）──
     writeln!(stdout, "│ 输出面板")?;
     writeln!(stdout, "{}", "─".repeat(term_width))?;
 
     // 过滤消息：非 verbose 模式下只显示用户、助手对话和重要状态
-    let visible: Vec<&(String, String)> = messages.iter()
+    let visible: Vec<&(String, String)> = conversation.iter()
         .filter(|(role, _)| {
             if verbose { return true; }
             role.starts_with("▸ 你")
@@ -72,6 +78,28 @@ pub fn render(messages: &[(String, String)], status_line: Option<&str>, verbose:
                     writeln!(stdout, "│ {} │ {}", prefix, line)?;
                 } else {
                     // 后续行缩进对齐第一行的前缀位置
+                    writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
+                }
+            }
+            writeln!(stdout, "│")?;
+        }
+    }
+
+    // ── 工具面板（工具执行状态）──
+    if !status.is_empty() {
+        writeln!(stdout, "{}", "─".repeat(term_width))?;
+        writeln!(stdout, "│ 工具面板")?;
+        writeln!(stdout, "{}", "─".repeat(term_width))?;
+
+        for (role, content) in status {
+            let prefix = role_prefix(role);
+            let pw = prefix_width(prefix);
+            for (i, line) in content.lines().enumerate() {
+                if line.is_empty() {
+                    writeln!(stdout, "│")?;
+                } else if i == 0 {
+                    writeln!(stdout, "│ {} │ {}", prefix, line)?;
+                } else {
                     writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
                 }
             }

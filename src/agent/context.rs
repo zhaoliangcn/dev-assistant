@@ -67,11 +67,9 @@ impl ContextManager {
         self.display_messages.push((level.label().to_string(), msg.to_string()));
     }
 
-    /// Extract display messages from conversation history.
-    /// Returns Vec of (role_label, content) for the UI.
-    /// Order: conversation history first, then status messages — chronological like a log.
-    /// Deduplicates: if a history message has the same content as a display message,
-    /// only the history version is shown (it has the richer role label).
+    /// Extract conversation messages from history for the UI.
+    /// Returns Vec of (role_label, content) in chronological order.
+    /// Skips system messages and messages already shown via display_messages.
     pub fn get_display_messages(&self) -> Vec<(String, String)> {
         // Build a set of content strings already present in display_messages
         let display_contents: std::collections::HashSet<String> = self
@@ -80,7 +78,6 @@ impl ContextManager {
             .map(|(_, content)| content.clone())
             .collect();
 
-        // 先添加对话历史（按时间顺序）
         let mut result: Vec<(String, String)> = Vec::new();
         for msg in &self.history[self.history_display_start..] {
             if msg.role == "system" {
@@ -88,7 +85,7 @@ impl ContextManager {
             }
             let content = msg.content.as_deref().unwrap_or("").to_string();
             if display_contents.contains(&content) {
-                continue; // 已通过 display_messages 显示（例如 finish 结果）
+                continue; // 已通过 display_messages 显示，不再重复
             }
             let role = match msg.role.as_str() {
                 "user" => "▸ 你".to_string(),
@@ -97,11 +94,6 @@ impl ContextManager {
                 other => other.to_string(),
             };
             result.push((role, content));
-        }
-
-        // 再添加纯展示消息（工具执行状态等）
-        for (label, content) in &self.display_messages {
-            result.push((format!("▸ {}", label), content.clone()));
         }
 
         result

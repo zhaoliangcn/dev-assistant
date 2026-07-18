@@ -125,10 +125,12 @@ impl LlmProvider for AnthropicProvider {
         let status = response.status();
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            return Err(AppError::Llm(format!(
-                "Anthropic API returned error (status {}): {}",
-                status, body_text
-            )));
+            let msg = format!("Anthropic API returned error (status {}): {}", status, body_text);
+            return Err(if status.as_u16() == 429 {
+                AppError::RateLimited(msg)
+            } else {
+                AppError::Llm(msg)
+            });
         }
 
         let data: Value = response.json().await?;

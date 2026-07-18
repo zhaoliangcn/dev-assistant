@@ -106,7 +106,7 @@ impl LlmClient {
         loop {
             match provider.chat(&self.http_client, &request).await {
                 Ok(resp) => return Ok(resp),
-                Err(AppError::Llm(ref e)) if is_429(e) && attempt < MAX_RETRIES => {
+                Err(ref e) if e.is_rate_limited() && attempt < MAX_RETRIES => {
                     attempt += 1;
                     let delay_ms = BASE_DELAY_MS * 2u64.pow(attempt - 1)
                         + rand::rng().random_range(0..500);
@@ -123,10 +123,6 @@ impl LlmClient {
             }
         }
     }
-}
-
-fn is_429(err: &str) -> bool {
-    err.contains("status 429") || err.contains("Too Many Requests")
 }
 
 // 保留旧接口兼容性，但标记为 deprecated

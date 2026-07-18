@@ -4,6 +4,8 @@ use crate::utils::message_level::MessageLevel;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
+use super::display::DisplayBuffer;
+
 #[derive(Debug, Clone)]
 pub enum Role {
     System,
@@ -30,10 +32,6 @@ impl From<Role> for String {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ContextManager {
     pub history: Vec<LlmMessage>,
-    /// 纯展示消息列表 (label, content)，用于 split-pane UI 渲染，不参与 LLM 上下文。
-    pub display_messages: Vec<(String, String)>,
-    /// history 中当前 turn 的起始索引，get_display_messages 只显示从该位置开始的消息。
-    pub history_display_start: usize,
     pub system_prompt: String,
     pub max_tokens: usize,
     pub used_tokens: usize,
@@ -41,6 +39,9 @@ pub struct ContextManager {
     /// 持久化的活跃模型名称，重启后恢复
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_model: Option<String>,
+    /// UI 展示缓冲区（不参与 LLM 上下文，也不序列化）
+    #[serde(skip)]
+    pub display: DisplayBuffer,
 }
 
 const ROUNDS_TO_KEEP: usize = 6;
@@ -50,13 +51,12 @@ impl ContextManager {
     pub fn new(system_prompt: String, max_tokens: usize) -> Self {
         Self {
             history: Vec::new(),
-            display_messages: Vec::new(),
-            history_display_start: 0,
             system_prompt,
             max_tokens,
             used_tokens: 0,
             consecutive_no_tool_rounds: 0,
             active_model: None,
+            display: DisplayBuffer::new(),
         }
     }
 
@@ -68,28 +68,29 @@ impl ContextManager {
     /// 添加一条纯展示消息，用于在 UI 中显示。此消息不会发送给 LLM。
     pub fn add_display_message(&mut self, level: MessageLevel, msg: &str) {
         debug!(level = ?level, len = msg.len(), "Adding display message");
-        self.display_messages.push((level.label().to_string(), msg.to_string()));
+        self.display.add(level, msg);
     }
 
     /// Extract conversation messages from history for the UI.
     /// Returns Vec of (role_label, content) in chronological order.
-    /// Skips system messages and messages already shown via display_messages.
+    /// Skips system messages and messages already shown via display buffer.
     pub fn get_display_messages(&self) -> Vec<(String, String)> {
-        // Build a set of content strings already present in display_messages
+        // Build a set of content strings already present in display buffer
         let display_contents: std::collections::HashSet<String> = self
-            .display_messages
+            .display
+            .messages
             .iter()
-            .map(|(_, content)| content.clone())
+            .map(|(_, content): &(_, String)| content.clone())
             .collect();
 
         let mut result: Vec<(String, String)> = Vec::new();
-        for msg in &self.history[self.history_display_start..] {
+        for msg in &self.history[self.display.history_start..] {
             if msg.role == "system" {
                 continue;
             }
             let content = msg.content.as_deref().unwrap_or("").to_string();
             if display_contents.contains(&content) {
-                continue; // 已通过 display_messages 显示，不再重复
+                continue; // 已通过 display buffer 显示，不再重复
             }
             let role = match msg.role.as_str() {
                 "user" => "▸ 你".to_string(),

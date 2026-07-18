@@ -7,10 +7,38 @@ use std::path::{Path, PathBuf};
 use std::os::unix::fs::OpenOptionsExt;
 
 use chrono::Local;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use tracing::debug;
 
 use crate::utils::error::AppError;
+
+/// 预编译的脱敏正则表达式集合（线程安全，进程级缓存）。
+struct SanitizePatterns {
+    api_keys: Vec<Regex>,
+    bearer: Regex,
+    password: Regex,
+    private_key: Regex,
+    ssh_key: Regex,
+    jwt: Regex,
+}
+
+static PATTERNS: Lazy<SanitizePatterns> = Lazy::new(|| {
+    let api_keys = vec![
+        Regex::new(r"(?i)(sk-[a-zA-Z0-9]{20,})").unwrap(),
+        Regex::new(r"(?i)(AIza[a-zA-Z0-9_-]{35})").unwrap(),
+        Regex::new(r"(?i)(gsk_[a-zA-Z0-9]{20,})").unwrap(),
+        Regex::new(r"(?i)(key-[a-zA-Z0-9]{20,})").unwrap(),
+    ];
+    SanitizePatterns {
+        api_keys,
+        bearer: Regex::new(r"(?i)(bearer\s+)[a-zA-Z0-9_.-]{20,}").unwrap(),
+        password: Regex::new(r#"(?i)(password|passwd|pwd)\s*[=:]\s*["']?([^"'\s,}]{4,})"#).unwrap(),
+        private_key: Regex::new(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----.*?-----END\s+(?:RSA\s+)?PRIVATE\s+KEY-----").unwrap(),
+        ssh_key: Regex::new(r"ssh-(?:rsa|ed25519|dss|ecdsa)\s+[a-zA-Z0-9+/=]+").unwrap(),
+        jwt: Regex::new(r"eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]+").unwrap(),
+    }
+});
 
 /// 交互会话日志记录器，将完整的交互过程持久化到文件，便于调试和回溯。
 ///
@@ -202,46 +230,17 @@ impl SessionLogger {
 
     /// 敏感信息脱敏处理，防止 API Key、密码、令牌等泄露到日志中。
     fn sanitize(content: &str) -> String {
+        let p = &*PATTERNS;
         let mut result = content.to_string();
 
-        // 脱敏 API Key (常见格式: sk-..., AIza..., gsk_...)
-        let api_key_patterns = vec![
-            r"(?i)(sk-[a-zA-Z0-9]{20,})",
-            r"(?i)(AIza[a-zA-Z0-9_-]{35})",
-            r"(?i)(gsk_[a-zA-Z0-9]{20,})",
-            r"(?i)(key-[a-zA-Z0-9]{20,})",
-        ];
-
-        for pattern in api_key_patterns {
-            if let Ok(re) = Regex::new(pattern) {
-                result = re.replace_all(&result, "[REDACTED_API_KEY]").to_string();
-            }
+        for re in &p.api_keys {
+            result = re.replace_all(&result, "[REDACTED_API_KEY]").to_string();
         }
-
-        // 脱敏 Bearer Token
-        if let Ok(re) = Regex::new(r"(?i)(bearer\s+)[a-zA-Z0-9_.-]{20,}") {
-            result = re.replace_all(&result, "${1}[REDACTED_TOKEN]").to_string();
-        }
-
-        // 脱敏密码 (key=value 或 "password": "value" 格式)
-        if let Ok(re) = Regex::new(r#"(?i)(password|passwd|pwd)\s*[=:]\s*["']?([^"'\s,}]{4,})"#) {
-            result = re.replace_all(&result, "${1}=[REDACTED]").to_string();
-        }
-
-        // 脱敏私钥内容
-        if let Ok(re) = Regex::new(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----.*?-----END\s+(?:RSA\s+)?PRIVATE\s+KEY-----") {
-            result = re.replace_all(&result, "[REDACTED_PRIVATE_KEY]").to_string();
-        }
-
-        // 脱敏 SSH 密钥
-        if let Ok(re) = Regex::new(r"ssh-(?:rsa|ed25519|dss|ecdsa)\s+[a-zA-Z0-9+/=]+") {
-            result = re.replace_all(&result, "[REDACTED_SSH_KEY]").to_string();
-        }
-
-        // 脱敏 JWT Token
-        if let Ok(re) = Regex::new(r"eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]+") {
-            result = re.replace_all(&result, "[REDACTED_JWT]").to_string();
-        }
+        result = p.bearer.replace_all(&result, "${1}[REDACTED_TOKEN]").to_string();
+        result = p.password.replace_all(&result, "${1}=[REDACTED]").to_string();
+        result = p.private_key.replace_all(&result, "[REDACTED_PRIVATE_KEY]").to_string();
+        result = p.ssh_key.replace_all(&result, "[REDACTED_SSH_KEY]").to_string();
+        result = p.jwt.replace_all(&result, "[REDACTED_JWT]").to_string();
 
         result
     }

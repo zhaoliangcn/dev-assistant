@@ -18,8 +18,25 @@ pub enum AppError {
     Env(String),
     #[error("LLM error: {0}")]
     Llm(String),
+    #[error("LLM rate limited: {0}")]
+    RateLimited(String),
+    #[error("Tool not found: {0}")]
+    ToolNotFound(String),
     #[error("Security error: {0}")]
     Security(String),
     #[error("Invalid config: {0}")]
     Config(String),
+}
+
+impl AppError {
+    /// 如果错误是 429 / Too Many Requests 返回 true。
+    pub fn is_rate_limited(&self) -> bool {
+        match self {
+            AppError::RateLimited(msg) => {
+                msg.contains("status 429") || msg.contains("Too Many Requests")
+            }
+            AppError::Llm(msg) => msg.contains("status 429") || msg.contains("Too Many Requests"),
+            _ => false,
+        }
+    }
 }

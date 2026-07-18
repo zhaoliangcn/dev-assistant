@@ -453,6 +453,7 @@ dependencies = [
  "hashlink",
  "libc",
  "lru",
+ "once_cell",
  "rand 0.10.2",
  "regex",
  "reqwest",

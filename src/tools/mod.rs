@@ -8,7 +8,7 @@ use crate::llm::ToolSchema;
 use crate::security::{SecurityEvaluation, SecurityPolicy};
 use crate::utils::error::AppError;
 
-pub mod file_tools;
+pub mod file;
 pub mod meta_tools;
 pub mod system_tools;
 
@@ -55,13 +55,13 @@ impl<'a> ToolRegistry<'a> {
     }
 
     fn register_builtin_tools(&mut self) {
-        self.register(file_tools::read_file_tool());
-        self.register(file_tools::batch_read_files_tool());
-        self.register(file_tools::write_file_tool());
-        self.register(file_tools::edit_file_tool());
-        self.register(file_tools::glob_tool());
-        self.register(file_tools::list_directory_tool());
-        self.register(file_tools::file_exists_tool());
+        self.register(file::read_file_tool());
+        self.register(file::batch_read_files_tool());
+        self.register(file::write_file_tool());
+        self.register(file::edit_file_tool());
+        self.register(file::glob_tool());
+        self.register(file::list_directory_tool());
+        self.register(file::file_exists_tool());
         self.register(system_tools::exec_command_tool());
         self.register(meta_tools::finish_tool());
         self.register(meta_tools::restart_tool());
@@ -89,25 +89,28 @@ impl<'a> ToolRegistry<'a> {
             .collect()
     }
 
+    /// 执行工具：先做安全评估，再根据评估结果决定是否执行。
+    ///
+    /// - `Critical`：阻止执行，返回带评估信息的失败结果
+    /// - `High` / `Medium`：返回需要审批的失败结果（调用方负责提示用户）
+    /// - `Low`：直接执行
     pub fn execute(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
         debug!(tool = name, "Executing tool");
 
-        // Security check before execution
         let evaluation = self.security.evaluate_tool(name, &arguments);
         match evaluation.danger_level {
             crate::security::DangerLevel::Critical => {
                 warn!(tool = name, reason = %evaluation.reason, "Tool blocked by security policy");
-                return Ok(ToolResult {
+                Ok(ToolResult {
                     success: false,
                     content: format!("🚫 Command blocked (CRITICAL): {}", evaluation.reason),
                     security_evaluation: Some(evaluation),
                     restart_requested: false,
-                });
+                })
             }
             crate::security::DangerLevel::High | crate::security::DangerLevel::Medium => {
-                // Return the evaluation to the Agent; it will prompt the user for approval
                 warn!(tool = name, level = ?evaluation.danger_level, reason = %evaluation.reason, "Tool requires approval");
-                return Ok(ToolResult {
+                Ok(ToolResult {
                     success: false,
                     content: format!(
                         "⚠️  This command requires approval ({}): {}\n\
@@ -117,45 +120,27 @@ impl<'a> ToolRegistry<'a> {
                     ),
                     security_evaluation: Some(evaluation),
                     restart_requested: false,
-                });
-            }
-            crate::security::DangerLevel::Low => {}
-        }
-
-        self.execute_tool(name, arguments)
-    }
-
-    /// Execute a tool directly without performing security evaluation.
-    /// This should only be used after the user has explicitly approved the tool,
-    /// or for tools that bypass security checks (e.g., finish, restart).
-    /// Note: Critical-level commands are still blocked even after approval.
-    pub fn execute_approved(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
-        debug!(tool = name, "Executing approved tool (security check bypassed for non-critical)");
-        
-        // 仍然进行安全评估，但 Critical 级别仍然阻止
-        let evaluation = self.security.evaluate_tool(name, &arguments);
-        match evaluation.danger_level {
-            crate::security::DangerLevel::Critical => {
-                warn!(tool = name, reason = %evaluation.reason, "Tool blocked by security policy even after approval");
-                Ok(ToolResult {
-                    success: false,
-                    content: format!("🚫 Command blocked (CRITICAL): {}", evaluation.reason),
-                    security_evaluation: Some(evaluation),
-                    restart_requested: false,
                 })
             }
-            _ => {
-                // 用户已批准，直接执行（跳过需要交互的检查）
-                self.execute_tool(name, arguments)
-            }
+            crate::security::DangerLevel::Low => self.execute_tool(name, arguments),
         }
+    }
+
+    /// 直接执行工具，跳过安全评估。
+    ///
+    /// 仅用于：
+    /// - 元工具（finish/restart）——它们不操作外部资源
+    /// - 用户已显式批准的工具
+    pub fn execute_approved(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
+        debug!(tool = name, "Executing approved tool (security check bypassed)");
+        self.execute_tool(name, arguments)
     }
 
     /// Internal method that executes the tool handler without security checks.
     fn execute_tool(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
         let tool = self
             .get_tool(name)
-            .ok_or_else(|| AppError::Llm(format!("Unknown tool: {}", name)))?;
+            .ok_or_else(|| AppError::ToolNotFound(name.to_string()))?;
 
         let args = ToolArgs { arguments };
         let context = ToolContext {

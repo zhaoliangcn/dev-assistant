@@ -343,7 +343,7 @@ impl SecurityPolicy {
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> SecurityEvaluation {
-        // For exec_command, check the actual command + args
+        // exec_command：委托给专门的命令评估器
         if tool_name == "exec_command" {
             let command = arguments["command"].as_str().unwrap_or("");
             let args: Vec<&str> = arguments["args"]
@@ -355,156 +355,78 @@ impl SecurityPolicy {
             return eval;
         }
 
-        // For file tools that read existing files, the file must exist within allowed directories
-        if matches!(tool_name, "read_file" | "edit_file") {
-            if let Some(file_path) = arguments["file_path"].as_str() {
-                let file_name = std::path::Path::new(file_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(file_path);
-
-                if self.is_dangerous_file(file_name) {
-                    let eval = SecurityEvaluation {
-                        danger_level: DangerLevel::High,
-                        reason: format!(
-                            "Access to sensitive file '{}' requires approval",
-                            file_path
-                        ),
-                    };
-                    debug!(tool = tool_name, file = file_path, level = ?eval.danger_level, "Security evaluation");
-                    return eval;
-                }
-
-                if let Err(e) = self.validate_path(file_path) {
-                    let eval = SecurityEvaluation {
-                        danger_level: DangerLevel::Critical,
-                        reason: e.to_string(),
-                    };
-                    debug!(tool = tool_name, file = file_path, level = ?eval.danger_level, "Security evaluation");
-                    return eval;
-                }
-            }
-        }
-
-        // For file tools that check existence or list directories, validate the path scope
-        // without requiring the target to exist
-        if matches!(tool_name, "file_exists" | "list_directory") {
-            if let Some(file_path) = arguments["file_path"].as_str() {
-                let file_name = std::path::Path::new(file_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(file_path);
-
-                if self.is_dangerous_file(file_name) {
-                    let eval = SecurityEvaluation {
-                        danger_level: DangerLevel::High,
-                        reason: format!(
-                            "Access to sensitive file '{}' requires approval",
-                            file_path
-                        ),
-                    };
-                    debug!(tool = tool_name, file = file_path, level = ?eval.danger_level, "Security evaluation");
-                    return eval;
-                }
-
-                if let Err(e) = self.validate_path_exists(file_path) {
-                    let eval = SecurityEvaluation {
-                        danger_level: DangerLevel::Critical,
-                        reason: e.to_string(),
-                    };
-                    debug!(tool = tool_name, file = file_path, level = ?eval.danger_level, "Security evaluation");
-                    return eval;
-                }
-            }
-        }
-
-        // For write_file, the file may not exist yet — validate parent directory instead
-        if tool_name == "write_file" {
-            if let Some(file_path) = arguments["file_path"].as_str() {
-                let file_name = std::path::Path::new(file_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(file_path);
-
-                if self.is_dangerous_file(file_name) {
-                    let eval = SecurityEvaluation {
-                        danger_level: DangerLevel::High,
-                        reason: format!(
-                            "Access to sensitive file '{}' requires approval",
-                            file_path
-                        ),
-                    };
-                    debug!(tool = tool_name, file = file_path, level = ?eval.danger_level, "Security evaluation");
-                    return eval;
-                }
-
-                if let Err(e) = self.validate_parent_path(file_path) {
-                    let eval = SecurityEvaluation {
-                        danger_level: DangerLevel::Critical,
-                        reason: e.to_string(),
-                    };
-                    debug!(tool = tool_name, file = file_path, level = ?eval.danger_level, "Security evaluation");
-                    return eval;
-                }
-            }
-        }
-
-        // For batch_read_files, validate each file path exists within allowed directories
-        if tool_name == "batch_read_files" {
-            if let Some(files) = arguments["files"].as_array() {
-                for file in files {
-                    if let Some(file_path) = file.as_str() {
-                        let file_name = std::path::Path::new(file_path)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(file_path);
-
-                        if self.is_dangerous_file(file_name) {
-                            let eval = SecurityEvaluation {
-                                danger_level: DangerLevel::High,
-                                reason: format!(
-                                    "Access to sensitive file '{}' requires approval",
-                                    file_path
-                                ),
-                            };
-                            debug!(tool = tool_name, file = file_path, level = ?eval.danger_level, "Security evaluation");
-                            return eval;
-                        }
-
-                        if let Err(e) = self.validate_path_exists(file_path) {
-                            let eval = SecurityEvaluation {
-                                danger_level: DangerLevel::Critical,
-                                reason: e.to_string(),
-                            };
-                            debug!(tool = tool_name, file = file_path, level = ?eval.danger_level, "Security evaluation");
-                            return eval;
-                        }
-                    }
-                }
-            }
-        }
-
-        // For glob, validate the pattern doesn't escape allowed directories
+        // glob：对 pattern 做专门检查
         if tool_name == "glob" {
             if let Some(pattern) = arguments["pattern"].as_str() {
-                // Reject patterns with parent directory traversal that could escape
                 if pattern.contains("..") {
-                    let eval = SecurityEvaluation {
-                        danger_level: DangerLevel::Critical,
-                        reason: "Glob pattern with '..' is not allowed".to_string(),
-                    };
-                    debug!(tool = tool_name, pattern, level = ?eval.danger_level, "Security evaluation");
-                    return eval;
+                    return self.debug_eval(
+                        tool_name,
+                        SecurityEvaluation {
+                            danger_level: DangerLevel::Critical,
+                            reason: "Glob pattern with '..' is not allowed".to_string(),
+                        },
+                    );
                 }
-                // Reject absolute paths
                 if pattern.starts_with('/') {
-                    let eval = SecurityEvaluation {
-                        danger_level: DangerLevel::Critical,
-                        reason: "Absolute path patterns are not allowed".to_string(),
-                    };
-                    debug!(tool = tool_name, pattern, level = ?eval.danger_level, "Security evaluation");
-                    return eval;
+                    return self.debug_eval(
+                        tool_name,
+                        SecurityEvaluation {
+                            danger_level: DangerLevel::Critical,
+                            reason: "Absolute path patterns are not allowed".to_string(),
+                        },
+                    );
                 }
+            }
+        }
+
+        // 通用路径校验：查表得到 spec，按 spec 走统一流程
+        if let Some(spec) = tool_security_spec(tool_name) {
+            return self.evaluate_path_tool(tool_name, spec, arguments);
+        }
+
+        debug!(tool = tool_name, "Security evaluation: safe");
+        SecurityEvaluation {
+            danger_level: DangerLevel::Low,
+            reason: "Safe operation".to_string(),
+        }
+    }
+
+    /// 通用路径校验流程：对 spec 中声明的每个路径字段做
+    /// `is_dangerous_file` 检查 + `validate_path*` 检查。
+    fn evaluate_path_tool(
+        &self,
+        tool_name: &str,
+        spec: ToolSecuritySpec,
+        arguments: &serde_json::Value,
+    ) -> SecurityEvaluation {
+        let paths = spec.extract_paths(arguments);
+        for path in paths {
+            let file_name = Path::new(&path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&path);
+
+            if self.is_dangerous_file(file_name) {
+                return self.debug_eval(
+                    tool_name,
+                    SecurityEvaluation {
+                        danger_level: DangerLevel::High,
+                        reason: format!(
+                            "Access to sensitive file '{}' requires approval",
+                            path
+                        ),
+                    },
+                );
+            }
+
+            if let Err(e) = spec.validation.validate(self, &path) {
+                return self.debug_eval(
+                    tool_name,
+                    SecurityEvaluation {
+                        danger_level: DangerLevel::Critical,
+                        reason: e.to_string(),
+                    },
+                );
             }
         }
 
@@ -513,6 +435,15 @@ impl SecurityPolicy {
             danger_level: DangerLevel::Low,
             reason: "Safe operation".to_string(),
         }
+    }
+
+    fn debug_eval(
+        &self,
+        tool_name: &str,
+        eval: SecurityEvaluation,
+    ) -> SecurityEvaluation {
+        debug!(tool = tool_name, level = ?eval.danger_level, "Security evaluation");
+        eval
     }
 
     pub fn is_dangerous_file(&self, filename: &str) -> bool {
@@ -528,5 +459,93 @@ impl SecurityPolicy {
             DangerLevel::Medium => self.approval_required,
             DangerLevel::Low => false,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 数据化规则：每个工具的安全 spec
+// ---------------------------------------------------------------------------
+
+/// 路径校验类型。
+#[derive(Debug, Clone, Copy)]
+pub enum PathValidation {
+    /// 路径必须存在且在允许目录内（用于 read_file / edit_file / batch_read_files）
+    Exists,
+    /// 路径可能不存在，但其父目录必须在允许目录内（用于 write_file）
+    ExistsParent,
+    /// 路径所在目录（可能不存在）必须在允许目录内（用于 file_exists / list_directory）
+    PathExists,
+    /// 不做路径校验
+    None,
+}
+
+impl PathValidation {
+    fn validate(
+        self,
+        policy: &SecurityPolicy,
+        path: &str,
+    ) -> Result<PathBuf, AppError> {
+        match self {
+            PathValidation::Exists => policy.validate_path(path),
+            PathValidation::ExistsParent => policy.validate_parent_path(path),
+            PathValidation::PathExists => policy.validate_path_exists(path),
+            PathValidation::None => Ok(PathBuf::from(path)),
+        }
+    }
+}
+
+/// 单个工具的安全规则。
+#[derive(Debug, Clone, Copy)]
+pub struct ToolSecuritySpec {
+    /// JSON 参数中路径字段的名字（如 "file_path" / "dir_path" / "pattern"）
+    pub path_field: &'static str,
+    /// 路径校验类型
+    pub validation: PathValidation,
+    /// true 表示路径字段是数组（如 batch_read_files 的 "files"）
+    pub multiple: bool,
+}
+
+impl ToolSecuritySpec {
+    fn extract_paths(&self, arguments: &serde_json::Value) -> Vec<String> {
+        if self.multiple {
+            arguments[self.path_field]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default()
+        } else {
+            arguments[self.path_field]
+                .as_str()
+                .map(|s| vec![s.to_string()])
+                .unwrap_or_default()
+        }
+    }
+}
+
+/// 查表：工具名 → 安全 spec。
+///
+/// 新增工具只需在此处添加一行，无需修改 `evaluate_tool` 主体。
+fn tool_security_spec(tool_name: &str) -> Option<ToolSecuritySpec> {
+    match tool_name {
+        "read_file" | "edit_file" => Some(ToolSecuritySpec {
+            path_field: "file_path",
+            validation: PathValidation::Exists,
+            multiple: false,
+        }),
+        "file_exists" | "list_directory" => Some(ToolSecuritySpec {
+            path_field: "file_path",
+            validation: PathValidation::PathExists,
+            multiple: false,
+        }),
+        "write_file" => Some(ToolSecuritySpec {
+            path_field: "file_path",
+            validation: PathValidation::ExistsParent,
+            multiple: false,
+        }),
+        "batch_read_files" => Some(ToolSecuritySpec {
+            path_field: "files",
+            validation: PathValidation::PathExists,
+            multiple: true,
+        }),
+        _ => None,
     }
 }

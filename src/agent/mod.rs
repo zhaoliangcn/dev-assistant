@@ -1,4 +1,5 @@
 pub mod context;
+pub mod display;
 
 pub use context::ContextManager;
 
@@ -223,33 +224,15 @@ impl<'a> Agent<'a> {
                 },
             };
 
-            // Handle High/Medium security evaluations that require user approval
+            // Security 评估由 ToolRegistry::execute 处理：Critical/High/Medium
+            // 时返回带 security_evaluation 的失败结果，Agent 仅负责日志和透传。
             if let Some(ref eval) = result.security_evaluation {
-                if matches!(
-                    eval.danger_level,
-                    crate::security::DangerLevel::High | crate::security::DangerLevel::Medium
-                ) && self.tools.security.requires_approval(&eval.danger_level)
-                {
-                    output.warning(&format!(
-                        "{} 需要审批 (级别: {}): {}",
-                        tool_call.function.name,
-                        eval.danger_level.as_str(),
-                        eval.reason
-                    ));
-                    results.push(ToolResult {
-                        success: false,
-                        content: format!(
-                            "[security] ⚠️  {} wants to {} (level: {}). \
-                             Tell the user: type 'approve' to allow, or 'cancel' to skip.",
-                            tool_call.function.name,
-                            eval.reason,
-                            eval.danger_level.as_str()
-                        ),
-                        security_evaluation: Some(eval.clone()),
-                        restart_requested: false,
-                    });
-                    continue;
-                }
+                output.warning(&format!(
+                    "{} 安全评估 ({}): {}",
+                    tool_call.function.name,
+                    eval.danger_level.as_str(),
+                    eval.reason
+                ));
             }
 
             if result.success {

@@ -1,0 +1,109 @@
+pub mod message_output;
+pub use message_output::{CliMessageOutput, UIMessageOutput};
+
+use std::io::{self, Write};
+
+// ── 前缀标签 ──────────────────────────────────────────────────────────
+
+fn role_prefix(role: &str) -> &'static str {
+    if role.starts_with("▸ 你")       { "👤 你" }
+    else if role.starts_with("◂ 助手") { "🤖 助手" }
+    else if role.starts_with("⚙ 工具") { "🔧 工具" }
+    else if role.starts_with("▸ 成功") { "✅ 成功" }
+    else if role.starts_with("▸ 错误") { "❌ 错误" }
+    else if role.starts_with("▸ 警告") { "⚠️ 警告" }
+    else if role.starts_with("▸ 调试") { "🐛 调试" }
+    else if role.starts_with("▸ 信息") { "ℹ️ 信息" }
+    else                               { "📝 消息" }
+}
+
+// ── 主渲染函数 ────────────────────────────────────────────────────────
+
+/// Render the full UI with two panels:
+///   - 输出面板 (output panel): message history
+///   - 输入面板 (input panel): current input or status
+///
+/// `verbose` — when false, only show user messages and assistant responses
+pub fn render(messages: &[(String, String)], input: &str, status_line: Option<&str>, verbose: bool) -> io::Result<()> {
+    let mut stdout = io::stdout();
+    let term_width = get_terminal_width().unwrap_or(80);
+
+    // 清屏并将光标移到左上角
+    print!("\x1b[2J\x1b[H");
+    stdout.flush()?;
+
+    // ── 标题栏 ──
+    writeln!(stdout, "{}", "═".repeat(term_width))?;
+    writeln!(stdout, "  Dev-Assistant — 消息窗口")?;
+    writeln!(stdout, "{}", "═".repeat(term_width))?;
+
+    // ── 输出面板 ──
+    writeln!(stdout, "│ 输出面板")?;
+    writeln!(stdout, "{}", "─".repeat(term_width))?;
+
+    // 过滤消息：非 verbose 模式下只显示用户、助手对话和重要状态
+    let visible: Vec<&(String, String)> = messages.iter()
+        .filter(|(role, _)| {
+            if verbose { return true; }
+            role.starts_with("▸ 你")
+                || role.starts_with("◂ 助手")
+                || role.starts_with("▸ 成功")
+                || role.starts_with("▸ 错误")
+                || role.starts_with("▸ 警告")
+        })
+        .collect();
+
+    if visible.is_empty() {
+        writeln!(stdout, "│ （等待消息...）")?;
+    } else {
+        for (role, content) in visible {
+            let prefix = role_prefix(role);
+            for line in content.lines() {
+                if line.is_empty() {
+                    writeln!(stdout, "│")?;
+                } else {
+                    writeln!(stdout, "│ {} │ {}", prefix, line)?;
+                }
+            }
+            writeln!(stdout, "│")?;
+        }
+    }
+
+    // ── 分隔线 ──
+    writeln!(stdout, "{}", "─".repeat(term_width))?;
+
+    // ── 输入面板 ──
+    match status_line {
+        Some(_status) => {
+            writeln!(stdout, "│ 输入面板 — ⏳ 正在处理...")?;
+            write!(stdout, "│ > {}", input)?;
+        }
+        None => {
+            writeln!(stdout, "│ 输入面板")?;
+            write!(stdout, "│ > {}", input)?;
+        }
+    }
+    stdout.flush()?;
+
+    Ok(())
+}
+
+/// Get terminal width, returns None if unavailable
+fn get_terminal_width() -> Option<usize> {
+    #[cfg(unix)]
+    {
+        use libc::ioctl;
+        use libc::STDOUT_FILENO;
+        use libc::TIOCGWINSZ;
+
+        let mut winsize: libc::winsize = unsafe { std::mem::zeroed() };
+        if unsafe { ioctl(STDOUT_FILENO, TIOCGWINSZ, &mut winsize) } == 0 {
+            return Some(winsize.ws_col as usize);
+        }
+    }
+
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&w| w > 0)
+}

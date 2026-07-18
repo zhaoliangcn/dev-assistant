@@ -31,6 +31,7 @@ anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenv = "0.15"
+unicode-width = "0.1"
 libc = "0.2"
 
 [features]

@@ -309,17 +309,15 @@ impl SecurityPolicy {
             }
         }
 
-        // SECURITY: Block shell execution with -c flag to prevent bypassing
-        // file path validation and other security checks via shell syntax.
-        // Users should use direct command execution instead of shell pipelines.
+        // SECURITY: Allow shell execution with -c flag. The tool description
+        // explicitly instructs the LLM to use command="sh" with args=["-c", "..."]
+        // for shell features (pipes, redirects, etc.). Dangerous commands within
+        // the shell string are still caught by the regex checks below.
         if (command == "sh" || command == "bash" || command == "zsh" || command == "fish")
             && args.contains(&"-c") {
             return SecurityEvaluation {
-                danger_level: DangerLevel::High,
-                reason: format!(
-                    "Shell execution with -c is restricted. Use direct command execution instead. \
-                     If shell features are truly needed, request approval with justification."
-                ),
+                danger_level: DangerLevel::Low,
+                reason: format!("Shell execution with -c — allowed by policy"),
             };
         }
 

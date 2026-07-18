@@ -31,7 +31,11 @@ impl MessageOutput for UIMessageOutput {
         if !self.verbose && matches!(level, MessageLevel::Debug | MessageLevel::Info) {
             return;
         }
-        self.buffer.push((level, msg.to_string()));
+        // 去重：避免相同 (level, msg) 连续出现
+        let entry = (level, msg.to_string());
+        if self.buffer.last() != Some(&entry) {
+            self.buffer.push(entry);
+        }
     }
 }
 
@@ -53,7 +57,8 @@ impl CliMessageOutput {
 
 impl MessageOutput for CliMessageOutput {
     fn emit(&mut self, level: MessageLevel, msg: &str) {
-        if level == MessageLevel::Debug && !self.verbose {
+        // 非 verbose 模式下跳过 Debug 和 Info 级别消息（与 UIMessageOutput 保持一致）
+        if !self.verbose && matches!(level, MessageLevel::Debug | MessageLevel::Info) {
             return;
         }
 

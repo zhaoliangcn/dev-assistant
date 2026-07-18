@@ -66,7 +66,16 @@ impl ContextManager {
 
     /// Extract display messages from conversation history.
     /// Returns Vec of (role_label, content) for the UI.
+    /// Deduplicates: if a display message has the same content as a history
+    /// message, only the display version is shown (it has the correct label).
     pub fn get_display_messages(&self) -> Vec<(String, String)> {
+        // Build a set of content strings already present in display_messages
+        let display_contents: std::collections::HashSet<String> = self
+            .display_messages
+            .iter()
+            .map(|(_, content)| content.clone())
+            .collect();
+
         // 先添加纯展示消息（系统状态消息等）
         let mut result: Vec<(String, String)> = self
             .display_messages
@@ -74,16 +83,21 @@ impl ContextManager {
             .map(|(label, content)| (format!("▸ {}", label), content.clone()))
             .collect();
 
-        // 再添加对话历史中的消息
+        // 再添加对话历史中的消息（跳过已在 display_messages 中出现的）
         for msg in &self.history {
+            if msg.role == "system" {
+                continue; // Don't show system messages
+            }
+            let content = msg.content.as_deref().unwrap_or("").to_string();
+            if display_contents.contains(&content) {
+                continue; // Already shown via display_messages
+            }
             let role = match msg.role.as_str() {
                 "user" => "▸ 你".to_string(),
                 "assistant" => "◂ 助手".to_string(),
                 "tool" => "⚙ 工具".to_string(),
-                "system" => continue, // Don't show system messages
                 other => other.to_string(),
             };
-            let content = msg.content.as_deref().unwrap_or("").to_string();
             result.push((role, content));
         }
 

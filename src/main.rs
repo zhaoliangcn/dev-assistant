@@ -264,7 +264,7 @@ async fn main() -> Result<(), AppError> {
         loop {
             // Render the split-pane UI: messages on top, input at bottom
             let messages = agent.context.get_display_messages();
-            crate::ui::render(&messages, "", None, cli.verbose)?;
+            crate::ui::render(&messages, None, cli.verbose)?;
 
             let mut input = String::new();
             let bytes_read = std::io::stdin()
@@ -284,6 +284,11 @@ async fn main() -> Result<(), AppError> {
                 print!("\x1b[2J\x1b[H");
                 println!("👋 Goodbye!");
                 break;
+            }
+
+            if input == "/clear" {
+                agent.context.display_messages.clear();
+                continue;
             }
 
             if input.is_empty() {
@@ -312,13 +317,13 @@ async fn main() -> Result<(), AppError> {
                     agent.context.add_display_message(level, &msg);
                 }
                 let messages = agent.context.get_display_messages();
-                crate::ui::render(&messages, "", None, cli.verbose)?;
+                crate::ui::render(&messages, None, cli.verbose)?;
 
                 // Show "thinking" indicator in the input area so it doesn't
                 // get drowned out by subsequent messages in the message panel.
                 session_log.log_thinking();
                 let messages = agent.context.get_display_messages();
-                crate::ui::render(&messages, "", Some("⏳ LLM 正在思考，请稍候..."), cli.verbose)?;
+                crate::ui::render(&messages, Some("⏳ LLM 正在思考，请稍候..."), cli.verbose)?;
 
                 tokio::select! {
                     step_result = agent.step(&mut output) => {
@@ -387,7 +392,7 @@ async fn main() -> Result<(), AppError> {
                         &format!("保存状态失败: {}。未重启。", e),
                     );
                     let messages = agent.context.get_display_messages();
-                    crate::ui::render(&messages, "", None, cli.verbose)?;
+                    crate::ui::render(&messages, None, cli.verbose)?;
                     break;
                 }
 
@@ -396,7 +401,7 @@ async fn main() -> Result<(), AppError> {
                     "正在运行 cargo build...",
                 );
                 let messages = agent.context.get_display_messages();
-                crate::ui::render(&messages, "", None, cli.verbose)?;
+                crate::ui::render(&messages, None, cli.verbose)?;
 
                 let build_result = process::Command::new("cargo")
                     .arg("build")
@@ -413,7 +418,7 @@ async fn main() -> Result<(), AppError> {
                                     &format!("获取当前可执行文件路径失败: {}。未重启。", e),
                                 );
                                 let messages = agent.context.get_display_messages();
-                                crate::ui::render(&messages, "", None, cli.verbose)?;
+                                crate::ui::render(&messages, None, cli.verbose)?;
                                 // Build succeeded but can't exec — continue REPL
                                 break;
                             }
@@ -445,7 +450,7 @@ async fn main() -> Result<(), AppError> {
                             &format!("构建成功，正在重启 (PID 保持不变)..."),
                         );
                         let messages = agent.context.get_display_messages();
-                        crate::ui::render(&messages, "", None, cli.verbose)?;
+                        crate::ui::render(&messages, None, cli.verbose)?;
 
                         // exec() replaces the current process on success (same PID).
                         // It only returns on error.
@@ -470,7 +475,7 @@ async fn main() -> Result<(), AppError> {
                                      args.join(" ")),
                         );
                         let messages = agent.context.get_display_messages();
-                        crate::ui::render(&messages, "", None, cli.verbose)?;
+                        crate::ui::render(&messages, None, cli.verbose)?;
                         break;
                     }
                     Ok(status) => {
@@ -480,7 +485,7 @@ async fn main() -> Result<(), AppError> {
                             &format!("构建失败，退出码: {}。请修复错误后再次尝试重启。", exit_code),
                         );
                         let messages = agent.context.get_display_messages();
-                        crate::ui::render(&messages, "", None, cli.verbose)?;
+                        crate::ui::render(&messages, None, cli.verbose)?;
                         // Build failed — continue REPL so user can fix and retry
                     }
                     Err(e) => {
@@ -489,7 +494,7 @@ async fn main() -> Result<(), AppError> {
                             &format!("运行 cargo build 失败: {}。请修复错误后再次尝试重启。", e),
                         );
                         let messages = agent.context.get_display_messages();
-                        crate::ui::render(&messages, "", None, cli.verbose)?;
+                        crate::ui::render(&messages, None, cli.verbose)?;
                         // Build command failed — continue REPL so user can fix and retry
                     }
                 }

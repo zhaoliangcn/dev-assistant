@@ -1,6 +1,5 @@
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use super::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
@@ -30,7 +29,13 @@ pub fn exec_command_tool() -> ToolDefinition {
     }
 }
 
-const COMMAND_TIMEOUT_SECS: u64 = 30;
+/// 默认命令超时时间（秒），可通过环境变量 `EXEC_COMMAND_TIMEOUT` 覆盖。
+fn command_timeout_secs() -> u64 {
+    std::env::var("EXEC_COMMAND_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300)
+}
 
 fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, AppError> {
     let command = args.arguments["command"]
@@ -47,12 +52,17 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         .unwrap_or_default();
 
     let working_dir = context.working_dir.clone();
-    debug!(command = %command, args = ?extra_args, cwd = %working_dir.display(), "exec_command");
+    let timeout = command_timeout_secs();
+    debug!(command = %command, args = ?extra_args, cwd = %working_dir.display(), timeout = %timeout, "exec_command");
 
-    // SECURITY: Execute the command directly without shell interpretation.
-    // This prevents shell injection attacks (e.g., command="ls"; args=["; rm -rf /"]).
-    // If shell features (pipes, redirects) are needed, the LLM should explicitly
-    // invoke a shell: command="sh", args=["-c", "ls | grep foo"]
+    // Build display string for the result
+    let args_for_display = if extra_args.is_empty() {
+        command.to_string()
+    } else {
+        format!("{} {}", command, extra_args.join(" "))
+    };
+
+    // Spawn with piped output
     let mut cmd = Command::new(command);
     cmd.args(&extra_args)
         .current_dir(working_dir)
@@ -68,58 +78,30 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         ))
     })?;
 
-    // Use Arc<Mutex<Option<Child>>> to share the child between the waiter thread
-    // and the main thread (for timeout killing)
-    let child_arc = Arc::new(std::sync::Mutex::new(Some(child)));
-    let child_arc_for_timeout = child_arc.clone();
+    let pid = child.id();
 
-    // Use mpsc channel to get the exit status with timeout
+    // Use wait_with_output() in a separate thread for timeout support.
+    // wait_with_output() internally reads stdout/stderr pipes to completion,
+    // avoiding the deadlock that would occur if we only waited on the child.
     let (tx, rx) = mpsc::channel();
 
     let _waiter = std::thread::spawn(move || {
-        let mut child_opt = child_arc.lock().unwrap();
-        if let Some(mut child) = child_opt.take() {
-            let status = child.wait();
-            tx.send(status).ok();
-        }
+        let output = child.wait_with_output();
+        tx.send(output).ok();
     });
 
-    // Build display string for the result
-    let args_for_display = if extra_args.is_empty() {
-        command.to_string()
-    } else {
-        format!("{} {}", command, extra_args.join(" "))
-    };
+    match rx.recv_timeout(Duration::from_secs(timeout)) {
+        Ok(Ok(output)) => {
+            // Process completed within timeout — we have all output
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            let status = output.status;
 
-    match rx.recv_timeout(Duration::from_secs(COMMAND_TIMEOUT_SECS)) {
-        Ok(Ok(status)) => {
-            // Process completed within timeout — collect output
-            let mut child_opt = child_arc_for_timeout.lock().unwrap();
-            let (stdout, stderr) = if let Some(mut child) = child_opt.take() {
-                let stdout = child.stdout.take()
-                    .map(|mut s| {
-                        let mut buf = String::new();
-                        use std::io::Read;
-                        let _ = s.read_to_string(&mut buf);
-                        buf
-                    })
-                    .unwrap_or_default();
-                let stderr = child.stderr.take()
-                    .map(|mut s| {
-                        let mut buf = String::new();
-                        use std::io::Read;
-                        let _ = s.read_to_string(&mut buf);
-                        buf
-                    })
-                    .unwrap_or_default();
-                (stdout, stderr)
-            } else {
-                (String::new(), String::new())
-            };
-
-            let mut content = format!("[exec_command] {} (exit code: {})",
+            let mut content = format!(
+                "[exec_command] {} (exit code: {})",
                 args_for_display,
-                status.code().unwrap_or(0));
+                status.code().unwrap_or(0)
+            );
 
             if !stdout.is_empty() {
                 content.push_str("\n\n--- stdout ---\n");
@@ -128,6 +110,17 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
             if !stderr.is_empty() {
                 content.push_str("\n\n--- stderr ---\n");
                 content.push_str(&stderr);
+            }
+
+            // If stdout was large, add a summary
+            const MAX_OUTPUT_LEN: usize = 50000;
+            if content.len() > MAX_OUTPUT_LEN {
+                let truncated = content.len() - MAX_OUTPUT_LEN;
+                content.truncate(MAX_OUTPUT_LEN);
+                content.push_str(&format!(
+                    "\n\n... (output truncated, {} more bytes)",
+                    truncated
+                ));
             }
 
             if status.success() {
@@ -148,22 +141,36 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         }
         Ok(Err(e)) => Err(AppError::Llm(format!("Command wait failed: {}", e))),
         Err(_) => {
-            // Timeout — kill the child process to prevent resource leak
-            let mut child_opt = child_arc_for_timeout.lock().unwrap();
-            if let Some(mut child) = child_opt.take() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
+            // Timeout — kill the child process by PID to prevent resource leak.
+            // We use PID-based kill because the Child object is consumed by
+            // wait_with_output() in the waiter thread.
+            debug!(command = %command, pid = %pid, timeout_secs = %timeout, "Command timed out, killing process");
+            let _killed = kill_process(pid);
+
             Ok(ToolResult {
                 success: false,
                 security_evaluation: None,
-                    restart_requested: false,
+                restart_requested: false,
                 content: format!(
                     "[exec_command] ❌ Timed out after {} seconds: {}",
-                    COMMAND_TIMEOUT_SECS,
-                    args_for_display
+                    timeout, args_for_display
                 ),
             })
         }
     }
+}
+
+/// Attempt to kill a process by PID. Returns true if the kill signal was sent.
+#[cfg(unix)]
+fn kill_process(pid: u32) -> bool {
+    unsafe { libc::kill(pid as i32, libc::SIGKILL) == 0 }
+}
+
+#[cfg(not(unix))]
+fn kill_process(pid: u32) -> bool {
+    std::process::Command::new("taskkill")
+        .args(&["/F", "/PID", &pid.to_string()])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }

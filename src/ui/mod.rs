@@ -2,6 +2,7 @@ pub mod message_output;
 pub use message_output::{CliMessageOutput, UIMessageOutput};
 
 use std::io::{self, Write};
+use unicode_width::UnicodeWidthStr;
 
 // ── 前缀标签 ──────────────────────────────────────────────────────────
 
@@ -17,6 +18,11 @@ fn role_prefix(role: &str) -> &'static str {
     else                               { "📝 消息" }
 }
 
+/// 返回前缀字符串的显示宽度（用于多行缩进对齐）。
+fn prefix_width(prefix: &str) -> usize {
+    UnicodeWidthStr::width(prefix)
+}
+
 // ── 主渲染函数 ────────────────────────────────────────────────────────
 
 /// Render the full UI with two panels:
@@ -24,7 +30,7 @@ fn role_prefix(role: &str) -> &'static str {
 ///   - 输入面板 (input panel): current input or status
 ///
 /// `verbose` — when false, only show user messages and assistant responses
-pub fn render(messages: &[(String, String)], input: &str, status_line: Option<&str>, verbose: bool) -> io::Result<()> {
+pub fn render(messages: &[(String, String)], status_line: Option<&str>, verbose: bool) -> io::Result<()> {
     let mut stdout = io::stdout();
     let term_width = get_terminal_width().unwrap_or(80);
 
@@ -58,11 +64,15 @@ pub fn render(messages: &[(String, String)], input: &str, status_line: Option<&s
     } else {
         for (role, content) in visible {
             let prefix = role_prefix(role);
-            for line in content.lines() {
+            let pw = prefix_width(prefix);
+            for (i, line) in content.lines().enumerate() {
                 if line.is_empty() {
                     writeln!(stdout, "│")?;
-                } else {
+                } else if i == 0 {
                     writeln!(stdout, "│ {} │ {}", prefix, line)?;
+                } else {
+                    // 后续行缩进对齐第一行的前缀位置
+                    writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
                 }
             }
             writeln!(stdout, "│")?;
@@ -74,15 +84,16 @@ pub fn render(messages: &[(String, String)], input: &str, status_line: Option<&s
 
     // ── 输入面板 ──
     match status_line {
-        Some(_status) => {
-            writeln!(stdout, "│ 输入面板 — ⏳ 正在处理...")?;
-            write!(stdout, "│ > {}", input)?;
+        Some(status) => {
+            writeln!(stdout, "│ 输入面板 — {}", status)?;
         }
         None => {
             writeln!(stdout, "│ 输入面板")?;
-            write!(stdout, "│ > {}", input)?;
+            write!(stdout, "│ > ")?;
         }
     }
+    // 清除可能残留的旧内容
+    write!(stdout, "\x1b[J")?;
     stdout.flush()?;
 
     Ok(())

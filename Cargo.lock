@@ -444,6 +444,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "unicode-width",
  "walkdir",
  "yaml-rust2",
 ]

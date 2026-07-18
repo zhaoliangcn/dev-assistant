@@ -1,11 +1,15 @@
 use std::time::Duration;
 
+use rand::RngExt;
 use reqwest::Client;
 use serde_json::Value;
 use tracing::{debug, warn};
 
 use super::models::*;
 use crate::utils::error::AppError;
+
+const MAX_RETRIES: u32 = 5;
+const BASE_DELAY_MS: u64 = 1000;
 
 pub struct LlmClient {
     client: Client,
@@ -37,27 +41,46 @@ impl LlmClient {
             max_tokens: self.config.max_tokens,
         };
 
-        let response = self
-            .client
-            .post(&self.config.api_url)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await?;
+        let mut attempt = 0u32;
+        loop {
+            let response = self
+                .client
+                .post(&self.config.api_url)
+                .header("Authorization", format!("Bearer {}", self.config.api_key))
+                .header("Content-Type", "application/json")
+                .json(&request)
+                .send()
+                .await?;
 
-        let status = response.status();
-        if !status.is_success() {
+            let status = response.status();
+            if status.is_success() {
+                let data: Value = response.json().await?;
+                return self.normalize_response(data);
+            }
+
             let body = response.text().await.unwrap_or_default();
             warn!(status = %status, body = %body, "LLM API returned error");
+
+            // 429 (rate limit) 是可恢复的，使用指数退避重试
+            if status.as_u16() == 429 && attempt < MAX_RETRIES {
+                attempt += 1;
+                let delay_ms = BASE_DELAY_MS * 2u64.pow(attempt - 1)
+                    + rand::rng().random_range(0..500);
+                warn!(
+                    attempt = attempt,
+                    max_retries = MAX_RETRIES,
+                    delay_ms = delay_ms,
+                    "429 rate limit hit, retrying after backoff"
+                );
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                continue;
+            }
+
             return Err(AppError::Llm(format!(
                 "LLM API returned error (status {}): {}",
                 status, body
             )));
         }
-
-        let data: Value = response.json().await?;
-        self.normalize_response(data)
     }
 
     fn normalize_response(&self, data: Value) -> Result<LlmResponse, AppError> {

@@ -49,7 +49,41 @@ pub fn render(
     writeln!(stdout, "  Dev-Assistant — 消息窗口")?;
     writeln!(stdout, "{}", "═".repeat(term_width))?;
 
+    // ── 工具面板（工具执行状态）──
+    if !status.is_empty() {
+        // 非 verbose 模式下只显示成功/错误/警告，隐藏信息/调试
+        let status_visible: Vec<&(String, String)> = status.iter()
+            .filter(|(role, _)| {
+                if verbose { return true; }
+                role == "成功" || role == "错误" || role == "警告"
+            })
+            .collect();
+
+        if !status_visible.is_empty() {
+            writeln!(stdout, "{}", "─".repeat(term_width))?;
+            writeln!(stdout, "│ 工具面板")?;
+            writeln!(stdout, "{}", "─".repeat(term_width))?;
+
+            for (role, content) in status_visible {
+                let prefix = role_prefix(role);
+                let pw = prefix_width(prefix);
+                for (i, line) in content.lines().enumerate() {
+                    if line.is_empty() {
+                        writeln!(stdout, "│")?;
+                    } else if i == 0 {
+                        writeln!(stdout, "│ {} │ {}", prefix, line)?;
+                    } else {
+                        // 后续行缩进对齐第一行的前缀位置
+                        writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
+                    }
+                }
+                writeln!(stdout, "│")?;
+            }
+        }
+    }
+
     // ── 输出面板（对话历史）──
+    writeln!(stdout, "{}", "─".repeat(term_width))?;
     writeln!(stdout, "│ 输出面板")?;
     writeln!(stdout, "{}", "─".repeat(term_width))?;
 
@@ -82,38 +116,6 @@ pub fn render(
                 }
             }
             writeln!(stdout, "│")?;
-        }
-    }
-
-    // ── 工具面板（工具执行状态）──
-    if !status.is_empty() {
-        // 非 verbose 模式下只显示成功/错误/警告，隐藏信息/调试
-        let status_visible: Vec<&(String, String)> = status.iter()
-            .filter(|(role, _)| {
-                if verbose { return true; }
-                role == "成功" || role == "错误" || role == "警告"
-            })
-            .collect();
-
-        if !status_visible.is_empty() {
-            writeln!(stdout, "{}", "─".repeat(term_width))?;
-            writeln!(stdout, "│ 工具面板")?;
-            writeln!(stdout, "{}", "─".repeat(term_width))?;
-
-            for (role, content) in status_visible {
-                let prefix = role_prefix(role);
-                let pw = prefix_width(prefix);
-                for (i, line) in content.lines().enumerate() {
-                    if line.is_empty() {
-                        writeln!(stdout, "│")?;
-                    } else if i == 0 {
-                        writeln!(stdout, "│ {} │ {}", prefix, line)?;
-                    } else {
-                        writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
-                    }
-                }
-                writeln!(stdout, "│")?;
-            }
         }
     }
 

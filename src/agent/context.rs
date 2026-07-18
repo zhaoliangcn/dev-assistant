@@ -93,6 +93,10 @@ impl ContextManager {
                 "tool" => "⚙ 工具".to_string(),
                 other => other.to_string(),
             };
+            // 跳过连续重复的相同 (role, content) 消息
+            if result.last() == Some(&(role.clone(), content.clone())) {
+                continue;
+            }
             result.push((role, content));
         }
 

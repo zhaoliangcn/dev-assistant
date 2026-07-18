@@ -1,5 +1,48 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use regex;
+
+/// 单个模型的配置，来自 TOML 文件或环境变量
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    pub name: String,
+    pub provider: String,
+    pub api_url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    pub model: String,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
+}
+
+impl ProviderConfig {
+    /// 用环境变量替换 `${VAR}` 占位符
+    pub fn resolve_env_vars(&mut self) {
+        self.api_url = resolve_env_var(&self.api_url);
+        self.api_key = self.api_key.as_ref().map(|k| resolve_env_var(k));
+        self.model = resolve_env_var(&self.model);
+    }
+}
+
+fn resolve_env_var(s: &str) -> String {
+    let re = regex::Regex::new(r"\$\{([^}]+)\}").unwrap();
+    let mut result = s.to_string();
+    for cap in re.captures_iter(s) {
+        let var_name = &cap[1];
+        if let Ok(val) = std::env::var(var_name) {
+            result = result.replace(&format!("${{{}}}", var_name), &val);
+        }
+    }
+    result
+}
+
+/// TOML 文件根结构
+#[derive(Debug, Deserialize)]
+pub struct ModelsConfig {
+    pub models: Vec<ProviderConfig>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LlmMessage {
@@ -54,7 +97,9 @@ pub enum LlmResponse {
     Error(String),
 }
 
+/// 单模型配置（旧接口，保留向后兼容）
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct LlmConfig {
     #[allow(dead_code)]
     pub provider: String,

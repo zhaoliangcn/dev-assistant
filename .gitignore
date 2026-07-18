@@ -4,3 +4,5 @@ target/
 skills/
 *.log
 
+.dev-assistant-models.toml
+.dev-assistant-state.json

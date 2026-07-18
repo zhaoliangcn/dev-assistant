@@ -8,7 +8,7 @@ use tracing::info;
 use tracing_subscriber::fmt;
 
 use crate::agent::{Agent, AgentConfig, AgentStep, ContextManager};
-use crate::config::{load_agent_config, load_llm_config};
+use crate::config::{load_agent_config, load_models};
 use crate::llm::LlmClient;
 use crate::security::SecurityPolicy;
 use crate::session::SessionLogger;
@@ -83,21 +83,6 @@ async fn main() -> Result<(), AppError> {
         .with_writer(std::io::stderr)
         .init();
 
-    let llm_config = load_llm_config()?;
-    let llm_config = if let Some(ref model) = cli.model {
-        crate::llm::LlmConfig {
-            model: model.clone(),
-            ..llm_config
-        }
-    } else {
-        llm_config
-    };
-
-    let llm_config = crate::llm::LlmConfig {
-        provider: cli.provider.clone(),
-        ..llm_config
-    };
-
     let working_dir = PathBuf::from(&cli.project);
     if !working_dir.exists() {
         return Err(AppError::Config(format!(
@@ -106,8 +91,25 @@ async fn main() -> Result<(), AppError> {
         )));
     }
 
+    // 加载模型配置（TOML 优先，fallback 到环境变量）
+    let mut provider_configs = load_models(&working_dir)?;
+
+    // CLI 参数覆盖：--model 和 --provider
+    if let Some(ref model) = cli.model {
+        if let Some(first) = provider_configs.first_mut() {
+            first.model = model.clone();
+        }
+    }
+    if cli.provider != "openai" {
+        if let Some(first) = provider_configs.first_mut() {
+            first.provider = cli.provider.clone();
+        }
+    }
+
     let security = SecurityPolicy::new(&working_dir, !cli.no_approval);
     let tools = ToolRegistry::new(working_dir.clone(), &security);
+
+    let llm_client = LlmClient::from_configs(provider_configs)?;
 
     // Build system prompt dynamically from registered tool schemas
     let tool_schemas = tools.get_tool_schemas();
@@ -172,7 +174,7 @@ async fn main() -> Result<(), AppError> {
     );
 
     // Try to resume from saved state, or create fresh context
-    let context = if cli.resume {
+    let (context, saved_model) = if cli.resume {
         let state_path = working_dir.join(STATE_FILE);
         info!(path = %state_path.display(), "Attempting to resume from saved state");
         match ContextManager::load_state(&state_path) {
@@ -215,16 +217,17 @@ async fn main() -> Result<(), AppError> {
                     None,
                 );
 
+                let saved_model = ctx.active_model.clone();
                 let _ = std::fs::remove_file(&state_path);
-                ctx
+                (ctx, saved_model)
             }
             Err(e) => {
                 info!(error = %e, "Failed to resume state, starting fresh");
-                ContextManager::new(system_prompt, cli.max_tokens)
+                (ContextManager::new(system_prompt, cli.max_tokens), None)
             }
         }
     } else {
-        ContextManager::new(system_prompt, cli.max_tokens)
+        (ContextManager::new(system_prompt, cli.max_tokens), None)
     };
 
     let env_config = load_agent_config();
@@ -235,15 +238,22 @@ async fn main() -> Result<(), AppError> {
 
     let agent_config = AgentConfig { max_iterations };
 
-    let llm_client = LlmClient::new(llm_config.clone());
-
     let mut agent = Agent::new(context, tools, llm_client, agent_config, discovered_skills);
+
+    // 恢复持久化的活跃模型
+    if let Some(ref model_name) = saved_model {
+        if let Err(e) = agent.switch_model(model_name) {
+            info!(model = %model_name, error = %e, "Failed to restore saved model, using default");
+        } else {
+            info!(model = %model_name, "Restored saved model");
+        }
+    }
 
     if let Some(message) = cli.message {
         // ── Non-interactive mode: use CliMessageOutput ──
         let mut output = CliMessageOutput::new(cli.verbose);
         output.info(&format!("项目目录: {}", working_dir.display()));
-        output.info(&format!("模型: {} ({})", llm_config.model, llm_config.provider));
+        output.info(&format!("模型: {}", agent.active_model()));
 
         let result = agent.run(message, &mut output).await?;
         if result.success {
@@ -260,7 +270,7 @@ async fn main() -> Result<(), AppError> {
         // Create a session log file for debugging
         let mut session_log = SessionLogger::create(&working_dir)?;
         session_log.log_status("信息", &format!("项目目录: {}", working_dir.display()));
-        session_log.log_status("信息", &format!("模型: {} ({})", llm_config.model, llm_config.provider));
+        session_log.log_status("信息", &format!("模型: {}", agent.active_model()));
 
         loop {
             // Render the split-pane UI: messages on top, input at bottom
@@ -290,6 +300,49 @@ async fn main() -> Result<(), AppError> {
             if input == "/clear" {
                 agent.context.display_messages.clear();
                 agent.context.history_display_start = agent.context.history.len();
+                continue;
+            }
+
+            if input.starts_with("/model") {
+                let parts: Vec<&str> = input.split_whitespace().collect();
+                if parts.len() == 1 {
+                    let active = agent.active_model().to_string();
+                    let models: Vec<String> = agent.list_models().into_iter().map(|s| s.to_string()).collect();
+                    agent.context.add_display_message(
+                        crate::utils::message_level::MessageLevel::Info,
+                        "可用模型:",
+                    );
+                    for m in &models {
+                        let marker = if m.as_str() == active.as_str() { "→" } else { " " };
+                        agent.context.add_display_message(
+                            crate::utils::message_level::MessageLevel::Info,
+                            &format!("{} {}", marker, m),
+                        );
+                    }
+                } else {
+                    let model_name = parts[1];
+                    match agent.switch_model(model_name) {
+                        Ok(()) => {
+                            agent.context.add_display_message(
+                                crate::utils::message_level::MessageLevel::Success,
+                                &format!("切换到模型: {}", model_name),
+                            );
+                            agent.context.active_model = Some(model_name.to_string());
+                            // 立即保存状态
+                            let state_path = working_dir.join(STATE_FILE);
+                            let _ = agent.context.save_state(&state_path);
+                        }
+                        Err(e) => {
+                            agent.context.add_display_message(
+                                crate::utils::message_level::MessageLevel::Error,
+                                &format!("切换失败: {}", e),
+                            );
+                        }
+                    }
+                }
+                // 重新渲染 UI 显示结果
+                let messages = agent.context.get_display_messages();
+                crate::ui::render(&messages, &agent.context.display_messages, None, cli.verbose)?;
                 continue;
             }
 
@@ -331,9 +384,15 @@ async fn main() -> Result<(), AppError> {
 
                 tokio::select! {
                     step_result = agent.step(&mut output) => {
-                        match step_result? {
-                            AgentStep::Done(result) => break Some(result),
-                            AgentStep::Continue => continue,
+                        match step_result {
+                            Ok(AgentStep::Done(result)) => break Some(result),
+                            Ok(AgentStep::Continue) => continue,
+                            Err(e) => {
+                                let msg = format!("LLM API 错误: {}", e);
+                                output.error(&msg);
+                                session_log.log_status("错误", &msg);
+                                break None;
+                            }
                         }
                     }
                     _ = tokio::signal::ctrl_c() => {

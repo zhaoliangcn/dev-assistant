@@ -2,29 +2,86 @@ use std::time::Duration;
 
 use rand::RngExt;
 use reqwest::Client;
-use serde_json::Value;
 use tracing::{debug, warn};
 
 use super::models::*;
+use super::provider::{create_provider, LlmProvider};
 use crate::utils::error::AppError;
 
 const MAX_RETRIES: u32 = 5;
 const BASE_DELAY_MS: u64 = 1000;
 
+/// 多 provider 容器，支持运行时切换模型
 pub struct LlmClient {
-    client: Client,
-    config: LlmConfig,
+    http_client: Client,
+    providers: Vec<Box<dyn LlmProvider>>,
+    provider_configs: Vec<ProviderConfig>,
+    active_idx: usize,
 }
 
 impl LlmClient {
-    pub fn new(config: LlmConfig) -> Self {
-        Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .expect("reqwest client builder should not fail with valid config"),
-            config,
+    /// 从 ProviderConfig 列表构建
+    pub fn from_configs(configs: Vec<ProviderConfig>) -> Result<Self, AppError> {
+        if configs.is_empty() {
+            return Err(AppError::Config("No model providers configured".to_string()));
         }
+
+        let http_client = Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()
+            .expect("reqwest client builder should not fail with valid config");
+
+        let mut providers: Vec<Box<dyn LlmProvider>> = Vec::new();
+        let mut provider_configs: Vec<ProviderConfig> = Vec::new();
+
+        for cfg in &configs {
+            let provider = create_provider(cfg)?;
+            provider_configs.push(cfg.clone());
+            providers.push(provider);
+        }
+
+        Ok(Self {
+            http_client,
+            providers,
+            provider_configs,
+            active_idx: 0,
+        })
+    }
+
+    /// 兼容旧的单模型构造方式（从环境变量）
+    #[allow(dead_code)]
+    pub fn new(config: &LlmConfig) -> Result<Self, AppError> {
+        let provider_config = ProviderConfig {
+            name: "default".to_string(),
+            provider: config.provider.clone(),
+            api_url: config.api_url.clone(),
+            api_key: Some(config.api_key.clone()),
+            model: config.model.clone(),
+            temperature: Some(config.temperature),
+            max_tokens: Some(config.max_tokens),
+        };
+        Self::from_configs(vec![provider_config])
+    }
+
+    /// 切换到指定名称的模型
+    pub fn switch_model(&mut self, name: &str) -> Result<(), AppError> {
+        let idx = self
+            .provider_configs
+            .iter()
+            .position(|c| c.name == name)
+            .ok_or_else(|| AppError::Config(format!("Unknown model: '{}'", name)))?;
+        self.active_idx = idx;
+        Ok(())
+    }
+
+    /// 当前活跃模型名称
+    pub fn active_model(&self) -> &str {
+        &self.provider_configs[self.active_idx].name
+    }
+
+    /// 列出所有可用模型名称
+    pub fn list_models(&self) -> Vec<&str> {
+        self.provider_configs.iter().map(|c| c.name.as_str()).collect()
     }
 
     pub async fn call(
@@ -32,114 +89,60 @@ impl LlmClient {
         messages: Vec<LlmMessage>,
         tools: Vec<ToolSchema>,
     ) -> Result<LlmResponse, AppError> {
-        debug!(model = %self.config.model, "Calling LLM API");
+        let cfg = &self.provider_configs[self.active_idx];
+        let provider = &self.providers[self.active_idx];
+
+        debug!(model = %cfg.name, provider = %cfg.provider, "Calling LLM API");
+
         let request = LlmRequest {
-            model: self.config.model.clone(),
+            model: cfg.model.clone(),
             messages,
             tools: Some(tools),
-            temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
+            temperature: cfg.temperature.unwrap_or(0.2),
+            max_tokens: cfg.max_tokens.unwrap_or(8192),
         };
 
         let mut attempt = 0u32;
         loop {
-            let response = self
-                .client
-                .post(&self.config.api_url)
-                .header("Authorization", format!("Bearer {}", self.config.api_key))
-                .header("Content-Type", "application/json")
-                .json(&request)
-                .send()
-                .await?;
-
-            let status = response.status();
-            if status.is_success() {
-                let data: Value = response.json().await?;
-                return self.normalize_response(data);
+            match provider.chat(&self.http_client, &request).await {
+                Ok(resp) => return Ok(resp),
+                Err(AppError::Llm(ref e)) if is_429(e) && attempt < MAX_RETRIES => {
+                    attempt += 1;
+                    let delay_ms = BASE_DELAY_MS * 2u64.pow(attempt - 1)
+                        + rand::rng().random_range(0..500);
+                    warn!(
+                        attempt = attempt,
+                        max_retries = MAX_RETRIES,
+                        delay_ms = delay_ms,
+                        "429 rate limit hit, retrying after backoff"
+                    );
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    continue;
+                }
+                Err(e) => return Err(e),
             }
-
-            let body = response.text().await.unwrap_or_default();
-            warn!(status = %status, body = %body, "LLM API returned error");
-
-            // 429 (rate limit) 是可恢复的，使用指数退避重试
-            if status.as_u16() == 429 && attempt < MAX_RETRIES {
-                attempt += 1;
-                let delay_ms = BASE_DELAY_MS * 2u64.pow(attempt - 1)
-                    + rand::rng().random_range(0..500);
-                warn!(
-                    attempt = attempt,
-                    max_retries = MAX_RETRIES,
-                    delay_ms = delay_ms,
-                    "429 rate limit hit, retrying after backoff"
-                );
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                continue;
-            }
-
-            return Err(AppError::Llm(format!(
-                "LLM API returned error (status {}): {}",
-                status, body
-            )));
         }
     }
+}
 
-    fn normalize_response(&self, data: Value) -> Result<LlmResponse, AppError> {
-        self.normalize_chat_response(data)
-    }
+fn is_429(err: &str) -> bool {
+    err.contains("status 429") || err.contains("Too Many Requests")
+}
 
-    fn parse_arguments(&self, args: Value) -> Result<Value, AppError> {
-        if let Some(s) = args.as_str() {
-            if let Ok(parsed) = serde_json::from_str(s) {
-                return Ok(parsed);
-            }
-            return Err(AppError::Llm(format!(
-                "Failed to parse tool arguments as JSON: {}",
-                s
-            )));
-        }
-        Ok(args)
-    }
-
-    /// Shared normalization for OpenAI-compatible chat completion responses.
-    /// Works for both OpenAI and Ollama since both use the same format.
-    fn normalize_chat_response(&self, data: Value) -> Result<LlmResponse, AppError> {
-        let choices = data["choices"].as_array().ok_or_else(|| {
-            AppError::Llm(format!(
-                "LLM response missing 'choices' array: {}",
-                serde_json::to_string(&data).unwrap_or_default()
-            ))
-        })?;
-
-        if choices.is_empty() {
-            return Err(AppError::Llm(format!(
-                "LLM response has empty 'choices' array: {}",
-                serde_json::to_string(&data).unwrap_or_default()
-            )));
-        }
-
-        let message = &choices[0]["message"];
-        let content_val = &message["content"];
-        let content = content_val.as_str().unwrap_or("");
-        let tool_calls = message["tool_calls"].as_array();
-
-        if let Some(tcs) = tool_calls {
-            let mut calls = Vec::new();
-            for tc in tcs {
-                let args = self.parse_arguments(tc["function"]["arguments"].clone())?;
-                calls.push(ToolCall {
-                    id: tc["id"].as_str().unwrap_or_default().to_string(),
-                    function: ToolCallFunction {
-                        name: tc["function"]["name"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_string(),
-                        arguments: args,
-                    },
-                });
-            }
-            Ok(LlmResponse::ToolCalls(calls))
-        } else {
-            Ok(LlmResponse::Text(content.to_string()))
-        }
+// 保留旧接口兼容性，但标记为 deprecated
+#[deprecated(since = "0.2.0", note = "use from_configs instead")]
+impl LlmClient {
+    #[allow(deprecated, dead_code)]
+    pub fn legacy_new(config: LlmConfig) -> Self {
+        Self::from_configs(vec![ProviderConfig {
+            name: "default".to_string(),
+            provider: config.provider,
+            api_url: config.api_url,
+            api_key: Some(config.api_key),
+            model: config.model,
+            temperature: Some(config.temperature),
+            max_tokens: Some(config.max_tokens),
+        }])
+        .expect("Failed to create LlmClient from legacy config")
     }
 }

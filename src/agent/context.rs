@@ -38,6 +38,9 @@ pub struct ContextManager {
     pub max_tokens: usize,
     pub used_tokens: usize,
     pub consecutive_no_tool_rounds: usize,
+    /// 持久化的活跃模型名称，重启后恢复
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_model: Option<String>,
 }
 
 const ROUNDS_TO_KEEP: usize = 6;
@@ -53,6 +56,7 @@ impl ContextManager {
             max_tokens,
             used_tokens: 0,
             consecutive_no_tool_rounds: 0,
+            active_model: None,
         }
     }
 

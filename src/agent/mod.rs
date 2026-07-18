@@ -292,4 +292,19 @@ impl<'a> Agent<'a> {
 
         None
     }
+
+    /// 切换到指定名称的模型
+    pub fn switch_model(&mut self, name: &str) -> Result<(), AppError> {
+        self.llm.switch_model(name)
+    }
+
+    /// 列出所有可用模型
+    pub fn list_models(&self) -> Vec<&str> {
+        self.llm.list_models()
+    }
+
+    /// 当前活跃模型名称
+    pub fn active_model(&self) -> &str {
+        self.llm.active_model()
+    }
 }

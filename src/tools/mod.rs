@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::Value;
 use tracing::{debug, warn};
@@ -10,15 +11,19 @@ use crate::utils::error::AppError;
 
 pub mod file;
 pub mod meta_tools;
+pub mod spec;
 pub mod system_tools;
 
 pub type ToolHandler =
     dyn Fn(&ToolArgs, &ToolContext) -> Result<ToolResult, AppError> + Sync + Send + 'static;
 
-pub struct ToolRegistry<'a> {
+/// 工具注册中心。持有所有工具定义和安全策略。
+///
+/// 安全策略使用 `Arc<SecurityPolicy>` 共享，避免生命周期参数污染类型签名。
+pub struct ToolRegistry {
     tools: HashMap<String, ToolDefinition>,
     working_dir: PathBuf,
-    pub security: &'a SecurityPolicy,
+    pub security: Arc<SecurityPolicy>,
 }
 
 pub struct ToolDefinition {
@@ -43,8 +48,8 @@ pub struct ToolResult {
     pub restart_requested: bool,
 }
 
-impl<'a> ToolRegistry<'a> {
-    pub fn new(working_dir: PathBuf, security: &'a SecurityPolicy) -> Self {
+impl ToolRegistry {
+    pub fn new(working_dir: PathBuf, security: Arc<SecurityPolicy>) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
             working_dir,

@@ -29,13 +29,17 @@ pub enum AppError {
 }
 
 impl AppError {
-    /// 如果错误是 429 / Too Many Requests 返回 true。
+    /// 如果错误是 rate limit（429 / Too Many Requests）返回 true。
+    ///
+    /// 结构化判断：provider 层返回 [`AppError::RateLimited`] 时直接命中；
+    /// [`AppError::Llm`] 中残留的 "status 429" / "Too Many Requests" 字符串
+    /// 作为兼容旧 provider 实现的兜底。
     pub fn is_rate_limited(&self) -> bool {
         match self {
-            AppError::RateLimited(msg) => {
+            AppError::RateLimited(_) => true,
+            AppError::Llm(msg) => {
                 msg.contains("status 429") || msg.contains("Too Many Requests")
             }
-            AppError::Llm(msg) => msg.contains("status 429") || msg.contains("Too Many Requests"),
             _ => false,
         }
     }

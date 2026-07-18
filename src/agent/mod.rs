@@ -1,5 +1,8 @@
+pub mod compressor;
 pub mod context;
 pub mod display;
+pub mod history;
+pub mod token_counter;
 
 pub use context::ContextManager;
 
@@ -38,18 +41,18 @@ pub enum AgentStep {
 // Agent
 // ---------------------------------------------------------------------------
 
-pub struct Agent<'a> {
+pub struct Agent {
     pub context: ContextManager,
-    tools: ToolRegistry<'a>,
+    tools: ToolRegistry,
     llm: LlmClient,
     max_iterations: usize,
     skills: Vec<Skill>,
 }
 
-impl<'a> Agent<'a> {
+impl Agent {
     pub fn new(
         context: ContextManager,
-        tools: ToolRegistry<'a>,
+        tools: ToolRegistry,
         llm: LlmClient,
         config: AgentConfig,
         skills: Vec<Skill>,

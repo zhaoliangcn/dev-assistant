@@ -9,7 +9,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use chrono::Local;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::utils::error::AppError;
 
@@ -78,24 +78,27 @@ impl SessionLogger {
 
         let mut logger = Self { file, path };
 
-        writeln!(
+        if let Err(e) = writeln!(
             logger.file,
             "{} ════════════════════════════════════════════",
             Self::now()
-        )
-        .ok();
-        writeln!(
+        ) {
+            warn!(error = %e, "Failed to write session log header");
+        }
+        if let Err(e) = writeln!(
             logger.file,
             "{}  Dev-Assistant 会话日志",
             Self::now()
-        )
-        .ok();
-        writeln!(
+        ) {
+            warn!(error = %e, "Failed to write session log header");
+        }
+        if let Err(e) = writeln!(
             logger.file,
             "{} ════════════════════════════════════════════",
             Self::now()
-        )
-        .ok();
+        ) {
+            warn!(error = %e, "Failed to write session log header");
+        }
         logger.flush();
 
         Ok(logger)
@@ -105,7 +108,9 @@ impl SessionLogger {
     pub fn log_user(&mut self, content: &str) {
         let sanitized = Self::sanitize(content);
         for line in sanitized.lines() {
-            writeln!(self.file, "{} ▶ 用户: {}", Self::now(), line).ok();
+            if let Err(e) = writeln!(self.file, "{} ▶ 用户: {}", Self::now(), line) {
+                warn!(error = %e, "Failed to write user message to session log");
+            }
         }
         self.flush();
     }
@@ -114,28 +119,33 @@ impl SessionLogger {
     pub fn log_assistant(&mut self, content: &str) {
         let sanitized = Self::sanitize(content);
         for line in sanitized.lines() {
-            writeln!(self.file, "{} ◂ 助手: {}", Self::now(), line).ok();
+            if let Err(e) = writeln!(self.file, "{} ◂ 助手: {}", Self::now(), line) {
+                warn!(error = %e, "Failed to write assistant message to session log");
+            }
         }
         self.flush();
     }
 
     /// 记录思考状态（LLM 正在处理中）。
     pub fn log_thinking(&mut self) {
-        writeln!(self.file, "{} ● 思考: LLM 正在处理...", Self::now()).ok();
+        if let Err(e) = writeln!(self.file, "{} ● 思考: LLM 正在处理...", Self::now()) {
+            warn!(error = %e, "Failed to write thinking status to session log");
+        }
         self.flush();
     }
 
     /// 记录工具调用。
     #[allow(dead_code)]
     pub fn log_tool_call(&mut self, tool_name: &str, args: &str) {
-        writeln!(
+        if let Err(e) = writeln!(
             self.file,
             "{} ⚙ 工具调用: {} (参数: {})",
             Self::now(),
             tool_name,
             args
-        )
-        .ok();
+        ) {
+            warn!(error = %e, tool = %tool_name, "Failed to write tool call to session log");
+        }
         self.flush();
     }
 
@@ -145,15 +155,16 @@ impl SessionLogger {
         let status = if success { "✅" } else { "❌" };
         let sanitized = Self::sanitize(summary);
         for line in sanitized.lines() {
-            writeln!(
+            if let Err(e) = writeln!(
                 self.file,
                 "{}   {} {}: {}",
                 Self::now(),
                 status,
                 tool_name,
                 line
-            )
-            .ok();
+            ) {
+                warn!(error = %e, tool = %tool_name, "Failed to write tool result to session log");
+            }
         }
         self.flush();
     }
@@ -169,15 +180,16 @@ impl SessionLogger {
         };
         let sanitized = Self::sanitize(msg);
         for line in sanitized.lines() {
-            writeln!(
+            if let Err(e) = writeln!(
                 self.file,
                 "{} {} [{}] {}",
                 Self::now(),
                 icon,
                 level,
                 line
-            )
-            .ok();
+            ) {
+                warn!(error = %e, level = %level, "Failed to write status message to session log");
+            }
         }
         self.flush();
     }
@@ -185,15 +197,20 @@ impl SessionLogger {
     /// 记录分隔线，用于标记不同轮次或阶段。
     #[allow(dead_code)]
     pub fn log_separator(&mut self, title: &str) {
-        writeln!(self.file).ok();
-        writeln!(
+        if let Err(e) = writeln!(self.file) {
+            warn!(error = %e, "Failed to write separator to session log");
+        }
+        if let Err(e) = writeln!(
             self.file,
             "{} ── {} ──",
             Self::now(),
             title
-        )
-        .ok();
-        writeln!(self.file).ok();
+        ) {
+            warn!(error = %e, "Failed to write separator to session log");
+        }
+        if let Err(e) = writeln!(self.file) {
+            warn!(error = %e, "Failed to write separator to session log");
+        }
         self.flush();
     }
 
@@ -205,18 +222,20 @@ impl SessionLogger {
 
     /// 关闭日志文件，写入结束标记。
     pub fn close(&mut self) {
-        writeln!(
+        if let Err(e) = writeln!(
             self.file,
             "{} ════════════════════════════════════════════",
             Self::now()
-        )
-        .ok();
-        writeln!(
+        ) {
+            warn!(error = %e, "Failed to write session log footer");
+        }
+        if let Err(e) = writeln!(
             self.file,
             "{}  会话结束",
             Self::now()
-        )
-        .ok();
+        ) {
+            warn!(error = %e, "Failed to write session log footer");
+        }
         self.flush();
     }
 

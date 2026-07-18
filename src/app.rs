@@ -1,8 +1,9 @@
 //! 应用协调层：组装各组件、提供 App 入口。
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use crate::agent::{Agent, AgentConfig, AgentStep, ContextManager};
+use crate::agent::{Agent, AgentConfig, ContextManager};
 use crate::config::{load_agent_config, load_models};
 use crate::llm::LlmClient;
 use crate::prompt::build_system_prompt;
@@ -10,8 +11,7 @@ use crate::security::SecurityPolicy;
 use crate::session::SessionLogger;
 use crate::skills::{default_skills_dir, discover_skills, Skill};
 use crate::tools::ToolRegistry;
-use crate::ui::{self, CliMessageOutput, UIMessageOutput};
-use crate::utils::message_level::MessageLevel;
+use crate::ui::{self, CliMessageOutput};
 use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
 
@@ -32,9 +32,13 @@ pub struct AppConfig {
 
 /// 应用实例：持有 Agent 和配置，提供运行入口。
 pub struct App {
-    agent: Agent<'static>,
+    agent: Agent,
     config: AppConfig,
+    /// 发现的项目技能。保留为未来 `/skill` slash 命令或动态激活的扩展点。
+    #[allow(dead_code)]
     skills: Vec<Skill>,
+    /// 构建好的系统提示词。保留为未来运行时刷新 prompt 的扩展点。
+    #[allow(dead_code)]
     system_prompt: String,
 }
 
@@ -66,14 +70,11 @@ impl App {
             }
         }
 
-        // SAFETY: 我们使用 `Box::leak` 把 `SecurityPolicy` 泄漏成 `'static`，
-        // 因为 `ToolRegistry<'a>` 的生命周期绑定到 `security` 引用，
-        // 而我们希望把 `Agent<'a>` 存进 struct，方便后续调用。
-        // 这种泄漏在每个进程生命周期内只发生一次，可以接受。
-        let security: &'static SecurityPolicy = Box::leak(Box::new(SecurityPolicy::new(
+        // SECURITY: 使用 `Arc<SecurityPolicy>` 共享所有权，避免 `Box::leak` 内存泄漏。
+        let security = Arc::new(SecurityPolicy::new(
             &config.working_dir,
             !config.no_approval,
-        )));
+        ));
         let tools = ToolRegistry::new(config.working_dir.clone(), security);
         let llm_client = LlmClient::from_configs(provider_configs)?;
 
@@ -133,7 +134,7 @@ impl App {
 
                 // Remove restart-related messages from history so the LLM
                 // doesn't see a stale "restart requested" and try again.
-                ctx.history.retain(|msg| {
+                ctx.history.messages.retain(|msg| {
                     if msg.role == "tool" {
                         if let Some(ref content) = msg.content {
                             if content.starts_with("[restart]") {
@@ -204,6 +205,12 @@ impl App {
 
     /// 交互模式：进入 REPL。
     async fn run_interactive(&mut self) -> Result<(), AppError> {
+        use crate::repl::{handle_restart, handle_slash, process_user_message, ReplAction, SlashOutcome};
+
+        let working_dir = self.config.working_dir.clone();
+        let restart_args = self.config.restart_args.clone();
+        let verbose = self.config.verbose;
+
         // 先打印欢迎信息和创建会话日志
         println!("🚀 Dev-Assistant Rust CLI");
         println!("Project: {}", self.config.working_dir.display());
@@ -216,7 +223,7 @@ impl App {
         loop {
             // Render the split-pane UI: messages on top, input at bottom
             let messages = self.agent.context.get_display_messages();
-            ui::render(&messages, &self.agent.context.display.messages, None, self.config.verbose)?;
+            ui::render(&messages, &self.agent.context.display.messages, None, verbose)?;
 
             let mut input = String::new();
             let bytes_read = std::io::stdin()
@@ -233,13 +240,11 @@ impl App {
 
             // ── Slash 命令分发 ──
             if input.starts_with('/') {
-                use crate::repl::{handle_slash, SlashOutcome};
-                let working_dir = self.config.working_dir.clone();
                 match handle_slash(&input, &mut self.agent, &working_dir) {
                     Some(SlashOutcome::Quit) => break,
                     Some(SlashOutcome::Continue) => {
                         let messages = self.agent.context.get_display_messages();
-                        ui::render(&messages, &self.agent.context.display.messages, None, self.config.verbose)?;
+                        ui::render(&messages, &self.agent.context.display.messages, None, verbose)?;
                         continue;
                     }
                     None => {}
@@ -251,9 +256,27 @@ impl App {
             }
 
             // 处理一次用户消息
-            let action = self
-                .process_user_message(&input, &mut session_log)
-                .await?;
+            let action = process_user_message(
+                &mut self.agent,
+                &input,
+                &mut session_log,
+                &working_dir,
+                &restart_args,
+                verbose,
+            )
+            .await?;
+
+            // 处理 restart 请求
+            if matches!(action, ReplAction::Continue) {
+                // 检查是否需要 restart（process_user_message 内部已处理 restart_requested，
+                // 这里只处理 restart 失败后继续 REPL 的情况）
+            }
+            let action = if self.needs_restart_check() {
+                handle_restart(&mut self.agent, &working_dir, &restart_args, verbose)?
+            } else {
+                action
+            };
+
             match action {
                 ReplAction::Continue => continue,
                 ReplAction::Quit => break,
@@ -263,155 +286,9 @@ impl App {
         Ok(())
     }
 
-    async fn process_user_message(
-        &mut self,
-        input: &str,
-        session_log: &mut SessionLogger,
-    ) -> Result<ReplAction, AppError> {
-        // Clear stale display messages from previous turn so they
-        // don't accumulate and stack on each render.
-        self.agent.context.display.messages.clear();
-        // 记录当前 history 位置，get_display_messages 只显示此后的消息
-        self.agent.context.display.history_start = self.agent.context.history.len();
-
-        // Clear the screen before agent execution so that any tracing
-        // logs (which go to stderr) don't appear inside the split-pane UI.
-        print!("\x1b[2J\x1b[H");
-        {
-            use std::io::Write;
-            std::io::stdout().flush().map_err(AppError::Io)?;
-        }
-
-        // ── Step-by-step agent loop with real-time UI updates ──
-        let mut output = UIMessageOutput::new(self.config.verbose);
-        session_log.log_user(input);
-        self.agent.start_turn(input.to_string(), &mut output);
-
-        let result = loop {
-            // Drain buffered messages and re-render UI
-            for (level, msg) in output.drain() {
-                let label = level.label();
-                session_log.log_status(label, &msg);
-                self.agent.context.add_display_message(level, &msg);
-            }
-            let messages = self.agent.context.get_display_messages();
-            ui::render(&messages, &self.agent.context.display.messages, None, self.config.verbose)?;
-
-            // Show "thinking" indicator in the input area so it doesn't
-            // get drowned out by subsequent messages in the message panel.
-            session_log.log_thinking();
-            let messages = self.agent.context.get_display_messages();
-            ui::render(
-                &messages,
-                &self.agent.context.display.messages,
-                Some("⏳ LLM 正在思考，请稍候..."),
-                self.config.verbose,
-            )?;
-
-            tokio::select! {
-                step_result = self.agent.step(&mut output) => {
-                    match step_result {
-                        Ok(AgentStep::Done(result)) => break Some(result),
-                        Ok(AgentStep::Continue) => continue,
-                        Err(e) => {
-                            let msg = format!("LLM API 错误: {}", e);
-                            output.error(&msg);
-                            session_log.log_status("错误", &msg);
-                            break None;
-                        }
-                    }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    output.info("操作已取消");
-                    session_log.log_status("警告", "用户中断了当前操作");
-                    break None;
-                }
-            }
-        };
-
-        // Flush remaining messages
-        for (level, msg) in output.drain() {
-            let label = level.label();
-            session_log.log_status(label, &msg);
-            self.agent.context.add_display_message(level, &msg);
-        }
-
-        // 处理用户中断的情况：回到输入提示，不处理结果
-        let result = match result {
-            Some(r) => r,
-            None => {
-                self.agent.context.add_display_message(
-                    MessageLevel::Warning,
-                    "⏹ 操作已取消",
-                );
-                return Ok(ReplAction::Continue);
-            }
-        };
-
-        // Add result to conversation history so it appears at the end
-        // of the message list, not just as a status message at the top.
-        self.agent.context.add_message(
-            crate::agent::context::Role::Assistant,
-            result.message.clone(),
-            None,
-            None,
-        );
-        session_log.log_assistant(&result.message);
-
-        // Handle restart request
-        if result.restart_requested {
-            return self.handle_restart(session_log);
-        }
-
-        Ok(ReplAction::Continue)
+    /// 占位：process_user_message 已内联 restart 逻辑，
+    /// 此方法保留为未来扩展点（如显式 /restart 命令）。
+    fn needs_restart_check(&self) -> bool {
+        false
     }
-
-    fn handle_restart(
-        &mut self,
-        _session_log: &mut SessionLogger,
-    ) -> Result<ReplAction, AppError> {
-        use std::io::Write;
-
-        let state_path = self.config.working_dir.join(crate::repl::STATE_FILE);
-        if let Err(e) = self.agent.context.save_state(&state_path) {
-            self.agent.context.add_display_message(
-                MessageLevel::Error,
-                &format!("保存状态失败: {}。未重启。", e),
-            );
-            let messages = self.agent.context.get_display_messages();
-            ui::render(&messages, &self.agent.context.display.messages, None, self.config.verbose)?;
-            return Ok(ReplAction::Quit);
-        }
-
-        self.agent.context.add_display_message(
-            MessageLevel::Info,
-            "正在运行 cargo build...",
-        );
-        let messages = self.agent.context.get_display_messages();
-        ui::render(&messages, &self.agent.context.display.messages, None, self.config.verbose)?;
-        std::io::stdout().flush().ok();
-
-        // perform_restart 会在成功时 exec() 替换进程，永远不会返回；
-        // 返回 true 表示构建失败、需要继续 REPL。
-        let should_continue = crate::restart::perform_restart(
-            &self.config.working_dir,
-            &self.config.restart_args,
-            &mut |level, msg: String| {
-                self.agent.context.add_display_message(level, &msg);
-            },
-        );
-
-        if should_continue {
-            let messages = self.agent.context.get_display_messages();
-            ui::render(&messages, &self.agent.context.display.messages, None, self.config.verbose)?;
-            Ok(ReplAction::Continue)
-        } else {
-            Ok(ReplAction::Quit)
-        }
-    }
-}
-
-enum ReplAction {
-    Continue,
-    Quit,
 }

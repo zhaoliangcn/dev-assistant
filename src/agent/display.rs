@@ -27,12 +27,6 @@ impl DisplayBuffer {
         self.messages.clear();
     }
 
-    /// 重置到新的 turn 起点：清空展示消息并把 `history_start` 推到 `new_start`。
-    pub fn reset_turn(&mut self, new_start: usize) {
-        self.messages.clear();
-        self.history_start = new_start;
-    }
-
     /// 添加一条纯展示消息。
     pub fn add(&mut self, level: MessageLevel, msg: &str) {
         self.messages.push((level.label().to_string(), msg.to_string()));

@@ -12,6 +12,7 @@ use crate::security::{SecurityEvaluation, SecurityPolicy};
 use crate::utils::error::AppError;
 
 pub mod file;
+pub mod analysis;
 pub mod kb;
 pub mod meta_tools;
 pub mod spec;
@@ -98,6 +99,10 @@ impl ToolRegistry {
         self.register(task_tools::pause_task_tool());
         self.register(task_tools::resume_task_tool());
         self.register(task_tools::cancel_task_tool());
+        self.register(analysis::analyze_codebase_tool());
+        self.register(analysis::record_analysis_tool());
+        self.register(analysis::get_analysis_summary_tool());
+        self.register(analysis::finish_analysis_tool());
     }
 
     fn register(&mut self, tool: ToolDefinition) {

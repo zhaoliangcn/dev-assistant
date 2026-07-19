@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,10 +21,12 @@ pub type ToolHandler =
 /// 工具注册中心。持有所有工具定义和安全策略。
 ///
 /// 安全策略使用 `Arc<SecurityPolicy>` 共享，避免生命周期参数污染类型签名。
+
 pub struct ToolRegistry {
     tools: HashMap<String, ToolDefinition>,
     working_dir: PathBuf,
     pub security: Arc<SecurityPolicy>,
+    schema_tokens: Cell<usize>,
 }
 
 pub struct ToolDefinition {
@@ -66,6 +69,7 @@ impl ToolRegistry {
             tools: HashMap::new(),
             working_dir,
             security,
+            schema_tokens: Cell::new(0),
         };
         registry.register_builtin_tools();
         registry
@@ -104,6 +108,16 @@ impl ToolRegistry {
                 },
             })
             .collect()
+    }
+
+    pub fn schema_token_count(&self) -> usize {
+        if self.schema_tokens.get() == 0 {
+            let schemas = self.get_tool_schemas();
+            if let Ok(json) = serde_json::to_string(&schemas) {
+                self.schema_tokens.set(crate::agent::token_counter::TokenCounter::estimate(&json));
+            }
+        }
+        self.schema_tokens.get()
     }
 
     /// 执行工具：先做安全评估，再根据评估结果决定是否执行。
@@ -184,5 +198,21 @@ impl ToolRegistry {
             security_evaluation: None,
             ..r
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::security::SecurityPolicy;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    #[test]
+    fn schema_token_count_returns_non_zero() {
+        let policy = Arc::new(SecurityPolicy::new(PathBuf::new().as_path(), true));
+        let registry = ToolRegistry::new(PathBuf::new(), policy);
+        let tokens = registry.schema_token_count();
+        assert!(tokens > 0, "schema token count should be non-zero");
     }
 }

@@ -127,7 +127,7 @@ impl SecurityPolicy {
                 //   rm -rf, rm -fr, rm -r -f, rm -r, rm -f, rm --recursive --force
                 Regex::new(r"(?i)\brm\s+-[rf]\w*").expect("invalid regex for rm -rf"),
                 DangerLevel::Critical,
-                "rm -rf is not allowed".to_string(),
+                "rm with -r/-f flags is not allowed".to_string(),
             ),
             (
                 Regex::new(r"(?i)\bsudo\b").expect("invalid regex for sudo"),

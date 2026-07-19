@@ -21,10 +21,11 @@ pub struct ConversationHistory {
 
 impl ConversationHistory {
     pub fn new(system_prompt: String) -> Self {
+        let used_tokens = TokenCounter::estimate(&system_prompt);
         Self {
             messages: Vec::new(),
             system_prompt,
-            used_tokens: 0,
+            used_tokens,
         }
     }
 
@@ -80,5 +81,17 @@ impl ConversationHistory {
     /// 当前消息数量。
     pub fn len(&self) -> usize {
         self.messages.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_counts_system_prompt_tokens() {
+        let system_prompt = "You are a helpful assistant.".to_string();
+        let history = ConversationHistory::new(system_prompt);
+        assert!(history.used_tokens > 0, "system prompt should contribute to token count");
     }
 }

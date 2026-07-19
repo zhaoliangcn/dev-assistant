@@ -40,7 +40,16 @@ impl TokenCounter {
     pub fn estimate_messages(messages: &[LlmMessage]) -> usize {
         messages
             .iter()
-            .map(|m| Self::estimate(m.content.as_deref().unwrap_or("")))
+            .map(|m| {
+                let content_tokens = Self::estimate(m.content.as_deref().unwrap_or(""));
+                let tool_calls_tokens = m
+                    .tool_calls
+                    .as_ref()
+                    .and_then(|tc| serde_json::to_string(tc).ok())
+                    .map(|s| Self::estimate(&s))
+                    .unwrap_or(0);
+                content_tokens + tool_calls_tokens
+            })
             .sum()
     }
 }
@@ -108,5 +117,23 @@ mod tests {
         }];
         // None content 通过 unwrap_or("") 得到空字符串，estimate("") 返回 .max(1) = 1
         assert_eq!(TokenCounter::estimate_messages(&msgs), 1);
+    }
+
+    #[test]
+    fn estimate_messages_includes_tool_calls() {
+        let msgs = vec![LlmMessage {
+            role: "assistant".to_string(),
+            content: None,
+            tool_calls: Some(vec![crate::llm::ToolCall {
+                id: "call_123".to_string(),
+                function: crate::llm::ToolCallFunction {
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({ "file_path": "src/main.rs" }),
+                },
+            }]),
+            tool_call_id: None,
+        }];
+        let total = TokenCounter::estimate_messages(&msgs);
+        assert!(total > 1, "tool_calls should contribute to token count, got {}", total);
     }
 }

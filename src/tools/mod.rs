@@ -6,6 +6,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use tracing::{debug, warn};
 
+use crate::agent::AgentIdentity;
 use crate::llm::ToolSchema;
 use crate::security::{SecurityEvaluation, SecurityPolicy};
 use crate::utils::error::AppError;
@@ -202,6 +203,62 @@ impl ToolRegistry {
         registry.register(file::file_exists_tool());
         registry.register(system_tools::exec_command_tool());
         registry.register(meta_tools::finish_tool());
+        registry
+    }
+
+    /// 根据 Agent 身份创建受限工具注册中心。
+    ///
+    /// 不同身份的 Agent 拥有不同的工具集：
+    /// - Architect: read_file, write_file, glob, kb_store, kb_query, finish
+    /// - Implementer: read_file, write_file, edit_file, exec_command, glob, kb_query, finish
+    /// - Reviewer: read_file, batch_read_files, glob, kb_store, kb_query, finish
+    /// - Tester: read_file, write_file, edit_file, exec_command, glob, kb_store, kb_query, finish
+    /// - Debugger: read_file, write_file, edit_file, exec_command, glob, kb_store, kb_query, finish
+    /// - General: 所有基础工具
+    pub fn new_subagent_registry_with_identity(&self, identity: &AgentIdentity) -> Self {
+        let mut registry = Self {
+            tools: HashMap::new(),
+            working_dir: self.working_dir.clone(),
+            security: self.security.clone(),
+            schema_tokens: Cell::new(0),
+        };
+
+        let allowed_tools = identity.default_tools();
+
+        if allowed_tools.contains("read_file") {
+            registry.register(file::read_file_tool());
+        }
+        if allowed_tools.contains("batch_read_files") {
+            registry.register(file::batch_read_files_tool());
+        }
+        if allowed_tools.contains("write_file") {
+            registry.register(file::write_file_tool());
+        }
+        if allowed_tools.contains("edit_file") {
+            registry.register(file::edit_file_tool());
+        }
+        if allowed_tools.contains("glob") {
+            registry.register(file::glob_tool());
+        }
+        if allowed_tools.contains("list_directory") {
+            registry.register(file::list_directory_tool());
+        }
+        if allowed_tools.contains("file_exists") {
+            registry.register(file::file_exists_tool());
+        }
+        if allowed_tools.contains("exec_command") {
+            registry.register(system_tools::exec_command_tool());
+        }
+        if allowed_tools.contains("kb_store") {
+            registry.register(kb::kb_store_tool());
+        }
+        if allowed_tools.contains("kb_query") {
+            registry.register(kb::kb_query_tool());
+        }
+        if allowed_tools.contains("finish") {
+            registry.register(meta_tools::finish_tool());
+        }
+
         registry
     }
 

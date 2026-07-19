@@ -33,7 +33,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::agent::Agent;
+use crate::agent::{Agent, AgentIdentity};
 use crate::llm::LlmClient;
 use crate::tools::ToolRegistry;
 use crate::utils::error::AppError;
@@ -494,6 +494,18 @@ async fn execute_single_task(
          3. 完成后使用 finish 工具结束"
     );
 
+    // 解析 agent_type
+    let agent_type = task.agent_type
+        .as_ref()
+        .and_then(|t| AgentIdentity::from_str(t));
+
+    // 根据 agent_type 创建工具集
+    let tools = if let Some(ref identity) = agent_type {
+        tools.new_subagent_registry_with_identity(identity)
+    } else {
+        tools.new_subagent_registry()
+    };
+
     // 创建子代理
     let mut agent = match Agent::new_subagent(
         llm,
@@ -503,6 +515,7 @@ async fn execute_single_task(
         "",
         max_iterations,
         max_tokens,
+        agent_type,
     ) {
         Ok(agent) => agent,
         Err(e) => {

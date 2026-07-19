@@ -2,9 +2,11 @@ pub mod compressor;
 pub mod context;
 pub mod display;
 pub mod history;
+pub mod identity;
 pub mod token_counter;
 
 pub use context::ContextManager;
+pub use identity::AgentIdentity;
 
 use std::sync::Arc;
 
@@ -350,28 +352,17 @@ impl Agent {
         context: &str,
         max_iterations: usize,
         max_tokens: usize,
+        agent_type: Option<AgentIdentity>,
     ) -> Result<Self, AppError> {
         if depth > MAX_SUBAGENT_DEPTH {
             return Err(AppError::SubagentDepthLimit(MAX_SUBAGENT_DEPTH));
         }
 
-        // 构建子 Agent 的 system prompt：静态身份 + 工具说明
-        let system_prompt = format!(
-            r#"你是一个子代理。你的职责是完成分配给你的任务。
-
-规则：
-1. 专注完成分配的任务
-2. 完成后必须使用 finish 工具结束，提供任务完成总结
-3. 重要信息写入输出中返回给父代理
-4. 遵守安全策略
-5. 不要调用 spawn_subagent 工具（它不可用）
-6. 不要调用 restart 工具（它不可用）
-"#
-        );
+        let identity = agent_type.unwrap_or(AgentIdentity::General);
+        let system_prompt = identity.system_prompt();
 
         let context_manager = ContextManager::new(system_prompt, max_tokens);
 
-        // 将任务描述作为首条用户消息添加到上下文中
         let mut ctx = context_manager;
         let task_description = if context.is_empty() {
             format!("任务目标：{}", task)
@@ -391,8 +382,8 @@ impl Agent {
             llm,
             max_iterations,
             depth,
-            skills: Vec::new(), // 子代理没有技能
-            session_store: None, // 子代理不持久化会话
+            skills: Vec::new(),
+            session_store: None,
         })
     }
 
@@ -476,6 +467,9 @@ impl Agent {
             .as_u64()
             .map(|n| n as usize)
             .unwrap_or(8192);
+        let agent_type = tool_call.function.arguments["agent_type"]
+            .as_str()
+            .and_then(AgentIdentity::from_str);
 
         // 检查深度限制
         let child_depth = self.depth + 1;
@@ -496,16 +490,20 @@ impl Agent {
             });
         }
 
+        let agent_type_str = agent_type.as_ref().map(|a| a.to_str()).unwrap_or("general");
         output.info(&format!(
-            "创建子代理 (深度 {})，任务: {}",
+            "创建子代理 (深度 {}, 类型: {})，任务: {}",
             child_depth,
+            agent_type_str,
             if task.len() > 80 { format!("{}...", &task[..80]) } else { task.to_string() }
         ));
 
-        // 创建子 Agent 的受限工具注册中心
-        let subagent_tools = self.tools.new_subagent_registry();
+        let subagent_tools = if let Some(ref identity) = agent_type {
+            self.tools.new_subagent_registry_with_identity(identity)
+        } else {
+            self.tools.new_subagent_registry()
+        };
 
-        // 创建子 Agent
         let mut subagent = match Agent::new_subagent(
             self.llm.clone(),
             subagent_tools,
@@ -514,6 +512,7 @@ impl Agent {
             context,
             sub_max_iterations,
             sub_max_tokens,
+            agent_type,
         ) {
             Ok(agent) => agent,
             Err(e) => {
@@ -657,6 +656,7 @@ mod tests {
             "",
             10,
             4096,
+            None,
         );
 
         assert!(result.is_err());
@@ -680,6 +680,7 @@ mod tests {
             "",
             10,
             4096,
+            None,
         );
 
         assert!(result.is_ok());
@@ -692,7 +693,7 @@ mod tests {
         let llm = test_llm_client();
         let tools = test_tool_registry();
 
-        let agent = Agent::new_subagent(llm, tools, 1, "test task", "", 10, 4096).unwrap();
+        let agent = Agent::new_subagent(llm, tools, 1, "test task", "", 10, 4096, None).unwrap();
 
         // 子代理不应有技能
         assert!(agent.skills.is_empty());
@@ -703,7 +704,7 @@ mod tests {
         let llm = test_llm_client();
         let tools = test_tool_registry();
 
-        let agent = Agent::new_subagent(llm, tools, 1, "test task", "", 10, 4096).unwrap();
+        let agent = Agent::new_subagent(llm, tools, 1, "test task", "", 10, 4096, None).unwrap();
 
         // 子代理不应有 session_store
         assert!(agent.session_store.is_none());
@@ -714,7 +715,7 @@ mod tests {
         let llm = test_llm_client();
         let tools = test_tool_registry();
 
-        let agent = Agent::new_subagent(llm, tools, 1, "特定任务描述", "", 10, 4096).unwrap();
+        let agent = Agent::new_subagent(llm, tools, 1, "特定任务描述", "", 10, 4096, None).unwrap();
 
         // 验证任务描述出现在上下文中
         let messages = agent.context.build_messages();
@@ -730,7 +731,7 @@ mod tests {
         let tools = test_tool_registry();
 
         let agent = Agent::new_subagent(
-            llm, tools, 1, "test task", "额外上下文信息", 10, 4096,
+            llm, tools, 1, "test task", "额外上下文信息", 10, 4096, None,
         ).unwrap();
 
         let messages = agent.context.build_messages();

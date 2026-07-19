@@ -30,6 +30,12 @@ pub fn spawn_subagent_tool() -> ToolDefinition {
                     "type": "string",
                     "description": "Context information to pass to the sub-agent, such as relevant file paths, interface definitions, or background knowledge."
                 },
+                "agent_type": {
+                    "type": "string",
+                    "description": "Type of sub-agent to create. Available types: architect, implementer, reviewer, tester, debugger, general. Each type has specialized skills and tools. Default: general.",
+                    "enum": ["architect", "implementer", "reviewer", "tester", "debugger", "general"],
+                    "default": "general"
+                },
                 "max_iterations": {
                     "type": "integer",
                     "description": "Maximum iterations for the sub-agent (default: 15). Set lower for simple tasks, higher for complex ones.",
@@ -43,8 +49,6 @@ pub fn spawn_subagent_tool() -> ToolDefinition {
             },
             "required": ["task"]
         }),
-        // skip_security: true 是安全的——此工具在 process_tool_calls 中被拦截，
-        // handler 是 dummy 实现，永远不会执行实际的安全敏感操作。
         skip_security: true,
         handler: Box::new(spawn_subagent_handler),
     }
@@ -54,7 +58,6 @@ pub fn spawn_subagent_tool() -> ToolDefinition {
 /// 因为 `spawn_subagent` 在 `Agent::process_tool_calls` 中被拦截。
 /// 仅作为 `ToolDefinition` 的必需字段存在。
 fn spawn_subagent_handler(args: &ToolArgs, _context: &ToolContext) -> Result<ToolResult, AppError> {
-    // 参数验证：确保 task 字段存在
     let task = args.arguments["task"]
         .as_str()
         .ok_or_else(|| AppError::Llm("spawn_subagent: 'task' is required".to_string()))?;
@@ -63,14 +66,17 @@ fn spawn_subagent_handler(args: &ToolArgs, _context: &ToolContext) -> Result<Too
         .as_str()
         .unwrap_or("");
 
-    // 注意：此结果不会被返回给 LLM，因为实际处理在拦截逻辑中完成。
+    let agent_type = args.arguments["agent_type"]
+        .as_str()
+        .unwrap_or("general");
+
     Ok(ToolResult {
         success: true,
         security_evaluation: None,
         restart_requested: false,
         content: format!(
-            "[spawn_subagent] Task: {}\nContext: {}",
-            task, context
+            "[spawn_subagent] Task: {}\nContext: {}\nAgent Type: {}",
+            task, context, agent_type
         ),
     })
 }

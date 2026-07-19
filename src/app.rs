@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::agent::{Agent, AgentConfig, ContextManager};
 use crate::config::{load_agent_config, load_models};
 use crate::llm::LlmClient;
+use crate::orchestrator::{TaskOrchestrator, BackgroundConfig};
 use crate::persist::SessionStore;
 use crate::prompt::build_system_prompt;
 use crate::security::SecurityPolicy;
@@ -27,6 +28,8 @@ pub struct AppConfig {
     pub model: Option<String>,
     pub message: Option<String>,
     pub resume: bool,
+    /// 后台模式：长时间运行任务
+    pub background: bool,
     /// 传给 restart 子进程的 CLI 参数列表（不含 argv[0]）
     pub restart_args: Vec<String>,
 }
@@ -184,10 +187,11 @@ impl App {
         }
     }
 
-    /// 运行应用：根据是否有 `--message` 选择交互 REPL 或一次性模式。
+    /// 运行应用：根据配置选择交互 REPL、一次性模式或后台模式。
     pub async fn run(&mut self) -> Result<(), AppError> {
-        let message = self.config.message.clone();
-        if let Some(message) = message {
+        if self.config.background {
+            self.run_background_mode().await
+        } else if let Some(message) = self.config.message.clone() {
             self.run_once(&message).await
         } else {
             self.run_interactive().await
@@ -206,6 +210,48 @@ impl App {
         } else {
             output.error(&result.message);
         }
+        Ok(())
+    }
+
+    /// 后台模式：执行长时间运行的任务。
+    async fn run_background_mode(&mut self) -> Result<(), AppError> {
+        let mut output = CliMessageOutput::new(self.config.verbose);
+        output.info("启动后台模式...");
+
+        let llm = Arc::new(crate::llm::LlmClient::from_configs(vec![
+            crate::llm::ProviderConfig {
+                name: "background".to_string(),
+                provider: "openai".to_string(),
+                api_url: "http://localhost:9999/v1".to_string(),
+                api_key: Some("test".to_string()),
+                model: "test-model".to_string(),
+                temperature: Some(0.7),
+                max_tokens: Some(8192),
+            }
+        ])?);
+
+        let security = Arc::new(SecurityPolicy::new(
+            &self.config.working_dir,
+            !self.config.no_approval,
+        ));
+        let tools = ToolRegistry::new(self.config.working_dir.clone(), security);
+        let mut orchestrator = TaskOrchestrator::new(
+            self.config.working_dir.clone(),
+            llm,
+            tools,
+        );
+
+        let config = BackgroundConfig {
+            checkpoint_interval: 5,
+            max_concurrent: 4,
+            progress_logging: true,
+        };
+
+        let result = crate::orchestrator::run_background(&mut orchestrator, config).await?;
+
+        output.info(&format!("后台任务完成: {}", result.summary));
+        output.info(&format!("已完成: {}, 失败: {}, 跳过: {}", result.completed, result.failed, result.skipped));
+
         Ok(())
     }
 

@@ -13,6 +13,7 @@ mod agent;
 mod app;
 mod config;
 mod llm;
+mod orchestrator;
 mod persist;
 mod prompt;
 mod repl;
@@ -70,6 +71,10 @@ struct Cli {
     /// 从上次保存的状态恢复对话（restart 后由子进程传入）
     #[arg(long)]
     resume: bool,
+
+    /// 后台模式：执行长时间运行的任务
+    #[arg(long)]
+    background: bool,
 }
 
 fn main() -> Result<(), AppError> {
@@ -134,6 +139,7 @@ fn main() -> Result<(), AppError> {
         model: cli.model,
         message: cli.message,
         resume: cli.resume,
+        background: cli.background,
         restart_args,
     };
 

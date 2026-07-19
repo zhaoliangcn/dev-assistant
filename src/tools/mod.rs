@@ -16,6 +16,7 @@ pub mod meta_tools;
 pub mod spec;
 pub mod subagent;
 pub mod system_tools;
+pub mod task_tools;
 
 pub type ToolHandler =
     dyn Fn(&ToolArgs, &ToolContext) -> Result<ToolResult, AppError> + Sync + Send + 'static;
@@ -92,6 +93,10 @@ impl ToolRegistry {
         self.register(subagent::spawn_subagent_tool());
         self.register(kb::kb_store_tool());
         self.register(kb::kb_query_tool());
+        self.register(task_tools::task_status_tool());
+        self.register(task_tools::pause_task_tool());
+        self.register(task_tools::resume_task_tool());
+        self.register(task_tools::cancel_task_tool());
     }
 
     fn register(&mut self, tool: ToolDefinition) {

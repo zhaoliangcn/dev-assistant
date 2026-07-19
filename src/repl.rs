@@ -50,6 +50,14 @@ pub fn handle_slash(
         return Some(handle_model_command(input, agent, working_dir));
     }
 
+    if input == "/status" {
+        return Some(handle_status_command(agent));
+    }
+
+    if input == "/background" {
+        return Some(handle_background_command(agent));
+    }
+
     None
 }
 
@@ -98,6 +106,53 @@ fn handle_model_command(
             );
         }
     }
+    SlashOutcome::Continue
+}
+
+fn handle_status_command(agent: &mut Agent) -> SlashOutcome {
+    use crate::tools::task_tools::get_global_task_manager;
+    
+    if let Some(manager) = get_global_task_manager() {
+        let graph_arc = manager.graph();
+        let graph = graph_arc.lock().unwrap();
+        let summary = graph.progress_summary();
+        let total = graph.total_count();
+        let completed = graph.completed_count();
+        drop(graph);
+        agent.add_display_message(
+            MessageLevel::Info,
+            &format!(
+                "📊 任务状态:\n\
+                 - 总任务数: {}\n\
+                 - 已完成: {}\n\
+                 \n{}",
+                total,
+                completed,
+                summary,
+            ),
+        );
+    } else {
+        agent.add_display_message(
+            MessageLevel::Info,
+            "当前没有正在运行的后台任务",
+        );
+    }
+    SlashOutcome::Continue
+}
+
+fn handle_background_command(agent: &mut Agent) -> SlashOutcome {
+    agent.add_display_message(
+        MessageLevel::Info,
+        "⚠️ 后台模式需要通过命令行参数 --background 启动\n\
+         使用方式: dev-assistant --background\n\
+         \n\
+         在后台模式下，任务将自动执行并定期保存检查点。\n\
+         支持的命令:\n\
+         - /status: 查询任务状态\n\
+         - /pause: 暂停任务\n\
+         - /resume: 恢复任务\n\
+         - /cancel: 取消任务",
+    );
     SlashOutcome::Continue
 }
 

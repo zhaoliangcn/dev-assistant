@@ -11,6 +11,7 @@ use crate::security::{SecurityEvaluation, SecurityPolicy};
 use crate::utils::error::AppError;
 
 pub mod file;
+pub mod kb;
 pub mod meta_tools;
 pub mod spec;
 pub mod subagent;
@@ -27,6 +28,7 @@ pub struct ToolRegistry {
     tools: HashMap<String, ToolDefinition>,
     working_dir: PathBuf,
     pub security: Arc<SecurityPolicy>,
+    #[allow(dead_code)]
     schema_tokens: Cell<usize>,
 }
 
@@ -88,6 +90,8 @@ impl ToolRegistry {
         self.register(meta_tools::finish_tool());
         self.register(meta_tools::restart_tool());
         self.register(subagent::spawn_subagent_tool());
+        self.register(kb::kb_store_tool());
+        self.register(kb::kb_query_tool());
     }
 
     fn register(&mut self, tool: ToolDefinition) {
@@ -112,6 +116,7 @@ impl ToolRegistry {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn schema_token_count(&self) -> usize {
         if self.schema_tokens.get() == 0 {
             let schemas = self.get_tool_schemas();

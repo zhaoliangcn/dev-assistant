@@ -41,6 +41,8 @@ pub fn build_system_prompt(tool_schemas: &[ToolSchema], skills: &[Skill]) -> Str
 - finish: 任务完成后调用，输出完成总结
 - list_directory: 列出目录结构
 - file_exists: 检查文件是否存在
+- kb_store: 创建或更新 KnowledgeBase 条目。用于记录架构决策、模块接口定义、问题追踪等。内容需包含 YAML frontmatter（--- 分隔）。子代理可以通过 KB 共享信息。
+- kb_query: 检索 KnowledgeBase 条目。支持按标签、类型、关键词过滤。在开始新任务前，先查询 KB 了解已有决策和接口定义。
 
 技能使用说明（技能不是工具，不能直接调用；激活后按照其流程使用工具执行）：
 - code-review: 代码审查技能，激活后按照其流程读取文件并输出审查报告

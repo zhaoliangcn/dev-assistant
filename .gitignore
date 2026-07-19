@@ -6,3 +6,4 @@ skills/
 
 .dev-assistant-models.toml
 .dev-assistant-state.json
+.dev-assistant-store/

@@ -6,6 +6,8 @@ pub mod token_counter;
 
 pub use context::ContextManager;
 
+use std::sync::Arc;
+
 use crate::llm::{LlmClient, LlmResponse, ToolCall};
 use crate::persist::SessionStore;
 use crate::skills::Skill;
@@ -13,6 +15,9 @@ use crate::tools::{ToolRegistry, ToolResult};
 use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
 use tracing::debug;
+
+/// 最大子代理深度。超过此深度时，返回 `SubagentDepthLimit` 错误。
+const MAX_SUBAGENT_DEPTH: usize = 3;
 
 // ---------------------------------------------------------------------------
 // Agent 结果
@@ -45,8 +50,9 @@ pub enum AgentStep {
 pub struct Agent {
     context: ContextManager,
     tools: ToolRegistry,
-    llm: LlmClient,
+    llm: Arc<LlmClient>,
     max_iterations: usize,
+    depth: usize,
     skills: Vec<Skill>,
     /// 可选的会话持久化存储。存在时，所有对话事件和工具调用都会被记录。
     session_store: Option<SessionStore>,
@@ -56,7 +62,7 @@ impl Agent {
     pub fn new(
         context: ContextManager,
         tools: ToolRegistry,
-        llm: LlmClient,
+        llm: Arc<LlmClient>,
         config: AgentConfig,
         skills: Vec<Skill>,
         session_store: Option<SessionStore>,
@@ -66,6 +72,7 @@ impl Agent {
             tools,
             llm,
             max_iterations: config.max_iterations,
+            depth: 0,
             skills,
             session_store,
         }
@@ -238,7 +245,7 @@ impl Agent {
                     }
                 }
 
-                let results = self.process_tool_calls(&tool_calls, output)?;
+                let results = self.process_tool_calls(&tool_calls, output).await?;
 
                 for (tool_call, result) in tool_calls.iter().zip(results.iter()) {
                     // 持久化：记录工具执行结果
@@ -323,15 +330,95 @@ impl Agent {
     }
 
     // -----------------------------------------------------------------------
+    // 子代理创建
+    // -----------------------------------------------------------------------
+
+    /// 创建一个子 Agent。
+    ///
+    /// 子 Agent 拥有：
+    /// - 独立的 `ContextManager`（新鲜的对话上下文，只包含 system prompt 和任务描述）
+    /// - 受限的 `ToolRegistry`（只有文件工具和 finish，没有 spawn_subagent 和 restart）
+    /// - 共享的 `Arc<LlmClient>`（与父 Agent 使用同一个 LLM 客户端）
+    /// - `depth = parent_depth + 1`
+    ///
+    /// 如果深度超过 `MAX_SUBAGENT_DEPTH`，返回 `SubagentDepthLimit` 错误。
+    pub fn new_subagent(
+        llm: Arc<LlmClient>,
+        tools: ToolRegistry,
+        depth: usize,
+        task: &str,
+        context: &str,
+        max_iterations: usize,
+        max_tokens: usize,
+    ) -> Result<Self, AppError> {
+        if depth > MAX_SUBAGENT_DEPTH {
+            return Err(AppError::SubagentDepthLimit(MAX_SUBAGENT_DEPTH));
+        }
+
+        // 构建子 Agent 的 system prompt：静态身份 + 工具说明
+        let system_prompt = format!(
+            r#"你是一个子代理。你的职责是完成分配给你的任务。
+
+规则：
+1. 专注完成分配的任务
+2. 完成后必须使用 finish 工具结束，提供任务完成总结
+3. 重要信息写入输出中返回给父代理
+4. 遵守安全策略
+5. 不要调用 spawn_subagent 工具（它不可用）
+6. 不要调用 restart 工具（它不可用）
+"#
+        );
+
+        let context_manager = ContextManager::new(system_prompt, max_tokens);
+
+        // 将任务描述作为首条用户消息添加到上下文中
+        let mut ctx = context_manager;
+        let task_description = if context.is_empty() {
+            format!("任务目标：{}", task)
+        } else {
+            format!("任务目标：{}\n\n上下文信息：\n{}", task, context)
+        };
+        ctx.add_message(
+            crate::agent::context::Role::User,
+            task_description,
+            None,
+            None,
+        );
+
+        Ok(Self {
+            context: ctx,
+            tools,
+            llm,
+            max_iterations,
+            depth,
+            skills: Vec::new(), // 子代理没有技能
+            session_store: None, // 子代理不持久化会话
+        })
+    }
+
+    /// 获取当前 Agent 的深度
+    #[allow(dead_code)]
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    // -----------------------------------------------------------------------
     // 内部方法
     // -----------------------------------------------------------------------
 
-    fn process_tool_calls(&mut self, tool_calls: &[ToolCall], output: &mut dyn MessageOutput) -> Result<Vec<ToolResult>, AppError> {
+    async fn process_tool_calls(&mut self, tool_calls: &[ToolCall], output: &mut dyn MessageOutput) -> Result<Vec<ToolResult>, AppError> {
         let mut results = Vec::new();
 
         for tool_call in tool_calls {
             output.info(&format!("执行工具: {} (id: {})", tool_call.function.name, tool_call.id));
             debug!(tool = %tool_call.function.name, args = %tool_call.function.arguments, "Tool arguments");
+
+            // ── 拦截 spawn_subagent 工具调用 ──
+            if tool_call.function.name == "spawn_subagent" {
+                let result = self.handle_spawn_subagent(tool_call, output).await?;
+                results.push(result);
+                continue;
+            }
 
             // 根据工具的 skip_security 标记决定走 execute_approved 还是 execute。
             // finish/restart 等元工具在 ToolDefinition 中标了 skip_security: true。
@@ -368,6 +455,117 @@ impl Agent {
         }
 
         Ok(results)
+    }
+
+    /// 处理 `spawn_subagent` 工具调用：创建子 Agent、执行任务、返回结果。
+    async fn handle_spawn_subagent(&mut self, tool_call: &ToolCall, output: &mut dyn MessageOutput) -> Result<ToolResult, AppError> {
+        let task = tool_call.function.arguments["task"]
+            .as_str()
+            .unwrap_or("");
+
+        let context = tool_call.function.arguments["context"]
+            .as_str()
+            .unwrap_or("");
+
+        // 解析子代理配置参数（带默认值）
+        let sub_max_iterations = tool_call.function.arguments["max_iterations"]
+            .as_u64()
+            .map(|n| n as usize)
+            .unwrap_or(15);
+        let sub_max_tokens = tool_call.function.arguments["max_tokens"]
+            .as_u64()
+            .map(|n| n as usize)
+            .unwrap_or(8192);
+
+        // 检查深度限制
+        let child_depth = self.depth + 1;
+        if child_depth > MAX_SUBAGENT_DEPTH {
+            output.warning(&format!(
+                "子代理深度限制 (最大: {}), 当前深度: {}",
+                MAX_SUBAGENT_DEPTH, self.depth
+            ));
+            return Ok(ToolResult {
+                success: false,
+                security_evaluation: None,
+                restart_requested: false,
+                content: format!(
+                    "[spawn_subagent] ❌ 子代理深度超过限制 (最大深度: {}, 当前深度: {})。\
+                     请自行完成此任务，不要继续分解子任务。",
+                    MAX_SUBAGENT_DEPTH, self.depth
+                ),
+            });
+        }
+
+        output.info(&format!(
+            "创建子代理 (深度 {})，任务: {}",
+            child_depth,
+            if task.len() > 80 { format!("{}...", &task[..80]) } else { task.to_string() }
+        ));
+
+        // 创建子 Agent 的受限工具注册中心
+        let subagent_tools = self.tools.new_subagent_registry();
+
+        // 创建子 Agent
+        let mut subagent = match Agent::new_subagent(
+            self.llm.clone(),
+            subagent_tools,
+            child_depth,
+            task,
+            context,
+            sub_max_iterations,
+            sub_max_tokens,
+        ) {
+            Ok(agent) => agent,
+            Err(e) => {
+                output.error(&format!("创建子代理失败: {}", e));
+                return Ok(ToolResult {
+                    success: false,
+                    security_evaluation: None,
+                    restart_requested: false,
+                    content: format!("[spawn_subagent] ❌ 创建子代理失败: {}", e),
+                });
+            }
+        };
+
+        let mut sub_output = crate::ui::UIMessageOutput::new(false);
+        let result = Box::pin(subagent.run(task.to_string(), &mut sub_output)).await;
+
+        match result {
+            Ok(agent_result) => {
+                if agent_result.success {
+                    output.success("子代理任务完成");
+                    Ok(ToolResult {
+                        success: true,
+                        security_evaluation: None,
+                        restart_requested: false,
+                        content: format!(
+                            "[spawn_subagent] ✅ 子代理任务完成\n深度: {}\n结果: {}",
+                            child_depth, agent_result.message
+                        ),
+                    })
+                } else {
+                    output.error(&format!("子代理任务失败: {}", agent_result.message));
+                    Ok(ToolResult {
+                        success: false,
+                        security_evaluation: None,
+                        restart_requested: false,
+                        content: format!(
+                            "[spawn_subagent] ❌ 子代理任务失败\n深度: {}\n错误: {}",
+                            child_depth, agent_result.message
+                        ),
+                    })
+                }
+            }
+            Err(e) => {
+                output.error(&format!("子代理执行出错: {}", e));
+                Ok(ToolResult {
+                    success: false,
+                    security_evaluation: None,
+                    restart_requested: false,
+                    content: format!("[spawn_subagent] ❌ 子代理执行出错: {}", e),
+                })
+            }
+        }
     }
 
     /// 匹配用户消息与已注册技能。优先匹配 `when_to_use` 触发条件，
@@ -413,5 +611,153 @@ impl Agent {
     /// 当前活跃模型名称
     pub fn active_model(&self) -> &str {
         self.llm.active_model()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::LlmClient;
+    use crate::security::SecurityPolicy;
+    use crate::tools::ToolRegistry;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    /// 创建一个测试用的 LlmClient（仅用于构造 Agent，不会被实际调用）
+    fn test_llm_client() -> Arc<LlmClient> {
+        let config = crate::llm::ProviderConfig {
+            name: "test".to_string(),
+            provider: "openai".to_string(),
+            api_url: "http://localhost:9999/v1".to_string(),
+            api_key: Some("test-key".to_string()),
+            model: "test-model".to_string(),
+            temperature: Some(0.0),
+            max_tokens: Some(100),
+        };
+        Arc::new(LlmClient::from_configs(vec![config]).unwrap())
+    }
+
+    /// 创建一个测试用的 ToolRegistry
+    fn test_tool_registry() -> ToolRegistry {
+        let policy = Arc::new(SecurityPolicy::new(PathBuf::new().as_path(), true));
+        ToolRegistry::new(PathBuf::new(), policy)
+    }
+
+    #[test]
+    fn new_subagent_depth_limit_exceeded() {
+        let llm = test_llm_client();
+        let tools = test_tool_registry();
+
+        // 深度超过 MAX_SUBAGENT_DEPTH 时应返回错误
+        let result = Agent::new_subagent(
+            llm,
+            tools,
+            MAX_SUBAGENT_DEPTH + 1, // 超出深度
+            "test task",
+            "",
+            10,
+            4096,
+        );
+
+        assert!(result.is_err());
+        match result {
+            Err(AppError::SubagentDepthLimit(max)) => assert_eq!(max, MAX_SUBAGENT_DEPTH),
+            _ => panic!("Expected SubagentDepthLimit error"),
+        }
+    }
+
+    #[test]
+    fn new_subagent_creates_at_depth_limit() {
+        let llm = test_llm_client();
+        let tools = test_tool_registry();
+
+        // 深度等于 MAX_SUBAGENT_DEPTH 时应成功
+        let result = Agent::new_subagent(
+            llm,
+            tools,
+            MAX_SUBAGENT_DEPTH, // 等于最大深度
+            "test task",
+            "",
+            10,
+            4096,
+        );
+
+        assert!(result.is_ok());
+        let agent = result.unwrap();
+        assert_eq!(agent.depth(), MAX_SUBAGENT_DEPTH);
+    }
+
+    #[test]
+    fn new_subagent_has_no_skills() {
+        let llm = test_llm_client();
+        let tools = test_tool_registry();
+
+        let agent = Agent::new_subagent(llm, tools, 1, "test task", "", 10, 4096).unwrap();
+
+        // 子代理不应有技能
+        assert!(agent.skills.is_empty());
+    }
+
+    #[test]
+    fn new_subagent_has_no_session_store() {
+        let llm = test_llm_client();
+        let tools = test_tool_registry();
+
+        let agent = Agent::new_subagent(llm, tools, 1, "test task", "", 10, 4096).unwrap();
+
+        // 子代理不应有 session_store
+        assert!(agent.session_store.is_none());
+    }
+
+    #[test]
+    fn new_subagent_context_contains_task() {
+        let llm = test_llm_client();
+        let tools = test_tool_registry();
+
+        let agent = Agent::new_subagent(llm, tools, 1, "特定任务描述", "", 10, 4096).unwrap();
+
+        // 验证任务描述出现在上下文中
+        let messages = agent.context.build_messages();
+        let user_msg = messages.iter().find(|m| m.role == "user");
+        assert!(user_msg.is_some(), "sub-agent should have a user message with task");
+        let content = user_msg.unwrap().content.as_ref().unwrap();
+        assert!(content.contains("特定任务描述"), "task description should be in user message");
+    }
+
+    #[test]
+    fn new_subagent_context_includes_context_param() {
+        let llm = test_llm_client();
+        let tools = test_tool_registry();
+
+        let agent = Agent::new_subagent(
+            llm, tools, 1, "test task", "额外上下文信息", 10, 4096,
+        ).unwrap();
+
+        let messages = agent.context.build_messages();
+        let user_msg = messages.iter().find(|m| m.role == "user").unwrap();
+        let content = user_msg.content.as_ref().unwrap();
+        assert!(content.contains("额外上下文信息"), "context param should be in user message");
+    }
+
+    #[test]
+    fn new_subagent_registry_excludes_spawn_subagent() {
+        let policy = Arc::new(SecurityPolicy::new(PathBuf::new().as_path(), true));
+        let parent_registry = ToolRegistry::new(PathBuf::new(), policy);
+
+        let sub_registry = parent_registry.new_subagent_registry();
+
+        // 子代理注册表不应包含 spawn_subagent
+        assert!(sub_registry.get_tool("spawn_subagent").is_none(),
+            "sub-agent registry should not contain spawn_subagent");
+
+        // 子代理注册表不应包含 restart
+        assert!(sub_registry.get_tool("restart").is_none(),
+            "sub-agent registry should not contain restart");
+
+        // 子代理注册表应包含基本工具
+        assert!(sub_registry.get_tool("read_file").is_some());
+        assert!(sub_registry.get_tool("write_file").is_some());
+        assert!(sub_registry.get_tool("finish").is_some());
+        assert!(sub_registry.get_tool("exec_command").is_some());
     }
 }

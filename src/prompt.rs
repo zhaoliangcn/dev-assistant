@@ -30,6 +30,7 @@ pub fn build_system_prompt(tool_schemas: &[ToolSchema], skills: &[Skill]) -> Str
 5. restart 工具用于修改代码后自动编译验证。调用后进程会重启并自动恢复对话。**重启后不要再调用 restart 工具**，直接继续执行用户任务。
 
 工具使用建议（以下全是工具名称，可以调用）：
+- spawn_subagent: 创建子代理执行独立子任务。适用于：文件搜索和分析、并行研究、复杂任务分解。子代理拥有独立的上下文和工具集，执行完毕后返回结果摘要。注意：子代理有深度限制（最多 3 层），完成后自动返回结果，不要让子代理创建子代理。
 - exec_command: 直接执行程序，command 为可执行文件名，args 为参数列表（如 command="cargo", args=["build"]）。**不支持** shell 语法（管道 |、重定向 >、&&、|| 等），也不支持 sh -c。每个调用只能执行一个命令。
 - batch_read_files: 批量读取多个文件（支持 glob 模式，自动生成摘要，适合代码审查等需要读取大量文件的场景）
 - restart: 修改源代码后自动运行 cargo build 并重启（仅在 dev-assistant-rs 项目自身上可用），验证修改是否编译通过
@@ -124,6 +125,7 @@ mod tests {
         assert!(prompt.contains("/quit"), "missing /quit rule");
         assert!(prompt.contains("绝不读取 target/"), "missing build-dir guard");
         assert!(prompt.contains("rm -rf, sudo"), "missing dangerous-ops caution");
+        assert!(prompt.contains("spawn_subagent"), "missing spawn_subagent tool description");
     }
 
     #[test]

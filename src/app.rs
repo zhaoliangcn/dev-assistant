@@ -77,7 +77,7 @@ impl App {
             !config.no_approval,
         ));
         let tools = ToolRegistry::new(config.working_dir.clone(), security);
-        let llm_client = LlmClient::from_configs(provider_configs)?;
+        let llm_client = Arc::new(LlmClient::from_configs(provider_configs)?);
 
         // 发现项目技能
         let skills_dir = default_skills_dir(&config.working_dir);

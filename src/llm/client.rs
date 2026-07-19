@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::time::Duration;
 
 use rand::RngExt;
@@ -11,12 +12,15 @@ use crate::utils::error::AppError;
 const MAX_RETRIES: u32 = 5;
 const BASE_DELAY_MS: u64 = 1000;
 
-/// 多 provider 容器，支持运行时切换模型
+/// 多 provider 容器，支持运行时切换模型。
+///
+/// `active_idx` 使用 `Mutex` 内部可变性，使得 `&self` 即可切换模型。
+/// 这允许通过 `Arc<LlmClient>` 在多个子 Agent 间共享同一个 LLM 客户端。
 pub struct LlmClient {
     http_client: Client,
     providers: Vec<Box<dyn LlmProvider>>,
     provider_configs: Vec<ProviderConfig>,
-    active_idx: usize,
+    active_idx: Mutex<usize>,
 }
 
 impl LlmClient {
@@ -44,7 +48,7 @@ impl LlmClient {
             http_client,
             providers,
             provider_configs,
-            active_idx: 0,
+            active_idx: Mutex::new(0),
         })
     }
 
@@ -64,19 +68,20 @@ impl LlmClient {
     }
 
     /// 切换到指定名称的模型
-    pub fn switch_model(&mut self, name: &str) -> Result<(), AppError> {
+    pub fn switch_model(&self, name: &str) -> Result<(), AppError> {
         let idx = self
             .provider_configs
             .iter()
             .position(|c| c.name == name)
             .ok_or_else(|| AppError::Config(format!("Unknown model: '{}'", name)))?;
-        self.active_idx = idx;
+        *self.active_idx.lock().unwrap() = idx;
         Ok(())
     }
 
     /// 当前活跃模型名称
     pub fn active_model(&self) -> &str {
-        &self.provider_configs[self.active_idx].name
+        let idx = *self.active_idx.lock().unwrap();
+        &self.provider_configs[idx].name
     }
 
     /// 列出所有可用模型名称
@@ -89,8 +94,9 @@ impl LlmClient {
         messages: Vec<LlmMessage>,
         tools: Vec<ToolSchema>,
     ) -> Result<LlmResponse, AppError> {
-        let cfg = &self.provider_configs[self.active_idx];
-        let provider = &self.providers[self.active_idx];
+        let active_idx = *self.active_idx.lock().unwrap();
+        let cfg = &self.provider_configs[active_idx];
+        let provider = &self.providers[active_idx];
 
         debug!(model = %cfg.name, provider = %cfg.provider, "Calling LLM API");
 

@@ -13,6 +13,7 @@ use crate::utils::error::AppError;
 pub mod file;
 pub mod meta_tools;
 pub mod spec;
+pub mod subagent;
 pub mod system_tools;
 
 pub type ToolHandler =
@@ -86,6 +87,7 @@ impl ToolRegistry {
         self.register(system_tools::exec_command_tool());
         self.register(meta_tools::finish_tool());
         self.register(meta_tools::restart_tool());
+        self.register(subagent::spawn_subagent_tool());
     }
 
     fn register(&mut self, tool: ToolDefinition) {
@@ -165,6 +167,32 @@ impl ToolRegistry {
     pub fn execute_approved(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
         debug!(tool = name, "Executing approved tool (security check bypassed)");
         self.execute_tool(name, arguments)
+    }
+
+    /// 创建子 Agent 的受限工具注册中心。
+    ///
+    /// 子 Agent 不应拥有以下工具：
+    /// - `spawn_subagent`（防止无限递归）
+    /// - `restart`（重启整个进程）
+    /// 子 Agent 拥有基本的文件操作工具和 `finish`。
+    pub fn new_subagent_registry(&self) -> Self {
+        let mut registry = Self {
+            tools: HashMap::new(),
+            working_dir: self.working_dir.clone(),
+            security: self.security.clone(),
+            schema_tokens: Cell::new(0),
+        };
+        // 子 Agent 只能使用文件工具、系统工具和 finish
+        registry.register(file::read_file_tool());
+        registry.register(file::batch_read_files_tool());
+        registry.register(file::write_file_tool());
+        registry.register(file::edit_file_tool());
+        registry.register(file::glob_tool());
+        registry.register(file::list_directory_tool());
+        registry.register(file::file_exists_tool());
+        registry.register(system_tools::exec_command_tool());
+        registry.register(meta_tools::finish_tool());
+        registry
     }
 
     /// 根据工具的 `skip_security` 标记决定走 `execute`（带安全评估）还是 `execute_approved`（跳过）。

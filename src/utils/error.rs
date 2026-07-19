@@ -26,6 +26,8 @@ pub enum AppError {
     Security(String),
     #[error("Invalid config: {0}")]
     Config(String),
+    #[error("Subagent depth limit exceeded (max depth: {0})")]
+    SubagentDepthLimit(usize),
 }
 
 impl AppError {

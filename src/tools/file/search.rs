@@ -159,7 +159,10 @@ fn list_directory_handler(args: &ToolArgs, context: &ToolContext) -> Result<Tool
     for entry in read_dir {
         let entry = entry?;
         let path = entry.path();
-        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+        let file_name = match path.file_name() {
+            Some(name) => name.to_string_lossy().to_string(),
+            None => continue,
+        };
 
         if path.is_dir() {
             entries.push(format!("📁 {}", file_name));

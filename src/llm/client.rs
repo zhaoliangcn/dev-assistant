@@ -29,7 +29,7 @@ impl LlmClient {
         let http_client = Client::builder()
             .timeout(Duration::from_secs(120))
             .build()
-            .expect("reqwest client builder should not fail with valid config");
+            .map_err(|e| AppError::Config(format!("Failed to create HTTP client: {}", e)))?;
 
         let mut providers: Vec<Box<dyn LlmProvider>> = Vec::new();
         let mut provider_configs: Vec<ProviderConfig> = Vec::new();

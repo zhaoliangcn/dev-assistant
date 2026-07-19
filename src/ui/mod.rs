@@ -1,5 +1,5 @@
-pub mod message_output;
-pub use message_output::{CliMessageOutput, UIMessageOutput};
+pub mod output_impls;
+pub use output_impls::{CliMessageOutput, UIMessageOutput};
 
 use std::io::{self, Write};
 use unicode_width::UnicodeWidthStr;

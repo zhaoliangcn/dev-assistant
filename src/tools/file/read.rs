@@ -33,6 +33,7 @@ pub fn read_file_tool() -> ToolDefinition {
             },
             "required": ["file_path"]
         }),
+        skip_security: false,
         handler: Box::new(read_file_handler),
     }
 }
@@ -64,6 +65,7 @@ pub fn batch_read_files_tool() -> ToolDefinition {
             },
             "required": ["files"]
         }),
+        skip_security: false,
         handler: Box::new(batch_read_files_handler),
     }
 }

@@ -42,7 +42,7 @@ pub enum AgentStep {
 // ---------------------------------------------------------------------------
 
 pub struct Agent {
-    pub context: ContextManager,
+    context: ContextManager,
     tools: ToolRegistry,
     llm: LlmClient,
     max_iterations: usize,
@@ -64,6 +64,76 @@ impl Agent {
             max_iterations: config.max_iterations,
             skills,
         }
+    }
+
+    // ----- UI 展示缓冲区委托 -----
+
+    pub fn add_display_message(&mut self, level: crate::utils::message_level::MessageLevel, msg: &str) {
+        self.context.add_display_message(level, msg);
+    }
+
+    pub fn get_display_messages(&self) -> Vec<(String, String)> {
+        self.context.get_display_messages()
+    }
+
+    /// UI 渲染所需的瞬时展示消息列表（不参与 LLM 上下文）。
+    pub fn display_messages(&self) -> &[(String, String)] {
+        &self.context.display.messages
+    }
+
+    /// 清空所有展示消息，保留 `history_start`。
+    ///
+    /// 当前 REPL 流程使用 [`reset_display_for_new_turn`] / [`clear_display_to`]，
+    /// 此方法保留为未来外部独立清空展示缓冲区的扩展点。
+    #[allow(dead_code)]
+    pub fn clear_display_messages(&mut self) {
+        self.context.display.clear_messages();
+    }
+
+    /// 重置展示缓冲区到新的 turn 起点：清空消息并把 `history_start` 推到当前 history 末尾。
+    pub fn reset_display_for_new_turn(&mut self) {
+        self.context.display.messages.clear();
+        self.context.display.history_start = self.context.history.len();
+    }
+
+    /// 清空展示消息并把 `history_start` 推到指定位置（`/clear` 命令使用）。
+    pub fn clear_display_to(&mut self, history_start: usize) {
+        self.context.display.clear_messages();
+        self.context.display.history_start = history_start;
+    }
+
+    // ----- 对话历史委托 -----
+
+    pub fn history_len(&self) -> usize {
+        self.context.history.len()
+    }
+
+    pub fn add_message(
+        &mut self,
+        role: crate::agent::context::Role,
+        content: String,
+        tool_calls: Option<Vec<crate::llm::ToolCall>>,
+        tool_call_id: Option<String>,
+    ) {
+        self.context.add_message(role, content, tool_calls, tool_call_id);
+    }
+
+    // ----- 状态持久化委托 -----
+
+    pub fn save_state(&self, path: &std::path::Path) -> Result<(), AppError> {
+        self.context.save_state(path)
+    }
+
+    // ----- 活跃模型管理 -----
+
+    /// 设置当前活跃模型名称（用于切换模型后持久化）。
+    pub fn set_active_model(&mut self, name: String) {
+        self.context.active_model = Some(name);
+    }
+
+    /// 获取当前活跃模型名称（用于切换模型后持久化）。
+    pub fn active_model_name(&self) -> Option<&str> {
+        self.context.active_model.as_deref()
     }
 
     /// 开始一轮新的对话，处理用户消息并匹配技能。
@@ -195,26 +265,9 @@ impl Agent {
             output.info(&format!("执行工具: {} (id: {})", tool_call.function.name, tool_call.id));
             debug!(tool = %tool_call.function.name, args = %tool_call.function.arguments, "Tool arguments");
 
-            // For finish, execute directly without security check
-            if tool_call.function.name == "finish" {
-                let result = match self.tools.execute_approved(
-                    &tool_call.function.name,
-                    tool_call.function.arguments.clone(),
-                ) {
-                    Ok(r) => r,
-                    Err(e) => ToolResult {
-                        success: false,
-                        content: format!("[error] Tool '{}' execution failed: {}", tool_call.function.name, e),
-                        security_evaluation: None,
-                        restart_requested: false,
-                    },
-                };
-                output.success(&format!("工具 {} 执行成功", tool_call.function.name));
-                results.push(result);
-                continue;
-            }
-
-            let result = match self.tools.execute(
+            // 根据工具的 skip_security 标记决定走 execute_approved 还是 execute。
+            // finish/restart 等元工具在 ToolDefinition 中标了 skip_security: true。
+            let result = match self.tools.execute_with_policy(
                 &tool_call.function.name,
                 tool_call.function.arguments.clone(),
             ) {

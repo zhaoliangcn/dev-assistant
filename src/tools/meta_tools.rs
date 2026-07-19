@@ -19,6 +19,7 @@ pub fn finish_tool() -> ToolDefinition {
             },
             "required": ["summary"]
         }),
+        skip_security: true,
         handler: Box::new(finish_handler),
     }
 }
@@ -49,6 +50,7 @@ pub fn restart_tool() -> ToolDefinition {
                 }
             }
         }),
+        skip_security: true,
         handler: Box::new(restart_handler),
     }
 }

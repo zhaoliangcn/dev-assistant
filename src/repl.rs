@@ -42,8 +42,7 @@ pub fn handle_slash(
     }
 
     if input == "/clear" {
-        agent.context.display.clear_messages();
-        agent.context.display.history_start = agent.context.history.len();
+        agent.clear_display_to(agent.history_len());
         return Some(SlashOutcome::Continue);
     }
 
@@ -65,13 +64,13 @@ fn handle_model_command(
         // 列出所有模型，标记当前活跃模型
         let active = agent.active_model().to_string();
         let models: Vec<String> = agent.list_models().into_iter().map(|s| s.to_string()).collect();
-        agent.context.add_display_message(
+        agent.add_display_message(
             MessageLevel::Info,
             "可用模型:",
         );
         for m in &models {
             let marker = if m.as_str() == active.as_str() { "→" } else { " " };
-            agent.context.add_display_message(
+            agent.add_display_message(
                 MessageLevel::Info,
                 &format!("{} {}", marker, m),
             );
@@ -83,17 +82,17 @@ fn handle_model_command(
     let model_name = parts[1];
     match agent.switch_model(model_name) {
         Ok(()) => {
-            agent.context.add_display_message(
+            agent.add_display_message(
                 MessageLevel::Success,
                 &format!("切换到模型: {}", model_name),
             );
-            agent.context.active_model = Some(model_name.to_string());
+            agent.set_active_model(model_name.to_string());
             // 立即保存状态
             let state_path = working_dir.join(STATE_FILE);
-            let _ = agent.context.save_state(&state_path);
+            let _ = agent.save_state(&state_path);
         }
         Err(e) => {
-            agent.context.add_display_message(
+            agent.add_display_message(
                 MessageLevel::Error,
                 &format!("切换失败: {}", e),
             );
@@ -115,9 +114,7 @@ pub async fn process_user_message(
 ) -> Result<ReplAction, AppError> {
     // Clear stale display messages from previous turn so they
     // don't accumulate and stack on each render.
-    agent.context.display.messages.clear();
-    // 记录当前 history 位置，get_display_messages 只显示此后的消息
-    agent.context.display.history_start = agent.context.history.len();
+    agent.reset_display_for_new_turn();
 
     // Clear the screen before agent execution so that any tracing
     // logs (which go to stderr) don't appear inside the split-pane UI.
@@ -136,18 +133,18 @@ pub async fn process_user_message(
         for (level, msg) in output.drain() {
             let label = level.label();
             session_log.log_status(label, &msg);
-            agent.context.add_display_message(level, &msg);
+            agent.add_display_message(level, &msg);
         }
-        let messages = agent.context.get_display_messages();
-        ui::render(&messages, &agent.context.display.messages, None, verbose)?;
+        let messages = agent.get_display_messages();
+        ui::render(&messages, &agent.display_messages(), None, verbose)?;
 
         // Show "thinking" indicator in the input area so it doesn't
         // get drowned out by subsequent messages in the message panel.
         session_log.log_thinking();
-        let messages = agent.context.get_display_messages();
+        let messages = agent.get_display_messages();
         ui::render(
             &messages,
-            &agent.context.display.messages,
+            &agent.display_messages(),
             Some("⏳ LLM 正在思考，请稍候..."),
             verbose,
         )?;
@@ -177,14 +174,14 @@ pub async fn process_user_message(
     for (level, msg) in output.drain() {
         let label = level.label();
         session_log.log_status(label, &msg);
-        agent.context.add_display_message(level, &msg);
+        agent.add_display_message(level, &msg);
     }
 
     // 处理用户中断的情况：回到输入提示，不处理结果
     let result = match result {
         Some(r) => r,
         None => {
-            agent.context.add_display_message(
+            agent.add_display_message(
                 MessageLevel::Warning,
                 "⏹ 操作已取消",
             );
@@ -194,7 +191,7 @@ pub async fn process_user_message(
 
     // Add result to conversation history so it appears at the end
     // of the message list, not just as a status message at the top.
-    agent.context.add_message(
+    agent.add_message(
         crate::agent::context::Role::Assistant,
         result.message.clone(),
         None,
@@ -223,22 +220,22 @@ pub fn handle_restart(
     use crate::restart::perform_restart;
 
     let state_path = working_dir.join(STATE_FILE);
-    if let Err(e) = agent.context.save_state(&state_path) {
-        agent.context.add_display_message(
+    if let Err(e) = agent.save_state(&state_path) {
+        agent.add_display_message(
             MessageLevel::Error,
             &format!("保存状态失败: {}。未重启。", e),
         );
-        let messages = agent.context.get_display_messages();
-        ui::render(&messages, &agent.context.display.messages, None, verbose)?;
+        let messages = agent.get_display_messages();
+        ui::render(&messages, &agent.display_messages(), None, verbose)?;
         return Ok(ReplAction::Quit);
     }
 
-    agent.context.add_display_message(
+    agent.add_display_message(
         MessageLevel::Info,
         "正在运行 cargo build...",
     );
-    let messages = agent.context.get_display_messages();
-    ui::render(&messages, &agent.context.display.messages, None, verbose)?;
+    let messages = agent.get_display_messages();
+    ui::render(&messages, &agent.display_messages(), None, verbose)?;
     std::io::stdout().flush().ok();
 
     // perform_restart 会在成功时 exec() 替换进程，永远不会返回；
@@ -247,13 +244,13 @@ pub fn handle_restart(
         working_dir,
         restart_args,
         &mut |level, msg: String| {
-            agent.context.add_display_message(level, &msg);
+            agent.add_display_message(level, &msg);
         },
     );
 
     if should_continue {
-        let messages = agent.context.get_display_messages();
-        ui::render(&messages, &agent.context.display.messages, None, verbose)?;
+        let messages = agent.get_display_messages();
+        ui::render(&messages, &agent.display_messages(), None, verbose)?;
         Ok(ReplAction::Continue)
     } else {
         Ok(ReplAction::Quit)

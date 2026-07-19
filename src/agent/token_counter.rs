@@ -44,3 +44,69 @@ impl TokenCounter {
             .sum()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::LlmMessage;
+
+    #[test]
+    fn empty_string_returns_min_one() {
+        // 至少返回 1，避免 0 token 的除零场景
+        assert_eq!(TokenCounter::estimate(""), 1);
+    }
+
+    #[test]
+    fn ascii_words_use_075_ratio() {
+        // "hello world": 2 words × 5 chars/word × 0.75 = ceil(3.75) × 2 ≈ 8 tokens
+        let tokens = TokenCounter::estimate("hello world");
+        assert!(tokens >= 5 && tokens <= 8, "expected ~6 tokens, got {}", tokens);
+    }
+
+    #[test]
+    fn cjk_chars_use_2_ratio() {
+        // 4 CJK chars × 2 = 8 tokens（每个汉字当 1 word）
+        let tokens = TokenCounter::estimate("你好世界");
+        assert_eq!(tokens, 8);
+    }
+
+    #[test]
+    fn mixed_cjk_ascii_sums_separately() {
+        // CJK 部分按 2/字符，ASCII 部分按 0.75/字符
+        let tokens = TokenCounter::estimate("Hello 世界");
+        assert!(tokens > 4, "mixed text should have more tokens than pure ascii, got {}", tokens);
+    }
+
+    #[test]
+    fn estimate_messages_sums_all() {
+        let msgs = vec![
+            LlmMessage {
+                role: "user".to_string(),
+                content: Some("Hello".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            LlmMessage {
+                role: "assistant".to_string(),
+                content: Some("World".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
+        let total = TokenCounter::estimate_messages(&msgs);
+        let sum = TokenCounter::estimate("Hello") + TokenCounter::estimate("World");
+        assert_eq!(total, sum);
+    }
+
+    #[test]
+    fn estimate_messages_handles_none_content() {
+        let msgs = vec![LlmMessage {
+            role: "assistant".to_string(),
+            content: None, // tool_calls-only message
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+        // None content 通过 unwrap_or("") 得到空字符串，estimate("") 返回 .max(1) = 1
+        assert_eq!(TokenCounter::estimate_messages(&msgs), 1);
+    }
+}

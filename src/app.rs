@@ -104,7 +104,7 @@ impl App {
         let mut agent = Agent::new(context, tools, llm_client, agent_config, discovered_skills.clone());
 
         // 恢复持久化的活跃模型
-        let saved_model = agent.context.active_model.clone();
+        let saved_model = agent.active_model_name().map(String::from);
         if let Some(ref model_name) = saved_model {
             if let Err(e) = agent.switch_model(model_name) {
                 tracing::info!(model = %model_name, error = %e, "Failed to restore saved model, using default");
@@ -222,8 +222,8 @@ impl App {
 
         loop {
             // Render the split-pane UI: messages on top, input at bottom
-            let messages = self.agent.context.get_display_messages();
-            ui::render(&messages, &self.agent.context.display.messages, None, verbose)?;
+            let messages = self.agent.get_display_messages();
+            ui::render(&messages, &self.agent.display_messages(), None, verbose)?;
 
             let mut input = String::new();
             let bytes_read = std::io::stdin()
@@ -243,8 +243,8 @@ impl App {
                 match handle_slash(&input, &mut self.agent, &working_dir) {
                     Some(SlashOutcome::Quit) => break,
                     Some(SlashOutcome::Continue) => {
-                        let messages = self.agent.context.get_display_messages();
-                        ui::render(&messages, &self.agent.context.display.messages, None, verbose)?;
+                        let messages = self.agent.get_display_messages();
+                        ui::render(&messages, &self.agent.display_messages(), None, verbose)?;
                         continue;
                     }
                     None => {}

@@ -25,6 +25,7 @@ pub fn exec_command_tool() -> ToolDefinition {
             },
             "required": ["command"]
         }),
+        skip_security: false,
         handler: Box::new(exec_command_handler),
     }
 }

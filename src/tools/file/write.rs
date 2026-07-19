@@ -24,6 +24,7 @@ pub fn write_file_tool() -> ToolDefinition {
             },
             "required": ["file_path", "content"]
         }),
+        skip_security: false,
         handler: Box::new(write_file_handler),
     }
 }
@@ -50,6 +51,7 @@ pub fn edit_file_tool() -> ToolDefinition {
             },
             "required": ["file_path", "old_content", "new_content"]
         }),
+        skip_security: false,
         handler: Box::new(edit_file_handler),
     }
 }

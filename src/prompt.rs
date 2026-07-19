@@ -70,3 +70,90 @@ fn format_tool_descriptions(tool_schemas: &[ToolSchema]) -> String {
     }
     buf
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::{ToolFunctionSchema, ToolSchema};
+    use crate::skills::{Skill, SkillMetadata};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn tool_schema(name: &str, desc: &str) -> ToolSchema {
+        ToolSchema {
+            tool_type: "function".to_string(),
+            function: ToolFunctionSchema {
+                name: name.to_string(),
+                description: desc.to_string(),
+                parameters: serde_json::json!({}),
+            },
+        }
+    }
+
+    fn skill_named(name: &str) -> Skill {
+        Skill {
+            meta: SkillMetadata {
+                name: name.to_string(),
+                description: "test".to_string(),
+                when_to_use: None,
+                metadata: HashMap::new(),
+            },
+            body: String::new(),
+            source_path: PathBuf::new(),
+        }
+    }
+
+    #[test]
+    fn build_prompt_includes_tool_descriptions() {
+        let schemas = vec![
+            tool_schema("read_file", "Read a file"),
+            tool_schema("write_file", "Write a file"),
+        ];
+        let prompt = build_system_prompt(&schemas, &[]);
+
+        assert!(prompt.contains("- read_file: Read a file"), "missing read_file entry");
+        assert!(prompt.contains("- write_file: Write a file"), "missing write_file entry");
+    }
+
+    #[test]
+    fn build_prompt_includes_core_rules() {
+        let prompt = build_system_prompt(&[], &[]);
+
+        // 固定行为规则不应漏
+        assert!(prompt.contains("finish"), "missing finish rule");
+        assert!(prompt.contains("/quit"), "missing /quit rule");
+        assert!(prompt.contains("绝不读取 target/"), "missing build-dir guard");
+        assert!(prompt.contains("rm -rf, sudo"), "missing dangerous-ops caution");
+    }
+
+    #[test]
+    fn build_prompt_with_no_tools_still_valid() {
+        // 空工具列表不应 panic，且仍含规则段
+        let prompt = build_system_prompt(&[], &[]);
+        assert!(prompt.contains("规则："));
+        assert!(prompt.contains("你是一个软件工程师助手"));
+    }
+
+    #[test]
+    fn build_prompt_includes_skills_section() {
+        let skills = vec![skill_named("code-review")];
+        let prompt = build_system_prompt(&[], &skills);
+
+        assert!(prompt.contains("code-review"), "missing skill name in prompt");
+    }
+
+    #[test]
+    fn format_tool_descriptions_each_on_its_own_line() {
+        let schemas = vec![
+            tool_schema("a", "desc a"),
+            tool_schema("b", "desc b"),
+            tool_schema("c", "desc c"),
+        ];
+        let desc = format_tool_descriptions(&schemas);
+        let lines: Vec<&str> = desc.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 3, "expected 3 lines, got {}: {:?}", lines.len(), lines);
+        assert!(lines[0].starts_with("- a:"));
+        assert!(lines[1].starts_with("- b:"));
+        assert!(lines[2].starts_with("- c:"));
+    }
+}

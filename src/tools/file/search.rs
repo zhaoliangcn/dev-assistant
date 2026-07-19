@@ -24,6 +24,7 @@ pub fn glob_tool() -> ToolDefinition {
             },
             "required": ["pattern"]
         }),
+        skip_security: false,
         handler: Box::new(glob_handler),
     }
 }
@@ -41,6 +42,7 @@ pub fn list_directory_tool() -> ToolDefinition {
                 }
             }
         }),
+        skip_security: false,
         handler: Box::new(list_directory_handler),
     }
 }
@@ -59,6 +61,7 @@ pub fn file_exists_tool() -> ToolDefinition {
             },
             "required": ["file_path"]
         }),
+        skip_security: false,
         handler: Box::new(file_exists_handler),
     }
 }

@@ -30,13 +30,25 @@ pub struct ToolDefinition {
     pub name: String,
     pub description: String,
     pub parameters: Value,
+    /// true 表示跳过安全评估直接执行（用于 finish/restart 等元工具）。
+    pub skip_security: bool,
     handler: Box<ToolHandler>,
 }
 
+/// 工具调用的参数容器。
+///
+/// 当前只包装了 `arguments: Value`，但保留为新参数类型（如 `timeout`、
+/// `redacted_fields` 等）的扩展点，避免未来要在 handler 签名里加参数时
+/// 破坏所有 handler。
 pub struct ToolArgs {
     pub arguments: Value,
 }
 
+/// 工具执行的上下文容器。
+///
+/// 当前只包装了 `working_dir`，但保留为未来扩展点（如执行超时、环境变量
+/// 覆盖、调用方身份等）。把它简化为裸 `PathBuf` 会让这些扩展都要改 handler
+/// 签名。
 pub struct ToolContext {
     pub working_dir: PathBuf,
 }
@@ -139,6 +151,21 @@ impl ToolRegistry {
     pub fn execute_approved(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
         debug!(tool = name, "Executing approved tool (security check bypassed)");
         self.execute_tool(name, arguments)
+    }
+
+    /// 根据工具的 `skip_security` 标记决定走 `execute`（带安全评估）还是 `execute_approved`（跳过）。
+    ///
+    /// 这是给 Agent 层的统一入口，避免调用方根据工具名硬编码分流。
+    pub fn execute_with_policy(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
+        let skip = self
+            .get_tool(name)
+            .map(|t| t.skip_security)
+            .unwrap_or(false);
+        if skip {
+            self.execute_approved(name, arguments)
+        } else {
+            self.execute(name, arguments)
+        }
     }
 
     /// Internal method that executes the tool handler without security checks.

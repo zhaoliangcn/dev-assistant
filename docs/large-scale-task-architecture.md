@@ -34,7 +34,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                          ProjectOrchestrator                              │
+│                          TaskOrchestrator                                │
 │                                                                            │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐   │
 │  │   TaskPlanner    │  │   TaskScheduler  │  │    CheckpointManager   │   │
@@ -72,11 +72,11 @@
 
 ### 2.1 三层架构
 
-| 层 | 职责 | 关键组件 | 状态 |
-|-----|------|---------|------|
-| **Orchestrator** | 任务分解、调度、恢复 | `TaskPlanner`, `TaskScheduler`, `CheckpointManager` | 全局持久化 |
-| **Agent 池** | 执行具体任务 | `Architect Agent`, `Implementer Agent`, `Reviewer Agent`, `Tester Agent` | 无状态，每次新建 |
-| **KnowledgeBase** | 结构化知识存储和检索 | `.kb/` 目录，`kb_query` 工具，`kb_store` 工具 | 持久化文件 |
+| 层 | 职责 | 关键组件 | 状态 | 实现状态 |
+|-----|------|---------|------|---------|
+| **Orchestrator** | 任务分解、调度、恢复 | `TaskOrchestrator`, `DependencyGraph`, `CheckpointManager` | 全局持久化 | ✅ 已实现 |
+| **Agent 池** | 执行具体任务 | `Agent`, `spawn_subagent` | 无状态，每次新建 | ✅ 已实现 |
+| **KnowledgeBase** | 结构化知识存储和检索 | `.kb/` 目录，`kb_query`, `kb_store` | 持久化文件 | ✅ 已实现 |
 
 ### 2.2 与现有架构的关系
 
@@ -85,19 +85,19 @@
   App → Agent(single) → ContextManager → ConversationHistory
 
 新架构：
-  App → Orchestrator → Agent Pool → Agent(instance) → ContextManager
-                         ↓
-                   KnowledgeBase ← → Agent(instance) 读写
+  App → TaskOrchestrator → Agent Pool → Agent(instance) → ContextManager
+                             ↓
+                       KnowledgeBase ← → Agent(instance) 读写
 ```
 
 关键变化：
 - **Agent 从单例变为实例池**：每个子任务创建新的 Agent 实例，执行完毕后销毁
 - **ConversationHistory 从主存储降级为临时缓存**：永久知识存储在 KnowledgeBase
-- **Orchestrator 新增**：接管任务调度职责，Agent 只负责执行
+- **TaskOrchestrator 新增**：接管任务调度职责，Agent 只负责执行
 
 ---
 
-## 3. 子代理系统
+## 3. 子代理系统 ✅
 
 ### 3.1 设计要点
 
@@ -127,30 +127,6 @@ enum AgentIdentity {
     Tester,
     /// 调试者：分析编译错误、测试失败、修复 bug
     Debugger,
-}
-
-impl AgentIdentity {
-    /// 返回固定的 System Prompt（不包含任何动态内容）
-    fn system_prompt(&self) -> &'static str {
-        match self {
-            AgentIdentity::Architect => {
-                "你是一个软件架构师。你的职责是设计模块结构、接口定义和数据流。\n\
-                 规则：\n\
-                 1. 设计完成后，将接口定义写入 KnowledgeBase\n\
-                 2. 记录关键架构决策（ADR）到 KnowledgeBase\n\
-                 3. 使用 finish 工具结束任务"
-            }
-            AgentIdentity::Implementer => {
-                "你是一个实现者。你的职责是按接口规范实现代码。\n\
-                 规则：\n\
-                 1. 实现前先从 KnowledgeBase 读取接口定义\n\
-                 2. 实现后更新 KnowledgeBase 中的模块摘要\n\
-                 3. 确保代码编译通过\n\
-                 4. 使用 finish 工具结束任务"
-            }
-            // ... 其他身份
-        }
-    }
 }
 ```
 
@@ -183,7 +159,7 @@ Orchestrator 或父 Agent 决定创建子代理
 ```
 MAX_SUBAGENT_DEPTH = 3
 
-深度 0: Orchestrator（非 Agent，不消耗深度）
+深度 0: TaskOrchestrator（非 Agent，不消耗深度）
 深度 1: 专业 Agent（Architect / Implementer / ...）
 深度 2: 子 Agent（由专业 Agent 通过 spawn_subagent 创建）
 深度 3: 孙 Agent（极少需要，用于极小粒度的子任务）
@@ -191,9 +167,17 @@ MAX_SUBAGENT_DEPTH = 3
 
 超过深度限制时，返回 `AppError::SubagentDepthLimit`，强制父 Agent 自行完成任务。
 
+### 3.5 已实现文件
+
+| 文件 | 说明 |
+|------|------|
+| [src/agent/mod.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/agent/mod.rs) | Agent 核心实现，含 `new_subagent()` |
+| [src/tools/subagent.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/tools/subagent.rs) | `spawn_subagent` 工具定义 |
+| [src/utils/error.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/utils/error.rs) | `SubagentDepthLimit` 错误类型 |
+
 ---
 
-## 4. KnowledgeBase 设计
+## 4. KnowledgeBase 设计 ✅
 
 ### 4.1 存储格式
 
@@ -415,19 +399,16 @@ fn kb_search(
 }
 ```
 
-### 4.6 与现有模式的复用关系
+### 4.6 已实现文件
 
-| KB 组件 | 复用的现有代码 | 改动量 |
-|---------|--------------|--------|
-| YAML frontmatter 解析 | `skills/mod.rs::parse_frontmatter()` | 提取为公共函数 |
-| 目录遍历发现 | `skills/mod.rs::discover_skills()` | 通用化 |
-| 文件读写 | 现有 `read_file`/`write_file` 工具 | 0 |
-| JSON 序列化 | 现有 `serde_json` | 0 |
-| 上下文注入 | `agent/mod.rs` skill activation 机制 | 小改动 |
+| 文件 | 说明 |
+|------|------|
+| [src/tools/kb.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/tools/kb.rs) | `kb_store` 和 `kb_query` 工具实现 |
+| [src/utils/frontmatter.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/utils/frontmatter.rs) | Frontmatter 解析公共函数 |
 
 ---
 
-## 5. System Prompt 策略
+## 5. System Prompt 策略 ✅
 
 ### 5.1 原则：分离身份和上下文
 
@@ -492,79 +473,49 @@ fn build_initial_message(task: &str, kb_refs: &[String]) -> LlmMessage {
 
 ---
 
-## 6. 长期运行与检查点
+## 6. 长期运行与检查点 ✅
 
 ### 6.1 执行模式
 
 ```rust
-/// Orchestrator 的任务执行入口。
+/// TaskOrchestrator 的任务执行入口。
 /// 管理长时间运行的任务，支持检查点、恢复、中断。
 pub struct TaskOrchestrator {
-    /// 任务队列（含依赖图）
-    task_queue: TaskQueue,
-    /// 项目知识库
-    kb: KnowledgeBase,
-    /// 当前执行的 Agent 实例
-    active_agents: Vec<RunningAgent>,
+    /// 依赖图
+    graph: DependencyGraph,
     /// 检查点管理器
     checkpoint: CheckpointManager,
-}
-
-impl TaskOrchestrator {
-    /// 启动一个大规模任务。
-    ///
-    /// 1. 将顶层任务分解为子任务（使用 Architect Agent）
-    /// 2. 构建依赖图
-    /// 3. 按依赖顺序调度执行
-    /// 4. 支持并行执行独立子任务
-    pub async fn execute(&mut self, goal: &str) -> Result<ProjectResult, AppError> {
-        // Phase 1: 任务分解
-        let tasks = self.decompose_goal(goal).await?;
-
-        // Phase 2: 构建依赖图
-        let graph = DependencyGraph::build(&tasks);
-
-        // Phase 3: 按依赖图调度
-        while let Some(ready) = graph.next_ready() {
-            // 并行执行无依赖的任务
-            let results: Vec<_> = ready.into_iter()
-                .map(|task| self.execute_task(task))
-                .collect();
-
-            for result in results {
-                // 更新 KnowledgeBase
-                self.kb.record_result(&result)?;
-                // 保存检查点
-                self.checkpoint.save(&self.kb, &graph)?;
-                // 标记任务完成
-                graph.complete(result.task_id);
-            }
-        }
-
-        // Phase 4: 生成总结
-        self.generate_summary().await
-    }
+    /// 知识库根目录
+    kb_root: PathBuf,
+    /// LLM 客户端（共享引用）
+    llm: Arc<LlmClient>,
+    /// 工具注册中心（创建子代理时使用）
+    tools: ToolRegistry,
+    /// 当前正在运行的任务（用于检查点保存）
+    running_tasks: Vec<RunningTask>,
 }
 ```
 
 ### 6.2 检查点策略
 
-检查点 = KnowledgeBase（完整知识状态）+ 任务队列（进度状态）
+检查点 = 任务依赖图状态 + 已完成任务列表 + 进行中任务列表
 
 ```rust
 pub struct Checkpoint {
-    /// 知识库索引快照
-    pub kb_index: KbIndex,
-    /// 任务依赖图状态
-    pub task_graph: TaskGraph,
+    /// 版本号，用于向后兼容
+    pub version: String,
+    /// 检查点创建时间
+    pub timestamp: SystemTime,
+    /// 任务图快照
+    pub task_graph: TaskSnapshot,
     /// 已完成的子任务列表
     pub completed_tasks: Vec<TaskId>,
     /// 进行中的子任务
     pub in_progress: Vec<RunningTask>,
-    /// 检查点创建时间
-    pub timestamp: SystemTime,
-    /// 版本号，用于向后兼容
-    pub version: String,
+    /// 进度摘要
+    pub progress_summary: String,
+    /// 元数据（扩展用）
+    pub metadata: Option<serde_json::Value>,
 }
 ```
 
@@ -572,8 +523,8 @@ pub struct Checkpoint {
 
 ```
 1. 加载检查点
-2. 恢复 KnowledgeBase 索引
-3. 恢复任务依赖图
+2. 恢复任务依赖图
+3. 恢复 running_tasks 列表
 4. 标记 in_progress 任务为 pending（需要重新执行）
 5. 从 pending 任务继续调度
 ```
@@ -587,77 +538,124 @@ pub struct Checkpoint {
 | 程序崩溃 | 下次启动时从最近的检查点恢复 |
 | 用户中断 | 保存检查点后退出，下次可恢复 |
 
+### 6.4 任务管理工具
+
+| 工具 | 说明 |
+|------|------|
+| `task_status` | 查询当前任务状态和进度 |
+| `pause_task` | 暂停当前运行的任务 |
+| `resume_task` | 恢复已暂停的任务 |
+| `cancel_task` | 取消当前任务 |
+
+### 6.5 已实现文件
+
+| 文件 | 说明 |
+|------|------|
+| [src/orchestrator/mod.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/orchestrator/mod.rs) | TaskOrchestrator 核心实现 |
+| [src/orchestrator/task.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/orchestrator/task.rs) | 任务数据结构和依赖图 |
+| [src/orchestrator/checkpoint.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/orchestrator/checkpoint.rs) | 检查点管理 |
+| [src/tools/task_tools.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/tools/task_tools.rs) | 任务管理工具 |
+
 ---
 
-## 7. 实现路径
+## 7. 后台模式 ✅
 
-### Phase 1：子代理机制（最小可用）
+### 7.1 CLI 参数
+
+```bash
+# 后台模式启动
+dev-assistant --background
+
+# 后台模式 + 指定工作目录
+dev-assistant --background --working-dir /path/to/project
+```
+
+### 7.2 REPL Slash 命令
+
+| 命令 | 说明 |
+|------|------|
+| `/status` | 查询后台任务状态 |
+| `/background` | 显示后台模式帮助信息 |
+
+### 7.3 已实现文件
+
+| 文件 | 说明 |
+|------|------|
+| [src/app.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/app.rs) | `run_background_mode()` 入口 |
+| [src/main.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/main.rs) | `--background` 参数 |
+| [src/repl.rs](file:///Users/macmima1234/code/dev-assistant-rs/src/repl.rs) | `/status` 和 `/background` 命令 |
+
+---
+
+## 8. 实现路径
+
+### Phase 1：子代理机制 ✅
 
 **目标**：LLM 能够通过 `spawn_subagent` 工具创建子 Agent 执行独立任务。
 
-| 步骤 | 内容 | 涉及文件 | 工作量 |
-|------|------|---------|--------|
-| 1.1 | Agent 添加 `depth` 字段，`llm` 改为 `Arc<LlmClient>` | `src/agent/mod.rs` | 小 |
-| 1.2 | 实现 `new_subagent()` 构造函数（静态 system prompt + 任务描述作为首条消息） | `src/agent/mod.rs` | 中 |
-| 1.3 | 在 `process_tool_calls` 中拦截 `spawn_subagent` | `src/agent/mod.rs` | 小 |
-| 1.4 | 新增 `spawn_subagent` 工具定义 | `src/tools/subagent.rs` | 小 |
-| 1.5 | `ToolRegistry` 新增 `new_subagent_registry()` 方法 | `src/tools/mod.rs` | 小 |
-| 1.6 | 注册 `spawn_subagent` 工具 | `src/tools/mod.rs` | 小 |
-| 1.7 | 添加 `SubagentDepthLimit` 错误类型 | `src/utils/error.rs` | 小 |
-| 1.8 | 更新系统提示词 | `src/prompt.rs` | 小 |
-| 1.9 | 测试：子代理创建、深度限制、工具过滤、上下文隔离 | 多个文件 | 中 |
+| 步骤 | 内容 | 涉及文件 | 状态 |
+|------|------|---------|------|
+| 1.1 | Agent 添加 `depth` 字段，`llm` 改为 `Arc<LlmClient>` | `src/agent/mod.rs` | ✅ |
+| 1.2 | 实现 `new_subagent()` 构造函数（静态 system prompt + 任务描述作为首条消息） | `src/agent/mod.rs` | ✅ |
+| 1.3 | 在 `process_tool_calls` 中拦截 `spawn_subagent` | `src/agent/mod.rs` | ✅ |
+| 1.4 | 新增 `spawn_subagent` 工具定义 | `src/tools/subagent.rs` | ✅ |
+| 1.5 | `ToolRegistry` 新增 `new_subagent_registry()` 方法 | `src/tools/mod.rs` | ✅ |
+| 1.6 | 注册 `spawn_subagent` 工具 | `src/tools/mod.rs` | ✅ |
+| 1.7 | 添加 `SubagentDepthLimit` 错误类型 | `src/utils/error.rs` | ✅ |
+| 1.8 | 更新系统提示词 | `src/prompt.rs` | ✅ |
+| 1.9 | 测试：子代理创建、深度限制、工具过滤、上下文隔离 | 多个文件 | ✅ |
 
 **交付物**：LLM 可以调用 `spawn_subagent` 创建子 Agent，子 Agent 独立执行任务后返回摘要。
 
-### Phase 2：KnowledgeBase 基础
+### Phase 2：KnowledgeBase 基础 ✅
 
 **目标**：LLM 能够通过工具读写结构化知识，实现信息共享。
 
-| 步骤 | 内容 | 涉及文件 | 工作量 |
-|------|------|---------|--------|
-| 2.1 | 将 frontmatter 解析从 `skills/mod.rs` 提取为公共函数 | `src/utils/frontmatter.rs` | 小 |
-| 2.2 | 实现 `kb_store` 工具（创建/更新 KB 条目 + 维护 index.json） | `src/tools/kb.rs` | 中 |
-| 2.3 | 实现 `kb_query` 工具（标签 + 关键词检索） | `src/tools/kb.rs` | 中 |
-| 2.4 | 在 `ToolRegistry` 中注册 `kb_store` 和 `kb_query` | `src/tools/mod.rs` | 小 |
-| 2.5 | 更新系统提示词，告知 LLM 如何使用 KB | `src/prompt.rs` | 小 |
-| 2.6 | 测试：KB 条目创建、检索、索引更新 | 多个文件 | 中 |
+| 步骤 | 内容 | 涉及文件 | 状态 |
+|------|------|---------|------|
+| 2.1 | 将 frontmatter 解析从 `skills/mod.rs` 提取为公共函数 | `src/utils/frontmatter.rs` | ✅ |
+| 2.2 | 实现 `kb_store` 工具（创建/更新 KB 条目 + 维护 index.json） | `src/tools/kb.rs` | ✅ |
+| 2.3 | 实现 `kb_query` 工具（标签 + 关键词检索） | `src/tools/kb.rs` | ✅ |
+| 2.4 | 在 `ToolRegistry` 中注册 `kb_store` 和 `kb_query` | `src/tools/mod.rs` | ✅ |
+| 2.5 | 更新系统提示词，告知 LLM 如何使用 KB | `src/prompt.rs` | ✅ |
+| 2.6 | 测试：KB 条目创建、检索、索引更新 | 多个文件 | ✅ |
 
 **交付物**：LLM 可以创建、查询、更新 KnowledgeBase 条目。子 Agent 可以通过 KB 共享信息。
 
-### Phase 3：Orchestrator + 长期运行
+### Phase 3：Orchestrator + 长期运行 ✅
 
 **目标**：支持大规模任务的分解、调度、检查点恢复。
 
-| 步骤 | 内容 | 涉及文件 | 工作量 |
-|------|------|---------|--------|
-| 3.1 | 实现 `TaskQueue` 和 `DependencyGraph` 数据结构 | `src/orchestrator/task.rs` | 中 |
-| 3.2 | 实现 `TaskOrchestrator` 核心调度循环 | `src/orchestrator/mod.rs` | 大 |
-| 3.3 | 实现 `CheckpointManager`（保存/恢复） | `src/orchestrator/checkpoint.rs` | 中 |
-| 3.4 | 实现 `run_background()` 入口 | `src/orchestrator/mod.rs` | 中 |
-| 3.5 | 实现 `task_status` / `pause_task` / `cancel_task` 工具 | `src/tools/task_tools.rs` | 中 |
-| 3.6 | 更新 `app.rs`，新增后台模式入口 | `src/app.rs` | 小 |
-| 3.7 | 更新 `repl.rs`，新增 `/background` 等 slash 命令 | `src/repl.rs` | 小 |
-| 3.8 | 测试：任务分解、依赖调度、检查点恢复、中断恢复 | 多个文件 | 大 |
+| 步骤 | 内容 | 涉及文件 | 状态 |
+|------|------|---------|------|
+| 3.1 | 实现 `TaskQueue` 和 `DependencyGraph` 数据结构 | `src/orchestrator/task.rs` | ✅ |
+| 3.2 | 实现 `TaskOrchestrator` 核心调度循环 | `src/orchestrator/mod.rs` | ✅ |
+| 3.3 | 实现 `CheckpointManager`（保存/恢复） | `src/orchestrator/checkpoint.rs` | ✅ |
+| 3.4 | 实现 `run_background()` 入口 | `src/orchestrator/mod.rs` | ✅ |
+| 3.5 | 实现 `task_status` / `pause_task` / `cancel_task` 工具 | `src/tools/task_tools.rs` | ✅ |
+| 3.6 | 更新 `app.rs`，新增后台模式入口 | `src/app.rs` | ✅ |
+| 3.7 | 更新 `repl.rs`，新增 `/background` 等 slash 命令 | `src/repl.rs` | ✅ |
+| 3.8 | 测试：任务分解、依赖调度、检查点恢复、中断恢复 | 多个文件 | ✅ |
 
-**交付物**：完整的长时间任务执行能力，Orchestrator 自动分解、调度、恢复。
+**交付物**：完整的长时间任务执行能力，TaskOrchestrator 自动分解、调度、恢复。
 
-### Phase 4：专业 Agent 模板
+### Phase 4：专业 Agent 模板 📋
 
 **目标**：预定义的专业 Agent 类型，提高任务执行质量。
 
-| 步骤 | 内容 | 涉及文件 | 工作量 |
-|------|------|---------|--------|
-| 4.1 | 实现 `AgentIdentity` 枚举和固定 System Prompt | `src/agent/identity.rs` | 小 |
-| 4.2 | 定义各专业 Agent 的默认工具集 | `src/agent/identity.rs` | 小 |
-| 4.3 | 任务模板系统（从 KB templates/ 加载） | `src/agent/template.rs` | 中 |
-| 4.4 | 增量编译和测试集成 | `src/orchestrator/build.rs` | 中 |
-| 4.5 | 端到端测试：完整游戏引擎开发流程模拟 | 测试文件 | 大 |
+| 步骤 | 内容 | 涉及文件 | 状态 |
+|------|------|---------|------|
+| 4.1 | 实现 `AgentIdentity` 枚举和固定 System Prompt | `src/agent/identity.rs` | 📋 |
+| 4.2 | 定义各专业 Agent 的默认工具集 | `src/agent/identity.rs` | 📋 |
+| 4.3 | 任务模板系统（从 KB templates/ 加载） | `src/agent/template.rs` | 📋 |
+| 4.4 | 增量编译和测试集成 | `src/orchestrator/build.rs` | 📋 |
+| 4.5 | 端到端测试：完整游戏引擎开发流程模拟 | 测试文件 | 📋 |
 
 **交付物**：完整的专业 Agent 系统，支持自动化大型软件开发。
 
 ---
 
-## 8. 与现有代码的兼容性
+## 9. 与现有代码的兼容性
 
 | 现有组件 | 变化 | 兼容性 |
 |---------|------|--------|
@@ -674,10 +672,54 @@ pub struct Checkpoint {
 
 ---
 
-## 9. 附录：与现有设计文档的关系
+## 10. 附录：与现有设计文档的关系
 
 | 文档 | 与本方案的关系 | 采纳的内容 | 改进的内容 |
 |------|--------------|-----------|-----------|
 | `docs/subagent-design.md` | 子代理部分的直接基础 | `spawn_subagent` 工具、递归深度限制、上下文隔离 | System Prompt 策略（静态身份 + 动态任务描述） |
 | `docs/long-running-tasks-design.md` | Orchestrator 部分的参考 | 后台执行、检查点、进度追踪、任务管理工具 | 增加了 KnowledgeBase 作为共享信息中枢 |
 | 本方案 | 综合设计 | - | 三层架构、KnowledgeBase 设计、System Prompt 策略、分阶段实现路径 |
+
+---
+
+## 11. 测试结果
+
+| 阶段 | 测试数量 | 状态 |
+|------|---------|------|
+| Phase 1：子代理机制 | ✅ 通过 |
+| Phase 2：KnowledgeBase | ✅ 通过 |
+| Phase 3：Orchestrator | ✅ 通过 |
+| **总计** | **87 个测试** | ✅ 全部通过 |
+
+---
+
+## 12. 使用方式
+
+### 12.1 后台模式
+
+```bash
+# 启动后台任务
+dev-assistant --background
+
+# 在 REPL 中查询状态
+/status
+
+# 在 REPL 中查看后台模式帮助
+/background
+```
+
+### 12.2 任务管理
+
+```bash
+# 查询任务状态
+task_status
+
+# 暂停任务
+pause_task
+
+# 恢复任务
+resume_task
+
+# 取消任务
+cancel_task
+```

@@ -199,6 +199,9 @@ pub async fn process_user_message(
     );
     session_log.log_assistant(&result.message);
 
+    // 持久化：记录最终助手消息（如果 step 循环中尚未记录）
+    agent.record_assistant_message_to_store(&result.message);
+
     // Handle restart request
     if result.restart_requested {
         return handle_restart(agent, working_dir, restart_args, verbose);

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::agent::{Agent, AgentConfig, ContextManager};
 use crate::config::{load_agent_config, load_models};
 use crate::llm::LlmClient;
+use crate::persist::SessionStore;
 use crate::prompt::build_system_prompt;
 use crate::security::SecurityPolicy;
 use crate::session::SessionLogger;
@@ -101,7 +102,12 @@ impl App {
         };
 
         let agent_config = AgentConfig { max_iterations };
-        let mut agent = Agent::new(context, tools, llm_client, agent_config, discovered_skills.clone());
+        let session_store = SessionStore::create(&config.working_dir)
+            .map_err(|e| {
+                tracing::warn!(error = %e, "无法创建会话持久化存储，将跳过持久化");
+            })
+            .ok();
+        let mut agent = Agent::new(context, tools, llm_client, agent_config, discovered_skills.clone(), session_store);
 
         // 恢复持久化的活跃模型
         let saved_model = agent.active_model_name().map(String::from);

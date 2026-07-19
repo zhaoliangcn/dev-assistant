@@ -1,4 +1,4 @@
-use crate::agent::compressor::ContextCompressor;
+use crate::agent::compressor::{CompressionInfo, ContextCompressor};
 use crate::agent::display::DisplayBuffer;
 use crate::agent::history::ConversationHistory;
 use crate::llm::{LlmMessage, ToolCall};
@@ -161,8 +161,8 @@ impl ContextManager {
     }
 
     /// 压缩上下文：委托给 [`ContextCompressor`]。
-    pub async fn compress(&mut self) -> Result<(), AppError> {
-        ContextCompressor::compress_if_needed(&mut self.history, self.max_tokens)?;
-        Ok(())
+    /// 返回 [`CompressionInfo`] 描述压缩详情。
+    pub fn compress(&mut self) -> Result<CompressionInfo, AppError> {
+        ContextCompressor::compress_if_needed(&mut self.history, self.max_tokens)
     }
 }

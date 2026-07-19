@@ -7,6 +7,7 @@ pub mod token_counter;
 pub use context::ContextManager;
 
 use crate::llm::{LlmClient, LlmResponse, ToolCall};
+use crate::persist::SessionStore;
 use crate::skills::Skill;
 use crate::tools::{ToolRegistry, ToolResult};
 use crate::utils::message_output::MessageOutput;
@@ -47,6 +48,8 @@ pub struct Agent {
     llm: LlmClient,
     max_iterations: usize,
     skills: Vec<Skill>,
+    /// 可选的会话持久化存储。存在时，所有对话事件和工具调用都会被记录。
+    session_store: Option<SessionStore>,
 }
 
 impl Agent {
@@ -56,6 +59,7 @@ impl Agent {
         llm: LlmClient,
         config: AgentConfig,
         skills: Vec<Skill>,
+        session_store: Option<SessionStore>,
     ) -> Self {
         Self {
             context,
@@ -63,6 +67,7 @@ impl Agent {
             llm,
             max_iterations: config.max_iterations,
             skills,
+            session_store,
         }
     }
 
@@ -124,6 +129,13 @@ impl Agent {
         self.context.save_state(path)
     }
 
+    /// 向持久化存储记录一条助手消息（用于 REPL 中追加最终结果）。
+    pub fn record_assistant_message_to_store(&mut self, content: &str) {
+        if let Some(ref mut store) = self.session_store {
+            store.record_assistant_message(content);
+        }
+    }
+
     // ----- 活跃模型管理 -----
 
     /// 设置当前活跃模型名称（用于切换模型后持久化）。
@@ -160,10 +172,19 @@ impl Agent {
                 None,
                 None,
             );
+            // 持久化：记录技能激活消息
+            if let Some(ref mut store) = self.session_store {
+                store.record_system_message(&format!("技能激活: {} — {}", skill_name, skill_desc));
+            }
         }
 
         self.context
-            .add_message(crate::agent::context::Role::User, user_message, None, None);
+            .add_message(crate::agent::context::Role::User, user_message.clone(), None, None);
+
+        // 持久化：记录用户消息
+        if let Some(ref mut store) = self.session_store {
+            store.record_user_message(&user_message);
+        }
     }
 
     /// 执行一轮 Agent 迭代（一次 LLM 调用 + 响应处理）。
@@ -187,6 +208,11 @@ impl Agent {
                 );
                 self.context.increment_no_tool_rounds();
 
+                // 持久化：记录助手文本回复
+                if let Some(ref mut store) = self.session_store {
+                    store.record_assistant_message(&content);
+                }
+
                 // Only return early if LLM has given a substantive response
                 if self.context.get_consecutive_no_tool_rounds() >= 2 {
                     return Ok(AgentStep::Done(AgentResult {
@@ -201,9 +227,30 @@ impl Agent {
                 output.info(&format!("LLM 请求调用 {} 个工具", tool_calls.len()));
                 self.context.reset_no_tool_rounds();
 
+                // 持久化：记录工具调用请求
+                for tc in &tool_calls {
+                    if let Some(ref mut store) = self.session_store {
+                        store.record_tool_call(
+                            &tc.id,
+                            &tc.function.name,
+                            tc.function.arguments.clone(),
+                        );
+                    }
+                }
+
                 let results = self.process_tool_calls(&tool_calls, output)?;
 
                 for (tool_call, result) in tool_calls.iter().zip(results.iter()) {
+                    // 持久化：记录工具执行结果
+                    if let Some(ref mut store) = self.session_store {
+                        store.record_tool_result(
+                            &tool_call.id,
+                            &tool_call.function.name,
+                            result.success,
+                            &result.content,
+                        );
+                    }
+
                     if tool_call.function.name == "finish" {
                         return Ok(AgentStep::Done(AgentResult {
                             success: true,
@@ -224,7 +271,28 @@ impl Agent {
                 }
 
                 // 压缩上下文，防止 token 无限制增长
-                self.context.compress().await?;
+                let compression_info = self.context.compress()?;
+
+                // 持久化：记录压缩事件
+                if compression_info.did_compress {
+                    if let Some(ref mut store) = self.session_store {
+                        store.record_compression(
+                            compression_info.original_messages,
+                            compression_info.after_messages,
+                            compression_info.kept_rounds,
+                            compression_info.original_tokens,
+                            compression_info.after_tokens,
+                        );
+                    }
+                    output.info(&format!(
+                        "上下文压缩: {} → {} 条消息 (保留 {} 轮, {} → {} tokens)",
+                        compression_info.original_messages,
+                        compression_info.after_messages,
+                        compression_info.kept_rounds,
+                        compression_info.original_tokens,
+                        compression_info.after_tokens,
+                    ));
+                }
 
                 Ok(AgentStep::Continue)
             }

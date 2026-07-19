@@ -13,6 +13,7 @@ mod agent;
 mod app;
 mod config;
 mod llm;
+mod persist;
 mod prompt;
 mod repl;
 mod restart;

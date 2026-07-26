@@ -54,6 +54,7 @@ pub async fn write_file_content(path: &Path, content: &str) -> Result<(), std::i
     let mut file = open_file_write(path).await?;
     use tokio::io::AsyncWriteExt;
     file.write_all(content.as_bytes()).await?;
+    file.flush().await?;
     Ok(())
 }
 

@@ -158,7 +158,7 @@ impl PermissionStore {
             scope = entry.scope_id,
             "Permission added"
         );
-        permissions.entry(key).or_insert_with(Vec::new).push(entry);
+        permissions.entry(key).or_default().push(entry);
     }
 
     /// 检查是否存在有效审批

@@ -270,7 +270,7 @@ impl<'a> ArgsDiagnoser<'a> {
 
     /// 检查参数是否存在
     pub fn require(&mut self, name: &str) -> bool {
-        if !self.args.get(name).is_some() {
+        if self.args.get(name).is_none() {
             self.errors.push(DiagnoseError::Missing {
                 name: name.to_string(),
                 suggestion: None,
@@ -283,7 +283,7 @@ impl<'a> ArgsDiagnoser<'a> {
 
     /// 检查参数是否存在，带建议
     pub fn require_with_suggestion(&mut self, name: &str, suggestion: &str) -> bool {
-        if !self.args.get(name).is_some() {
+        if self.args.get(name).is_none() {
             self.errors.push(DiagnoseError::Missing {
                 name: name.to_string(),
                 suggestion: Some(suggestion.to_string()),
@@ -514,8 +514,8 @@ pub fn diagnose_args(args: &serde_json::Value, schema: &serde_json::Value) -> Ve
                         .and_then(|d| d.as_str())
                         .map(|d| format!("参考: {}", d));
                     
-                    if suggestion.is_some() {
-                        diagnoser.require_with_suggestion(name, suggestion.as_ref().unwrap());
+                    if let Some(ref suggestion) = suggestion {
+                        diagnoser.require_with_suggestion(name, suggestion);
                     } else {
                         diagnoser.require(name);
                     }

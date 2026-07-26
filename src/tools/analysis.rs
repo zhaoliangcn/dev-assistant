@@ -183,7 +183,7 @@ pub fn create_file_batches(
     let mut current_tokens = 0;
     let mut batch_number = 1;
     let total_files = files.len();
-    let total_batches = (total_files + batch_size - 1) / batch_size;
+    let total_batches = total_files.div_ceil(batch_size);
 
     for file in files {
         let file_tokens = estimate_file_tokens(&file);
@@ -235,7 +235,7 @@ fn get_analysis_dir(working_dir: &Path) -> PathBuf {
 
 fn save_analysis_record(working_dir: &Path, record: &AnalysisRecord) -> Result<(), AppError> {
     let analysis_dir = get_analysis_dir(working_dir);
-    fs::create_dir_all(&analysis_dir).map_err(|e| AppError::Io(e))?;
+    fs::create_dir_all(&analysis_dir).map_err(AppError::Io)?;
 
     let file_name = format!(
         "{}-{}-{}.json",
@@ -245,8 +245,8 @@ fn save_analysis_record(working_dir: &Path, record: &AnalysisRecord) -> Result<(
     );
     let file_path = analysis_dir.join(file_name);
 
-    let content = serde_json::to_string_pretty(record).map_err(|e| AppError::Json(e))?;
-    fs::write(&file_path, content).map_err(|e| AppError::Io(e))?;
+    let content = serde_json::to_string_pretty(record).map_err(AppError::Json)?;
+    fs::write(&file_path, content).map_err(AppError::Io)?;
 
     debug!(path = %file_path.display(), "Saved analysis record");
     Ok(())
@@ -259,12 +259,12 @@ fn load_all_analysis_records(working_dir: &Path) -> Result<Vec<AnalysisRecord>, 
     }
 
     let mut records = Vec::new();
-    for entry in fs::read_dir(&analysis_dir).map_err(|e| AppError::Io(e))? {
-        let entry = entry.map_err(|e| AppError::Io(e))?;
+    for entry in fs::read_dir(&analysis_dir).map_err(AppError::Io)? {
+        let entry = entry.map_err(AppError::Io)?;
         let path = entry.path();
         if path.is_file() && path.extension().map(|e| e == "json").unwrap_or(false) {
-            let content = fs::read_to_string(&path).map_err(|e| AppError::Io(e))?;
-            let record: AnalysisRecord = serde_json::from_str(&content).map_err(|e| AppError::Json(e))?;
+            let content = fs::read_to_string(&path).map_err(AppError::Io)?;
+            let record: AnalysisRecord = serde_json::from_str(&content).map_err(AppError::Json)?;
             records.push(record);
         }
     }
@@ -542,7 +542,7 @@ fn analyze_codebase_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         .unwrap_or_else(|| vec!["target/**".to_string(), ".git/**".to_string(), "node_modules/**".to_string()]);
 
     let batch_size = common::get_lenient_usize(&args.arguments["batch_size"], "batch_size", 5)
-        .map_err(|e| AppError::Llm(e))?;
+        .map_err(AppError::Llm)?;
 
     let analysis_depth = args.arguments["analysis_depth"].as_str().unwrap_or("standard");
 
@@ -691,7 +691,7 @@ fn finish_analysis_handler(args: &ToolArgs, context: &ToolContext) -> Result<Too
 
     if let Some(output_path) = output_file {
         let full_path = context.working_dir.join(output_path);
-        fs::write(&full_path, &report).map_err(|e| AppError::Io(e))?;
+        fs::write(&full_path, &report).map_err(AppError::Io)?;
         info!(path = %full_path.display(), "Analysis report saved");
     }
 

@@ -160,7 +160,7 @@ impl AsyncTool for AsyncEditFileTool {
             .ok_or_else(|| AppError::Llm("new_str is required".to_string()))?;
 
         let limit = common::get_lenient_usize(&args.arguments["limit"], "limit", 0)
-            .map_err(|e| AppError::Llm(e))?;
+            .map_err(AppError::Llm)?;
 
         let full_path = common::resolve_model_path(&context.working_dir, file_path);
 

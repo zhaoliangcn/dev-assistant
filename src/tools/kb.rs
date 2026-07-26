@@ -263,8 +263,7 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
     // 确保父目录存在
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            AppError::Io(std::io::Error::other(
                 format!("Failed to create KB directory '{}': {}", parent.display(), e),
             ))
         })?;
@@ -272,8 +271,7 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
 
     // 写入文件
     fs::write(&file_path, content).map_err(|e| {
-        AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        AppError::Io(std::io::Error::other(
             format!("Failed to write KB entry '{}': {}", file_path.display(), e),
         ))
     })?;
@@ -345,8 +343,7 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
 
     // 加载索引
     let index_content = fs::read_to_string(&index_path).map_err(|e| {
-        AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        AppError::Io(std::io::Error::other(
             format!("Failed to read KB index '{}': {}", index_path.display(), e),
         ))
     })?;
@@ -408,8 +405,7 @@ fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str) -> Result
     // 加载现有索引，或创建新索引
     let mut index: KbIndex = if index_path.exists() {
         let content = fs::read_to_string(&index_path).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            AppError::Io(std::io::Error::other(
                 format!("Failed to read KB index: {}", e),
             ))
         })?;
@@ -500,8 +496,7 @@ fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str) -> Result
     })?;
 
     fs::write(&index_path, &index_json).map_err(|e| {
-        AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        AppError::Io(std::io::Error::other(
             format!("Failed to write KB index: {}", e),
         ))
     })?;

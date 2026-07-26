@@ -64,7 +64,7 @@ impl SessionLogger {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .write(true)
+            
             .mode(0o600)  // SECURITY: Restrict log file to owner only
             .open(&path)
             .map_err(|e: std::io::Error| {

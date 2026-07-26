@@ -84,7 +84,7 @@ pub struct ToolResult {
 #[serde(rename_all = "snake_case")]
 pub enum ToolNamespace {
     DevAssistant,
-    MCP,
+    Mcp,
 }
 
 /// 工具类型分类
@@ -283,6 +283,7 @@ impl ToolRegistry {
     /// 子 Agent 不应拥有以下工具：
     /// - `spawn_subagent`（防止无限递归）
     /// - `restart`（重启整个进程）
+    ///
     /// 子 Agent 拥有基本的文件操作工具和 `finish`。
     pub fn new_subagent_registry(&self) -> Self {
         let mut registry = Self {

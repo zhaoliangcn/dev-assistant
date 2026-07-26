@@ -78,7 +78,7 @@ mod system_time_serde {
     where
         S: Serializer,
     {
-        let datetime: DateTime<Utc> = time.clone().into();
+        let datetime: DateTime<Utc> = (*time).into();
         let s = datetime.to_rfc3339();
         serializer.serialize_str(&s)
     }
@@ -159,8 +159,7 @@ impl CheckpointManager {
     ) -> Result<(), AppError> {
         // 确保目录存在
         fs::create_dir_all(&self.checkpoint_dir).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            AppError::Io(std::io::Error::other(
                 format!("Failed to create checkpoint directory '{}': {}",
                     self.checkpoint_dir.display(), e),
             ))
@@ -199,8 +198,7 @@ impl CheckpointManager {
         })?;
 
         fs::write(&latest_path, &json).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            AppError::Io(std::io::Error::other(
                 format!("Failed to write checkpoint '{}': {}",
                     latest_path.display(), e),
             ))
@@ -230,8 +228,7 @@ impl CheckpointManager {
         }
 
         let content = fs::read_to_string(&latest_path).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            AppError::Io(std::io::Error::other(
                 format!("Failed to read checkpoint '{}': {}",
                     latest_path.display(), e),
             ))
@@ -258,7 +255,7 @@ impl CheckpointManager {
         }
 
         let mut checkpoints: Vec<PathBuf> = fs::read_dir(&self.checkpoint_dir)
-            .map_err(|e| AppError::Io(e))?
+            .map_err(AppError::Io)?
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
             .filter(|path| {
@@ -286,11 +283,11 @@ impl CheckpointManager {
             return Ok(());
         }
 
-        for entry in fs::read_dir(&self.checkpoint_dir).map_err(|e| AppError::Io(e))? {
-            let entry = entry.map_err(|e| AppError::Io(e))?;
+        for entry in fs::read_dir(&self.checkpoint_dir).map_err(AppError::Io)? {
+            let entry = entry.map_err(AppError::Io)?;
             let path = entry.path();
             if path.is_file() && path.extension().map(|e| e == "json").unwrap_or(false) {
-                fs::remove_file(&path).map_err(|e| AppError::Io(e))?;
+                fs::remove_file(&path).map_err(AppError::Io)?;
             }
         }
 
@@ -320,8 +317,7 @@ impl CheckpointManager {
         let archive_path = self.checkpoint_dir.join(&archive_name);
 
         fs::rename(&latest_path, &archive_path).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            AppError::Io(std::io::Error::other(
                 format!("Failed to archive checkpoint: {}", e),
             ))
         })?;
@@ -348,7 +344,7 @@ impl CheckpointManager {
 
         // 删除多余的（列表已排序，最旧的在后）
         for path in archives.iter().skip(self.max_archives) {
-            fs::remove_file(path).map_err(|e| AppError::Io(e))?;
+            fs::remove_file(path).map_err(AppError::Io)?;
             debug!(path = %path.display(), "Removed old checkpoint archive");
         }
 

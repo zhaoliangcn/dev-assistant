@@ -470,8 +470,7 @@ impl TaskOrchestrator {
 
         let progress_dir = self.kb_root.join(".kb/progress");
         fs::create_dir_all(&progress_dir).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            AppError::Io(std::io::Error::other(
                 format!("Failed to create progress directory: {}", e),
             ))
         })?;
@@ -487,8 +486,7 @@ impl TaskOrchestrator {
         );
 
         fs::write(&progress_file, content).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            AppError::Io(std::io::Error::other(
                 format!("Failed to write progress: {}", e),
             ))
         })

@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Default)]
 pub enum AgentIdentity {
     Architect,
     Implementer,
     Reviewer,
     Tester,
     Debugger,
+    #[default]
     General,
 }
 
@@ -238,11 +240,6 @@ impl AgentIdentity {
     }
 }
 
-impl Default for AgentIdentity {
-    fn default() -> Self {
-        Self::General
-    }
-}
 
 /// 流水线阶段定义
 #[derive(Debug, Clone)]

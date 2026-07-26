@@ -69,7 +69,7 @@ mod tests {
     fn ascii_words_use_075_ratio() {
         // "hello world": 2 words × 5 chars/word × 0.75 = ceil(3.75) × 2 ≈ 8 tokens
         let tokens = TokenCounter::estimate("hello world");
-        assert!(tokens >= 5 && tokens <= 8, "expected ~6 tokens, got {}", tokens);
+        assert!((5..=8).contains(&tokens), "expected ~6 tokens, got {}", tokens);
     }
 
     #[test]

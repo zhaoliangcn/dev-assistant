@@ -353,7 +353,7 @@ mod tests {
         drop(store);
 
         let events = SessionStore::read_events(&dir.path().join(".dev-assistant-store").join(
-            &fs::read_dir(dir.path().join(".dev-assistant-store"))
+            fs::read_dir(dir.path().join(".dev-assistant-store"))
                 .unwrap()
                 .next()
                 .unwrap()

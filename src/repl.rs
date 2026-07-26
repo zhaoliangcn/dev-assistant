@@ -318,7 +318,7 @@ pub fn handle_restart(
             &format!("保存状态失败: {}。未重启。", e),
         );
         let messages = agent.get_display_messages();
-        ui::render(&messages, &agent.display_messages(), None, verbose)?;
+        ui::render(&messages, agent.display_messages(), None, verbose)?;
         return Ok(ReplAction::Quit);
     }
 
@@ -327,7 +327,7 @@ pub fn handle_restart(
         "正在运行 cargo build...",
     );
     let messages = agent.get_display_messages();
-    ui::render(&messages, &agent.display_messages(), None, verbose)?;
+    ui::render(&messages, agent.display_messages(), None, verbose)?;
     std::io::stdout().flush().ok();
 
     // perform_restart 会在成功时 exec() 替换进程，永远不会返回；
@@ -342,7 +342,7 @@ pub fn handle_restart(
 
     if should_continue {
         let messages = agent.get_display_messages();
-        ui::render(&messages, &agent.display_messages(), None, verbose)?;
+        ui::render(&messages, agent.display_messages(), None, verbose)?;
         Ok(ReplAction::Continue)
     } else {
         Ok(ReplAction::Quit)

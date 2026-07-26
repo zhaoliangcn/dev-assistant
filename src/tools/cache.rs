@@ -367,9 +367,10 @@ pub struct CacheStats {
     pub hit_rate: f64,
 }
 
-impl CacheStats {
-    pub fn to_string(&self) -> String {
-        format!(
+impl std::fmt::Display for CacheStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
             "CacheStats: entries={}, hits={}, misses={}, hit_rate={:.2}%",
             self.entries, self.hits, self.misses, self.hit_rate
         )
@@ -480,7 +481,7 @@ mod tests {
         fs::write(&file_path, &large_content).unwrap();
 
         let cache = ReadCache::new(CacheConfig {
-            max_file_size: 1 * 1024 * 1024, // 1MB
+            max_file_size: 1024 * 1024, // 1MB
             ..CacheConfig::default()
         });
 

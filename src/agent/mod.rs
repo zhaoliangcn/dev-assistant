@@ -358,6 +358,7 @@ impl Agent {
     /// - `depth = parent_depth + 1`
     ///
     /// 如果深度超过 `MAX_SUBAGENT_DEPTH`，返回 `SubagentDepthLimit` 错误。
+    #[allow(clippy::too_many_arguments)]
     pub fn new_subagent(
         llm: Arc<LlmClient>,
         tools: ToolRegistry,

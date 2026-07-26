@@ -51,11 +51,11 @@ impl AsyncTool for AsyncReadFileTool {
             .ok_or_else(|| AppError::Llm("file_path is required".to_string()))?;
 
         let offset = common::get_lenient_usize(&args.arguments["offset"], "offset", 1)
-            .map_err(|e| AppError::Llm(e))?
+            .map_err(AppError::Llm)?
             .max(1);
 
         let limit = common::get_lenient_usize(&args.arguments["limit"], "limit", DEFAULT_READ_LIMIT)
-            .map_err(|e| AppError::Llm(e))?;
+            .map_err(AppError::Llm)?;
 
         let full_path = common::resolve_model_path(&context.working_dir, file_path);
         
@@ -248,7 +248,7 @@ impl AsyncTool for AsyncBatchReadFilesTool {
         }
 
         let max_chars_per_file = common::get_lenient_usize(&args.arguments["max_chars_per_file"], "max_chars_per_file", 3000)
-            .map_err(|e| AppError::Llm(e))?;
+            .map_err(AppError::Llm)?;
 
         let summarize = args.arguments["summarize"].as_bool().unwrap_or(true);
 

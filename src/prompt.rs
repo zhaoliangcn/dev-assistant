@@ -94,15 +94,18 @@ mod tests {
     }
 
     fn skill_named(name: &str) -> Skill {
+        let meta = SkillMetadata {
+            name: name.to_string(),
+            description: "test".to_string(),
+            when_to_use: None,
+            metadata: HashMap::new(),
+        };
+        let keywords = Skill::compute_keywords(&meta);
         Skill {
-            meta: SkillMetadata {
-                name: name.to_string(),
-                description: "test".to_string(),
-                when_to_use: None,
-                metadata: HashMap::new(),
-            },
+            meta,
             body: String::new(),
             source_path: PathBuf::new(),
+            keywords,
         }
     }
 

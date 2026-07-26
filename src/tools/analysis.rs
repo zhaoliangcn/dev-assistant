@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -91,14 +91,14 @@ pub struct AnalysisRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future analysis summary aggregation
 pub struct AnalysisSummary {
     pub analysis_records: Vec<AnalysisRecord>,
     pub task_summary: TaskSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future analysis summary aggregation
 pub struct TaskSummary {
     pub total_files: usize,
     pub analyzed_files: usize,
@@ -108,63 +108,7 @@ pub struct TaskSummary {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct AnalyzedFileTracker {
-    analyzed: HashSet<String>,
-    in_progress: HashSet<String>,
-    failed: HashMap<String, usize>,
-}
-
-impl AnalyzedFileTracker {
-    pub fn new() -> Self {
-        Self {
-            analyzed: HashSet::new(),
-            in_progress: HashSet::new(),
-            failed: HashMap::new(),
-        }
-    }
-
-    pub fn mark_analyzed(&mut self, file: &str) {
-        self.analyzed.insert(file.to_string());
-        self.in_progress.remove(file);
-    }
-
-    pub fn mark_in_progress(&mut self, file: &str) {
-        self.in_progress.insert(file.to_string());
-    }
-
-    pub fn mark_failed(&mut self, file: &str) {
-        *self.failed.entry(file.to_string()).or_insert(0) += 1;
-        self.in_progress.remove(file);
-    }
-
-    pub fn is_analyzed(&self, file: &str) -> bool {
-        self.analyzed.contains(file)
-    }
-
-    pub fn is_in_progress(&self, file: &str) -> bool {
-        self.in_progress.contains(file)
-    }
-
-    pub fn get_pending_files(&self, all_files: &[String]) -> Vec<String> {
-        all_files
-            .iter()
-            .filter(|f| !self.is_analyzed(f) && !self.is_in_progress(f))
-            .cloned()
-            .collect()
-    }
-
-    pub fn analyzed_count(&self) -> usize {
-        self.analyzed.len()
-    }
-
-    pub fn failed_count(&self) -> usize {
-        self.failed.len()
-    }
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future file batch processing
 pub struct FileBatch {
     pub files: Vec<String>,
     pub batch_number: usize,
@@ -380,6 +324,7 @@ fn record_analysis_handler(args: &ToolArgs, context: &ToolContext) -> Result<Too
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!("[record_analysis] 分析记录已保存: {}", file_path),
     })
 }
@@ -413,6 +358,7 @@ fn get_analysis_summary_handler(args: &ToolArgs, context: &ToolContext) -> Resul
             success: true,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: "[get_analysis_summary] 暂无分析记录".to_string(),
         });
     }
@@ -429,6 +375,7 @@ fn get_analysis_summary_handler(args: &ToolArgs, context: &ToolContext) -> Resul
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!("[get_analysis_summary]\n{}", summary),
     })
 }
@@ -561,6 +508,7 @@ fn analyze_codebase_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
             success: false,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: "[analyze_codebase] ❌ 未找到匹配的文件".to_string(),
         });
     }
@@ -597,6 +545,7 @@ fn analyze_codebase_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: result,
     })
 }
@@ -683,6 +632,7 @@ fn finish_analysis_handler(args: &ToolArgs, context: &ToolContext) -> Result<Too
             success: false,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: "[finish_analysis] ❌ 暂无分析记录，无法生成报告".to_string(),
         });
     }
@@ -699,6 +649,7 @@ fn finish_analysis_handler(args: &ToolArgs, context: &ToolContext) -> Result<Too
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!("[finish_analysis]\n\n{}", report),
     })
 }
@@ -786,14 +737,6 @@ mod tests {
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[0].files.len(), 2);
         assert_eq!(batches[1].files.len(), 1);
-    }
-
-    #[test]
-    fn analyzed_file_tracker_mark_analyzed() {
-        let mut tracker = AnalyzedFileTracker::new();
-        tracker.mark_analyzed("file.rs");
-        assert!(tracker.is_analyzed("file.rs"));
-        assert!(!tracker.is_in_progress("file.rs"));
     }
 
     #[test]

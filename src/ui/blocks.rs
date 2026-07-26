@@ -4,12 +4,14 @@ use serde_json::Value;
 
 /// 消息块类型
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // reserved for future block-based UI rendering
 pub enum MessageBlock {
     /// 用户消息
     User {
         content: String,
     },
     /// 助手消息
+    #[allow(dead_code)]
     Assistant {
         content: String,
         is_streaming: bool,
@@ -19,12 +21,14 @@ pub enum MessageBlock {
         content: String,
     },
     /// 工具调用
+    #[allow(dead_code)]
     ToolCall {
         tool_name: String,
         args: Value,
     },
     /// 工具执行结果
     ToolResult {
+        #[allow(dead_code)]
         tool_name: String,
         success: bool,
         content: String,
@@ -59,6 +63,7 @@ impl MessageBlock {
     }
     
     /// 获取块的角色标签（用于 display_messages 兼容）
+    #[allow(dead_code)] // reserved for future block-based UI rendering
     pub fn role_label(&self) -> &'static str {
         match self {
             MessageBlock::User { .. } => "你",

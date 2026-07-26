@@ -166,8 +166,8 @@ fn try_parse_json_args(raw: &str) -> Result<Value, serde_json::Error> {
         return Ok(v);
     }
 
-    // 4. 移除 trailing comma
-    let no_trailing_comma = without_fence.replace(",}", "}").replace(",]", "]");
+    // 4. 移除 trailing comma（仅在字符串外部）
+    let no_trailing_comma = remove_trailing_commas(without_fence);
     if let Ok(v) = serde_json::from_str(&no_trailing_comma) {
         return Ok(v);
     }
@@ -201,14 +201,65 @@ fn escape_newlines_in_json(s: &str) -> String {
             result.push(c);
             continue;
         }
-        if in_string && (c == '\n' || c == '\r') {
-            // 统一转换成 \\n
-            result.push_str("\\n");
-            // 跳过 \\r 后的 \\n，避免生成 \\n\\n
-            if c == '\r' && chars.peek() == Some(&'\n') {
-                chars.next();
+        if in_string && (c == '\n' || c == '\r' || c == '\t') {
+            match c {
+                '\n' | '\r' => {
+                    // 统一转换成 \\n
+                    result.push_str("\\n");
+                    // 跳过 \\r 后的 \\n，避免生成 \\n\\n
+                    if c == '\r' && chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                }
+                '\t' => result.push_str("\\t"),
+                _ => unreachable!(),
             }
             continue;
+        }
+        result.push(c);
+    }
+
+    result
+}
+
+/// 移除 JSON 中的尾随逗号（仅在字符串外部）。
+///
+/// 使用状态机跟踪是否在字符串内部，避免误修改字符串值中的逗号。
+/// 例如 `{"cmd": "echo foo,}"}` 不会被破坏。
+fn remove_trailing_commas(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut in_string = false;
+    let mut escape = false;
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+
+    for i in 0..len {
+        let c = chars[i];
+        if escape {
+            result.push(c);
+            escape = false;
+            continue;
+        }
+        if c == '\\' && in_string {
+            result.push(c);
+            escape = true;
+            continue;
+        }
+        if c == '"' {
+            in_string = !in_string;
+            result.push(c);
+            continue;
+        }
+        // 仅在字符串外部移除尾随逗号
+        if !in_string && c == ',' {
+            // 检查下一个非空白字符是否是 } 或 ]
+            let mut j = i + 1;
+            while j < len && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < len && (chars[j] == '}' || chars[j] == ']') {
+                continue; // 跳过这个逗号
+            }
         }
         result.push(c);
     }
@@ -268,5 +319,49 @@ line2"}"#;
         let escaped = escape_newlines_in_json(input);
         // 字符串外部的换行保持原样，字符串内部的换行被转义
         assert_eq!(escaped, "{\n  \"a\": \"b\\nc\",\n  \"d\": 1\n}");
+    }
+
+    #[test]
+    fn remove_trailing_commas_basic() {
+        let input = r#"{"a": 1,}"#;
+        let result = remove_trailing_commas(input);
+        assert_eq!(result, r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn remove_trailing_commas_in_array() {
+        let input = r#"[1, 2,]"#;
+        let result = remove_trailing_commas(input);
+        assert_eq!(result, r#"[1, 2]"#);
+    }
+
+    #[test]
+    fn remove_trailing_commas_preserves_string_content() {
+        // 字符串中的逗号不应被移除
+        let input = r#"{"cmd": "echo foo,bar",}"#;
+        let result = remove_trailing_commas(input);
+        assert_eq!(result, r#"{"cmd": "echo foo,bar"}"#);
+    }
+
+    #[test]
+    fn remove_trailing_commas_no_change_when_valid() {
+        let input = r#"{"a": 1, "b": [1, 2, 3]}"#;
+        let result = remove_trailing_commas(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn remove_trailing_commas_nested() {
+        let input = r#"{"a": {"b": 1,},"c": [1, 2,],}"#;
+        let result = remove_trailing_commas(input);
+        assert_eq!(result, r#"{"a": {"b": 1},"c": [1, 2]}"#);
+    }
+
+    #[test]
+    fn escape_newlines_in_json_handles_tabs() {
+        let input = "{\n  \"a\": \"b\tc\",\n  \"d\": 1\n}";
+        let escaped = escape_newlines_in_json(input);
+        // 字符串内部的 tab 被转义为 \\t
+        assert_eq!(escaped, "{\n  \"a\": \"b\\tc\",\n  \"d\": 1\n}");
     }
 }

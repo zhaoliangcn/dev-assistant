@@ -273,8 +273,12 @@ impl TaskOrchestrator {
                 }
 
                 self.graph.start(task_id);
-                
-                // 记录到 running_tasks
+
+                // SAFETY: running_tasks 的 push 和 retain 都在主任务中执行，
+                // 且当前循环是顺序处理每个 batch（先 spawn 所有任务，再 await 所有 handle）。
+                // 这保证了 running_tasks 的所有访问都在同一个 async task 中，
+                // 不会与其他并发访问竞争。如果未来改为并行 polling handle，
+                // 需要将 running_tasks 改为 Arc<Mutex<>> 或类似同步原语。
                 self.running_tasks.push(RunningTask {
                     task_id: task.id.clone(),
                     started_at: std::time::SystemTime::now(),
@@ -536,16 +540,16 @@ async fn execute_single_task(
     };
 
     // 创建子代理
-    let mut agent = match Agent::new_subagent(
+    let mut agent = match Agent::new_subagent(crate::agent::SubagentConfig {
         llm,
         tools,
-        1, // 深度 1（Orchestrator 在深度 0）
-        &task_msg,
-        "",
+        depth: 1, // 深度 1（Orchestrator 在深度 0）
+        task: task_msg.clone(),
+        context: String::new(),
         max_iterations,
         max_tokens,
         agent_type,
-    ) {
+    }) {
         Ok(agent) => agent,
         Err(e) => {
             return TaskExecutionResult {

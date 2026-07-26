@@ -24,6 +24,7 @@ pub struct ToolArgs {
 pub struct ToolContext {
     pub working_dir: PathBuf,
     pub cache: Option<Arc<ReadCache>>,
+    #[allow(dead_code)] // reserved for future resource injection
     pub resources: Option<crate::tools::resources::SharedResources>,
 }
 
@@ -86,6 +87,7 @@ impl AsyncToolRegistry {
     }
 
     /// 创建带自定义缓存配置的注册中心
+    #[allow(dead_code)] // reserved for future cache configuration
     pub fn new_with_cache_config(
         working_dir: PathBuf,
         security: Arc<SecurityPolicy>,
@@ -131,6 +133,7 @@ impl AsyncToolRegistry {
     }
 
     /// 直接注册工具定义
+    #[allow(dead_code)] // reserved for future dynamic tool registration
     pub fn register_definition(&mut self, definition: AsyncToolDefinition) {
         self.register(definition);
     }
@@ -167,6 +170,7 @@ impl AsyncToolRegistry {
                     content: format!("🚫 Command blocked (CRITICAL): {}", evaluation.reason),
                     security_evaluation: Some(evaluation),
                     restart_requested: false,
+                error_category: None,
                 })
             }
             ref level @ (crate::security::DangerLevel::High | crate::security::DangerLevel::Medium) => {
@@ -183,6 +187,7 @@ impl AsyncToolRegistry {
                         ),
                         security_evaluation: Some(evaluation),
                         restart_requested: false,
+                error_category: None,
                     })
                 } else {
                     debug!(tool = name, level = ?level, "Tool execution approved by permission store");
@@ -232,16 +237,19 @@ impl AsyncToolRegistry {
     }
 
     /// 获取缓存统计信息
+    #[allow(dead_code)] // reserved for future cache monitoring
     pub fn cache_stats(&self) -> crate::tools::cache::CacheStats {
         self.cache.stats()
     }
 
     /// 使指定路径的缓存失效
+    #[allow(dead_code)] // reserved for future cache invalidation
     pub fn invalidate_cache(&self, path: &std::path::Path) {
         self.cache.invalidate(path);
     }
 
     /// 清除所有缓存
+    #[allow(dead_code)] // reserved for future cache management
     pub fn clear_cache(&self) {
         self.cache.clear();
     }
@@ -286,6 +294,7 @@ mod tests {
                 content: "test result".to_string(),
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
             })
         }
     }

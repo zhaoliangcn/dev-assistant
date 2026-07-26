@@ -287,6 +287,7 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!(
             "[kb_store] ✅ 条目已保存: {}\n路径: {}",
             path,
@@ -337,6 +338,7 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
             success: true,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: "KnowledgeBase 为空（.kb/index.json 不存在）。请先使用 kb_store 创建条目。".to_string(),
         });
     }
@@ -388,6 +390,7 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: output,
     })
 }

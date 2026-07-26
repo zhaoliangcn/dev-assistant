@@ -73,6 +73,7 @@ fn write_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResu
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!("[write_file] ❌ Parent directory not found: {}", file_path),
             });
         }
@@ -83,6 +84,7 @@ fn write_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResu
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!("[write_file] ✅ {} ({} chars)", file_path, content.len()),
     })
 }
@@ -128,7 +130,12 @@ fn fuzzy_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(pos) = haystack.find(&needle_dedented) {
-                return Some((pos, needle_dedented.len()));
+                // 计算原始 needle 在 haystack 中的实际匹配长度
+                // 从匹配位置开始，跳过前导空白，然后计算到 needle 末尾的长度
+                let haystack_from_pos = &haystack[pos..];
+                let leading_spaces = haystack_from_pos.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+                let actual_match_len = leading_spaces + needle_dedented.len();
+                return Some((pos, actual_match_len));
             }
         }
     }
@@ -156,6 +163,7 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!(
                     "[edit_file] ❌ File not found: {}\n\
                      The file does not exist at this path. You may want to:\n\
@@ -170,6 +178,7 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!(
                     "[edit_file] ❌ Permission denied: {}\n\
                      The file exists but you don't have write access.",
@@ -195,6 +204,7 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
             success: false,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: format!(
                 "[edit_file] ❌ Old content not found in file: {}\n\
                  The file content (with line numbers) is:\n\
@@ -221,6 +231,7 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!(
             "[edit_file] ✅ {} (replaced {} chars{}){}",
             file_path,
@@ -241,33 +252,37 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
 
 // ToolMetadata 实现
 
+#[allow(dead_code)] // reserved for future tool metadata introspection
 pub struct WriteFileToolMetadata;
 
+#[allow(dead_code)]
 impl ToolMetadata for WriteFileToolMetadata {
     fn kind(&self) -> ToolKind {
         ToolKind::Write
     }
-    
+
     fn tool_namespace(&self) -> ToolNamespace {
         ToolNamespace::DevAssistant
     }
-    
+
     fn description_template(&self) -> &str {
         "Write content to a file."
     }
 }
 
+#[allow(dead_code)] // reserved for future tool metadata introspection
 pub struct EditFileToolMetadata;
 
+#[allow(dead_code)]
 impl ToolMetadata for EditFileToolMetadata {
     fn kind(&self) -> ToolKind {
         ToolKind::Write
     }
-    
+
     fn tool_namespace(&self) -> ToolNamespace {
         ToolNamespace::DevAssistant
     }
-    
+
     fn description_template(&self) -> &str {
         "Edit a file by replacing old content with new content."
     }

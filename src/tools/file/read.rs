@@ -85,6 +85,7 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
             success: false,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: format!("[read_file] ❌ Gitignore ignored: {}", reason),
         });
     }
@@ -96,6 +97,7 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!(
                     "[read_file] ❌ File not found: {}\n\
                      Please check the file path. You may need to use glob to find the correct file name.",
@@ -108,6 +110,7 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!(
                     "[read_file] ❌ Permission denied: {}\n\
                      The file exists but you don't have read access.",
@@ -120,6 +123,7 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!(
                     "[read_file] ❌ Binary/non-UTF-8 file: {}\n\
                      This file contains binary or non-text data and cannot be displayed.\n\
@@ -146,6 +150,7 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!("{}\n\n{}", info, displayed),
     })
 }
@@ -165,6 +170,7 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
             success: false,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: "[batch_read_files] ❌ No files specified".to_string(),
         });
     }
@@ -247,39 +253,44 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         success: success_count > 0,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!("{}{}", header, result),
     })
 }
 
 // ToolMetadata 实现
 
+#[allow(dead_code)] // reserved for future tool metadata introspection
 pub struct ReadFileToolMetadata;
 
+#[allow(dead_code)]
 impl ToolMetadata for ReadFileToolMetadata {
     fn kind(&self) -> ToolKind {
         ToolKind::Read
     }
-    
+
     fn tool_namespace(&self) -> ToolNamespace {
         ToolNamespace::DevAssistant
     }
-    
+
     fn description_template(&self) -> &str {
         "Read a file from the filesystem. Supports offset/limit for reading large files in chunks."
     }
 }
 
+#[allow(dead_code)] // reserved for future tool metadata introspection
 pub struct BatchReadFilesToolMetadata;
 
+#[allow(dead_code)]
 impl ToolMetadata for BatchReadFilesToolMetadata {
     fn kind(&self) -> ToolKind {
         ToolKind::Read
     }
-    
+
     fn tool_namespace(&self) -> ToolNamespace {
         ToolNamespace::DevAssistant
     }
-    
+
     fn description_template(&self) -> &str {
         "Read multiple files at once. Efficient for code review tasks."
     }

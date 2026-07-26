@@ -9,10 +9,7 @@
 //! 业务逻辑（REPL 循环、slash 命令、restart 流程、prompt 构建）分别位于
 //! `app.rs`、`repl.rs`、`restart.rs`、`prompt.rs`。
 
-// 当前处于快速迭代期，大量 public API（如工具元数据、审批接口、重试模块、
-// UI 块等）已设计但尚未全部接线。先关闭 dead_code 警告以保持构建输出干净，
-// 后续随着功能完整可逐步移除并清理真正未使用的代码。
-#![allow(dead_code)]
+
 
 mod agent;
 mod app;

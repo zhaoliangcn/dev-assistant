@@ -1,6 +1,6 @@
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -39,8 +39,8 @@ pub struct ToolRegistry {
     pub approval_manager: Arc<ApprovalManager>,
     pub retry_manager: retry::RetryManager,
     pub resources: Option<crate::tools::resources::SharedResources>,
-    #[allow(dead_code)]
-    schema_tokens: Cell<usize>,
+    #[allow(dead_code)] // reserved for future schema token budget tracking
+    schema_tokens: AtomicUsize,
 }
 
 pub struct ToolDefinition {
@@ -72,16 +72,71 @@ pub struct ToolContext {
     pub resources: Option<crate::tools::resources::SharedResources>,
 }
 
+/// 错误类别，用于区分可重试和不可重试的错误
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[allow(dead_code)] // reserved for future retry logic
+pub enum ErrorCategory {
+    /// 临时性错误（I/O 错误、网络超时等），可重试
+    #[default]
+    Transient,
+    /// 永久性错误（工具不存在、安全拒绝等），不可重试
+    Permanent,
+    /// LLM 返回的错误，可能可重试
+    Llm,
+}
+
 pub struct ToolResult {
     pub success: bool,
     pub content: String,
     pub security_evaluation: Option<SecurityEvaluation>,
     pub restart_requested: bool,
+    /// 错误类别，仅在 `success = false` 时有意义。
+    /// `None` 表示未分类错误（向后兼容）。
+    #[allow(dead_code)] // reserved for future retry logic
+    pub error_category: Option<ErrorCategory>,
+}
+
+impl ToolResult {
+    /// 创建成功结果
+    #[allow(dead_code)] // reserved for future use
+    pub fn success(content: String) -> Self {
+        Self {
+            success: true,
+            content,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+        }
+    }
+
+    /// 创建失败结果（带错误类别）
+    pub fn failure(content: String, category: ErrorCategory) -> Self {
+        Self {
+            success: false,
+            content,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: Some(category),
+        }
+    }
+
+    /// 创建失败结果（不带错误类别，向后兼容）
+    #[allow(dead_code)] // reserved for future use
+    pub fn failure_unclassified(content: String) -> Self {
+        Self {
+            success: false,
+            content,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+        }
+    }
 }
 
 /// 工具命名空间
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // reserved for future MCP/tool namespace differentiation
 pub enum ToolNamespace {
     DevAssistant,
     Mcp,
@@ -90,6 +145,7 @@ pub enum ToolNamespace {
 /// 工具类型分类
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // reserved for future tool permission system
 pub enum ToolKind {
     Read,
     Edit,
@@ -108,26 +164,28 @@ pub enum ToolKind {
     Other,
 }
 
+#[allow(dead_code)] // reserved for future tool permission system
 impl ToolKind {
     pub fn is_read_only(&self) -> bool {
         matches!(self, ToolKind::Read | ToolKind::Search | ToolKind::ListDir | ToolKind::WebSearch | ToolKind::WebFetch | ToolKind::KnowledgeBase)
     }
-    
+
     pub fn requires_approval(&self) -> bool {
         !self.is_read_only()
     }
 }
 
 /// 工具元数据 trait
+#[allow(dead_code)] // reserved for future tool metadata introspection
 pub trait ToolMetadata: Send + Sync {
     fn kind(&self) -> ToolKind;
     fn tool_namespace(&self) -> ToolNamespace;
     fn description_template(&self) -> &str;
-    
+
     fn is_read_only(&self) -> bool {
         self.kind().is_read_only()
     }
-    
+
     fn requires_approval(&self) -> bool {
         self.kind().requires_approval()
     }
@@ -142,7 +200,7 @@ impl ToolRegistry {
             approval_manager: Arc::new(ApprovalManager::new()),
             retry_manager: retry::RetryManager::default(),
             resources: None,
-            schema_tokens: Cell::new(0),
+            schema_tokens: AtomicUsize::new(0),
         };
         registry.register_builtin_tools();
         registry
@@ -161,34 +219,59 @@ impl ToolRegistry {
             approval_manager,
             retry_manager: retry::RetryManager::default(),
             resources: Some(resources),
-            schema_tokens: Cell::new(0),
+            schema_tokens: AtomicUsize::new(0),
         };
         registry.register_builtin_tools();
         registry
     }
 
     fn register_builtin_tools(&mut self) {
-        self.register(file::read_file_tool());
-        self.register(file::batch_read_files_tool());
-        self.register(file::write_file_tool());
-        self.register(file::edit_file_tool());
-        self.register(file::glob_tool());
-        self.register(file::list_directory_tool());
-        self.register(file::file_exists_tool());
-        self.register(system_tools::exec_command_tool());
-        self.register(meta_tools::finish_tool());
-        self.register(meta_tools::restart_tool());
-        self.register(subagent::spawn_subagent_tool());
-        self.register(kb::kb_store_tool());
-        self.register(kb::kb_query_tool());
-        self.register(task_tools::task_status_tool());
-        self.register(task_tools::pause_task_tool());
-        self.register(task_tools::resume_task_tool());
-        self.register(task_tools::cancel_task_tool());
-        self.register(analysis::analyze_codebase_tool());
-        self.register(analysis::record_analysis_tool());
-        self.register(analysis::get_analysis_summary_tool());
-        self.register(analysis::finish_analysis_tool());
+        self.register_tools_by_names(&[
+            "read_file", "batch_read_files", "write_file", "edit_file",
+            "glob", "list_directory", "file_exists", "exec_command",
+            "finish", "restart", "spawn_subagent",
+            "kb_store", "kb_query",
+            "task_status", "pause_task", "resume_task", "cancel_task",
+            "analyze_codebase", "record_analysis", "get_analysis_summary", "finish_analysis",
+        ]);
+    }
+
+    /// 根据工具名列表注册工具。工具名到工厂函数的映射表定义在此处，
+    /// 新增工具只需在此表中添加一行，避免在多处重复注册逻辑。
+    fn register_tools_by_names(&mut self, names: &[&str]) {
+        for name in names {
+            if let Some(tool) = self.create_tool_by_name(name) {
+                self.register(tool);
+            }
+        }
+    }
+
+    /// 根据工具名创建工具定义。单一映射表，新增工具只需在此处添加。
+    fn create_tool_by_name(&self, name: &str) -> Option<ToolDefinition> {
+        match name {
+            "read_file" => Some(file::read_file_tool()),
+            "batch_read_files" => Some(file::batch_read_files_tool()),
+            "write_file" => Some(file::write_file_tool()),
+            "edit_file" => Some(file::edit_file_tool()),
+            "glob" => Some(file::glob_tool()),
+            "list_directory" => Some(file::list_directory_tool()),
+            "file_exists" => Some(file::file_exists_tool()),
+            "exec_command" => Some(system_tools::exec_command_tool()),
+            "finish" => Some(meta_tools::finish_tool()),
+            "restart" => Some(meta_tools::restart_tool()),
+            "spawn_subagent" => Some(subagent::spawn_subagent_tool()),
+            "kb_store" => Some(kb::kb_store_tool()),
+            "kb_query" => Some(kb::kb_query_tool()),
+            "task_status" => Some(task_tools::task_status_tool()),
+            "pause_task" => Some(task_tools::pause_task_tool()),
+            "resume_task" => Some(task_tools::resume_task_tool()),
+            "cancel_task" => Some(task_tools::cancel_task_tool()),
+            "analyze_codebase" => Some(analysis::analyze_codebase_tool()),
+            "record_analysis" => Some(analysis::record_analysis_tool()),
+            "get_analysis_summary" => Some(analysis::get_analysis_summary_tool()),
+            "finish_analysis" => Some(analysis::finish_analysis_tool()),
+            _ => None,
+        }
     }
 
     fn register(&mut self, tool: ToolDefinition) {
@@ -213,15 +296,18 @@ impl ToolRegistry {
             .collect()
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // reserved for future schema token budget tracking
     pub fn schema_token_count(&self) -> usize {
-        if self.schema_tokens.get() == 0 {
+        let current = self.schema_tokens.load(Ordering::Relaxed);
+        if current == 0 {
             let schemas = self.get_tool_schemas();
             if let Ok(json) = serde_json::to_string(&schemas) {
-                self.schema_tokens.set(crate::agent::token_counter::TokenCounter::estimate(&json));
+                let estimated = crate::agent::token_counter::TokenCounter::estimate(&json);
+                self.schema_tokens.store(estimated, Ordering::Relaxed);
+                return estimated;
             }
         }
-        self.schema_tokens.get()
+        current
     }
 
     /// 执行工具：先做安全评估，再根据评估结果决定是否执行。
@@ -241,6 +327,7 @@ impl ToolRegistry {
                     content: format!("🚫 Command blocked (CRITICAL): {}", evaluation.reason),
                     security_evaluation: Some(evaluation),
                     restart_requested: false,
+                error_category: None,
                 })
             }
             ref level @ (crate::security::DangerLevel::High | crate::security::DangerLevel::Medium) => {
@@ -258,6 +345,7 @@ impl ToolRegistry {
                         ),
                         security_evaluation: Some(evaluation),
                         restart_requested: false,
+                error_category: None,
                     })
                 } else {
                     debug!(tool = name, level = ?level, "Tool execution approved by permission store");
@@ -293,18 +381,13 @@ impl ToolRegistry {
             approval_manager: self.approval_manager.clone(),
             retry_manager: self.retry_manager.clone(),
             resources: self.resources.clone(),
-            schema_tokens: Cell::new(0),
+            schema_tokens: AtomicUsize::new(0),
         };
         // 子 Agent 只能使用文件工具、系统工具和 finish
-        registry.register(file::read_file_tool());
-        registry.register(file::batch_read_files_tool());
-        registry.register(file::write_file_tool());
-        registry.register(file::edit_file_tool());
-        registry.register(file::glob_tool());
-        registry.register(file::list_directory_tool());
-        registry.register(file::file_exists_tool());
-        registry.register(system_tools::exec_command_tool());
-        registry.register(meta_tools::finish_tool());
+        registry.register_tools_by_names(&[
+            "read_file", "batch_read_files", "write_file", "edit_file",
+            "glob", "list_directory", "file_exists", "exec_command", "finish",
+        ]);
         registry
     }
 
@@ -325,44 +408,22 @@ impl ToolRegistry {
             approval_manager: self.approval_manager.clone(),
             retry_manager: self.retry_manager.clone(),
             resources: self.resources.clone(),
-            schema_tokens: Cell::new(0),
+            schema_tokens: AtomicUsize::new(0),
         };
 
         let allowed_tools = identity.default_tools();
 
-        if allowed_tools.contains("read_file") {
-            registry.register(file::read_file_tool());
-        }
-        if allowed_tools.contains("batch_read_files") {
-            registry.register(file::batch_read_files_tool());
-        }
-        if allowed_tools.contains("write_file") {
-            registry.register(file::write_file_tool());
-        }
-        if allowed_tools.contains("edit_file") {
-            registry.register(file::edit_file_tool());
-        }
-        if allowed_tools.contains("glob") {
-            registry.register(file::glob_tool());
-        }
-        if allowed_tools.contains("list_directory") {
-            registry.register(file::list_directory_tool());
-        }
-        if allowed_tools.contains("file_exists") {
-            registry.register(file::file_exists_tool());
-        }
-        if allowed_tools.contains("exec_command") {
-            registry.register(system_tools::exec_command_tool());
-        }
-        if allowed_tools.contains("kb_store") {
-            registry.register(kb::kb_store_tool());
-        }
-        if allowed_tools.contains("kb_query") {
-            registry.register(kb::kb_query_tool());
-        }
-        if allowed_tools.contains("finish") {
-            registry.register(meta_tools::finish_tool());
-        }
+        // 根据身份过滤工具名，然后批量注册
+        let all_tool_names = [
+            "read_file", "batch_read_files", "write_file", "edit_file",
+            "glob", "list_directory", "file_exists", "exec_command",
+            "kb_store", "kb_query", "finish",
+        ];
+        let filtered: Vec<&str> = all_tool_names.iter()
+            .copied()
+            .filter(|name| allowed_tools.contains(*name))
+            .collect();
+        registry.register_tools_by_names(&filtered);
 
         registry
     }

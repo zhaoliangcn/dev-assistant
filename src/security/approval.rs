@@ -17,7 +17,7 @@ fn now_timestamp() -> Timestamp {
 
 /// 审批状态
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future interactive approval workflow
 pub enum ApprovalStatus {
     Pending,
     Approved,
@@ -26,7 +26,7 @@ pub enum ApprovalStatus {
 
 /// 审批需求定义
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future interactive approval workflow
 pub struct ApprovalRequirement {
     /// 审批类型
     pub approval_type: ApprovalType,
@@ -42,7 +42,7 @@ pub struct ApprovalRequirement {
 
 impl ApprovalRequirement {
     /// 创建默认的审批需求
-    #[allow(dead_code)]
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn default_for_danger(level: &DangerLevel) -> Self {
         match level {
             DangerLevel::Critical => Self {
@@ -79,7 +79,7 @@ impl ApprovalRequirement {
 
 /// 审批类型
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future interactive approval workflow
 pub enum ApprovalType {
     /// 自动审批（无需用户确认）
     Auto,
@@ -91,7 +91,7 @@ pub enum ApprovalType {
 
 /// 审批范围
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future interactive approval workflow
 pub enum ApprovalScope {
     /// 无限制
     None,
@@ -105,7 +105,7 @@ pub enum ApprovalScope {
 
 /// 已审批的权限记录
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future interactive approval workflow
 pub struct PermissionEntry {
     /// 审批的工具名
     pub tool_name: String,
@@ -150,6 +150,7 @@ impl PermissionStore {
     }
 
     /// 添加审批权限
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn add_permission(&self, entry: PermissionEntry) {
         let mut permissions = self.permissions.write().unwrap();
         let key = Self::make_key(&entry.tool_name, &entry.scope_id);
@@ -225,7 +226,7 @@ impl Default for PermissionStore {
 
 /// 审批请求
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[allow(dead_code)] // reserved for future interactive approval workflow
 pub struct ApprovalRequest {
     /// 请求ID
     pub request_id: String,
@@ -245,6 +246,7 @@ pub struct ApprovalRequest {
 #[derive(Debug, Clone)]
 pub struct ApprovalManager {
     permission_store: PermissionStore,
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     pending_requests: Arc<RwLock<HashMap<String, ApprovalRequest>>>,
 }
 
@@ -277,6 +279,7 @@ impl ApprovalManager {
     }
 
     /// 创建审批请求
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn create_request(
         &self,
         tool_name: &str,
@@ -301,6 +304,7 @@ impl ApprovalManager {
     }
 
     /// 审批通过
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn approve(&self, request_id: &str) -> bool {
         let mut pending = self.pending_requests.write().unwrap();
         if let Some(request) = pending.remove(request_id) {
@@ -323,6 +327,7 @@ impl ApprovalManager {
     }
 
     /// 拒绝审批
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn reject(&self, request_id: &str) -> bool {
         let mut pending = self.pending_requests.write().unwrap();
         if pending.remove(request_id).is_some() {
@@ -334,12 +339,14 @@ impl ApprovalManager {
     }
 
     /// 获取待审批请求
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn get_pending_requests(&self) -> Vec<ApprovalRequest> {
         let pending = self.pending_requests.read().unwrap();
         pending.values().cloned().collect()
     }
 
     /// 添加权限（直接，用于会话恢复或预授权）
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn add_permission_directly(
         &self,
         tool_name: &str,
@@ -357,6 +364,7 @@ impl ApprovalManager {
         });
     }
 
+    #[allow(dead_code)] // reserved for future interactive approval workflow
     fn extract_scope_id(&self, request: &ApprovalRequest) -> String {
         // 尝试从参数中提取具体作用域（路径、命令等），失败时回退到工具名。
         if let Ok(args) = serde_json::from_str::<serde_json::Value>(&request.arguments) {

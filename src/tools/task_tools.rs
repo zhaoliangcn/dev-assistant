@@ -98,6 +98,7 @@ fn task_status_handler(_args: &ToolArgs, _context: &ToolContext) -> Result<ToolR
         content,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
     })
 }
 
@@ -122,6 +123,7 @@ fn pause_task_handler(_args: &ToolArgs, _context: &ToolContext) -> Result<ToolRe
             content: "任务已暂停，检查点已保存".to_string(),
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
         })
     } else {
         Ok(ToolResult {
@@ -129,6 +131,7 @@ fn pause_task_handler(_args: &ToolArgs, _context: &ToolContext) -> Result<ToolRe
             content: "当前没有正在运行的任务".to_string(),
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
         })
     }
 }
@@ -154,6 +157,7 @@ fn resume_task_handler(_args: &ToolArgs, _context: &ToolContext) -> Result<ToolR
             content: "任务已恢复".to_string(),
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
         })
     } else {
         Ok(ToolResult {
@@ -161,6 +165,7 @@ fn resume_task_handler(_args: &ToolArgs, _context: &ToolContext) -> Result<ToolR
             content: "当前没有已暂停的任务".to_string(),
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
         })
     }
 }
@@ -186,6 +191,7 @@ fn cancel_task_handler(_args: &ToolArgs, _context: &ToolContext) -> Result<ToolR
             content: "任务已取消".to_string(),
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
         })
     } else {
         Ok(ToolResult {
@@ -193,6 +199,7 @@ fn cancel_task_handler(_args: &ToolArgs, _context: &ToolContext) -> Result<ToolR
             content: "当前没有正在运行的任务".to_string(),
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
         })
     }
 }

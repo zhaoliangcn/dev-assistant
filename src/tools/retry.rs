@@ -14,6 +14,7 @@ pub struct BackoffConfig {
 }
 
 impl BackoffConfig {
+    #[allow(dead_code)] // reserved for future backoff configuration
     pub fn new(max_attempts: usize, initial_delay: Duration, multiplier: f64, max_delay: Duration) -> Self {
         Self {
             max_attempts,
@@ -55,6 +56,7 @@ impl BackoffConfig {
     }
     
     /// 带自定义重试条件的异步重试函数
+    #[allow(dead_code)] // reserved for future async retry with condition
     pub async fn retry_with<F, T, E>(&self, mut f: F, should_retry: impl Fn(&E) -> bool) -> Result<T, E>
     where
         F: FnMut() -> Result<T, E>,
@@ -148,15 +150,17 @@ impl RetryManager {
         }
     }
     
+    #[allow(dead_code)] // reserved for future per-tool retry configuration
     pub fn with_tool_backoff(mut self, tool_name: &str, backoff: BackoffConfig) -> Self {
         self.per_tool_backoff.insert(tool_name.to_string(), backoff);
         self
     }
-    
+
     pub fn get_backoff(&self, tool_name: &str) -> &BackoffConfig {
         self.per_tool_backoff.get(tool_name).unwrap_or(&self.default_backoff)
     }
-    
+
+    #[allow(dead_code)] // reserved for future async retry support
     pub async fn execute_with_retry<T, E>(&self, tool_name: &str, f: impl FnMut() -> Result<T, E>) -> Result<T, E>
     where
         E: std::fmt::Display,
@@ -164,7 +168,8 @@ impl RetryManager {
         let backoff = self.get_backoff(tool_name);
         backoff.retry(f).await
     }
-    
+
+    #[allow(dead_code)] // reserved for future sync retry support
     pub fn execute_with_retry_sync<T, E>(&self, tool_name: &str, f: impl FnMut() -> Result<T, E>) -> Result<T, E>
     where
         E: std::fmt::Display,
@@ -195,11 +200,13 @@ impl Default for RetryManager {
 }
 
 /// 可重试错误 trait
+#[allow(dead_code)] // reserved for future retry integration
 pub trait RetryableError {
     fn is_retryable(&self) -> bool;
 }
 
 /// 网络错误可重试实现示例
+#[allow(dead_code)]
 impl RetryableError for reqwest::Error {
     fn is_retryable(&self) -> bool {
         self.is_timeout() || self.is_connect() || self.is_request()
@@ -207,10 +214,11 @@ impl RetryableError for reqwest::Error {
 }
 
 /// IO 错误可重试实现示例
+#[allow(dead_code)]
 impl RetryableError for std::io::Error {
     fn is_retryable(&self) -> bool {
-        matches!(self.kind(), 
-            std::io::ErrorKind::Interrupted | 
+        matches!(self.kind(),
+            std::io::ErrorKind::Interrupted |
             std::io::ErrorKind::TimedOut |
             std::io::ErrorKind::WouldBlock
         )

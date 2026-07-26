@@ -145,6 +145,7 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
                     success: true,
                     security_evaluation: None,
                     restart_requested: false,
+                error_category: None,
                     content,
                 })
             } else {
@@ -152,6 +153,7 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
                     success: false,
                     security_evaluation: None,
                     restart_requested: false,
+                error_category: None,
                     content,
                 })
             }
@@ -167,6 +169,7 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!(
                     "[exec_command] ❌ Timed out after {} seconds: {}",
                     timeout, args_for_display

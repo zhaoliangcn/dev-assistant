@@ -137,6 +137,7 @@ fn glob_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, Ap
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: truncated,
     })
 }
@@ -155,6 +156,7 @@ fn list_directory_handler(args: &ToolArgs, context: &ToolContext) -> Result<Tool
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!("[list_directory] ❌ Directory not found: {}", dir_path),
             });
         }
@@ -182,6 +184,7 @@ fn list_directory_handler(args: &ToolArgs, context: &ToolContext) -> Result<Tool
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!("[list_directory] {}:\n{}", dir_path, entries.join("\n")),
     })
 }
@@ -200,6 +203,7 @@ fn file_exists_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRes
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!(
             "[file_exists] {}: {} (is_dir: {})",
             file_path, exists, is_dir

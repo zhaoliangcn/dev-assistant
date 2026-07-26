@@ -72,6 +72,7 @@ impl AsyncTool for AsyncReadFileTool {
                             success: false,
                             security_evaluation: None,
                             restart_requested: false,
+                error_category: None,
                             content: format!(
                                 "[async_read_file] ❌ File not found: {}\n\
                                  Please check the file path. You may need to use glob to find the correct file name.",
@@ -84,6 +85,7 @@ impl AsyncTool for AsyncReadFileTool {
                             success: false,
                             security_evaluation: None,
                             restart_requested: false,
+                error_category: None,
                             content: format!(
                                 "[async_read_file] ❌ Permission denied: {}\n\
                                  The file exists but you don't have read access.",
@@ -96,6 +98,7 @@ impl AsyncTool for AsyncReadFileTool {
                             success: false,
                             security_evaluation: None,
                             restart_requested: false,
+                error_category: None,
                             content: format!(
                                 "[async_read_file] ❌ Binary/non-UTF-8 file: {}\n\
                                  This file contains binary or non-text data and cannot be displayed.\n\
@@ -117,6 +120,7 @@ impl AsyncTool for AsyncReadFileTool {
                         success: false,
                         security_evaluation: None,
                         restart_requested: false,
+                error_category: None,
                         content: format!(
                             "[async_read_file] ❌ File not found: {}\n\
                              Please check the file path. You may need to use glob to find the correct file name.",
@@ -129,6 +133,7 @@ impl AsyncTool for AsyncReadFileTool {
                         success: false,
                         security_evaluation: None,
                         restart_requested: false,
+                error_category: None,
                         content: format!(
                             "[async_read_file] ❌ Permission denied: {}\n\
                              The file exists but you don't have read access.",
@@ -141,6 +146,7 @@ impl AsyncTool for AsyncReadFileTool {
                         success: false,
                         security_evaluation: None,
                         restart_requested: false,
+                error_category: None,
                         content: format!(
                             "[async_read_file] ❌ Binary/non-UTF-8 file: {}\n\
                              This file contains binary or non-text data and cannot be displayed.\n\
@@ -184,6 +190,7 @@ impl AsyncTool for AsyncReadFileTool {
             success: true,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: format!("{}\n\n{}", info, displayed),
         })
     }
@@ -243,6 +250,7 @@ impl AsyncTool for AsyncBatchReadFilesTool {
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: "[async_batch_read_files] ❌ No files specified".to_string(),
             });
         }
@@ -336,6 +344,7 @@ impl AsyncTool for AsyncBatchReadFilesTool {
             success: success_count > 0,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: format!("{}{}", header, result),
         })
     }

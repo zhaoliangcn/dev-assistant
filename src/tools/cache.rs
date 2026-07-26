@@ -20,6 +20,7 @@ struct CacheEntry {
     content: String,
     mtime: Timestamp,
     accessed_at: Timestamp,
+    #[allow(dead_code)] // reserved for future cache size tracking
     size: usize,
 }
 
@@ -71,6 +72,7 @@ pub struct ReadCache {
     misses: Arc<RwLock<usize>>,
 }
 
+#[allow(dead_code)] // sync methods used in tests; async methods used in production
 impl ReadCache {
     pub fn new(config: CacheConfig) -> Self {
         Self {
@@ -356,6 +358,7 @@ impl ReadCache {
 
 /// 缓存统计信息
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // used by async_tool.rs and tests
 pub struct CacheStats {
     /// 当前缓存条目数
     pub entries: usize,

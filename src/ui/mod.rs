@@ -75,6 +75,7 @@ pub fn render_block(
 }
 
 /// 渲染消息块列表（追加模式）
+#[allow(dead_code)] // reserved for future block rendering
 pub fn render_blocks(
     blocks: &[MessageBlock],
     markdown_renderer: &MarkdownRenderer,

@@ -35,10 +35,12 @@ impl Resources {
         self.data.insert(TypeId::of::<T>(), Box::new(value));
     }
     
+    #[allow(dead_code)] // reserved for future resource management
     pub fn contains<T: Send + Sync + 'static>(&self) -> bool {
         self.data.contains_key(&TypeId::of::<T>())
     }
-    
+
+    #[allow(dead_code)] // reserved for future resource management
     pub fn remove<T: Send + Sync + 'static>(&mut self) -> bool {
         self.data.remove(&TypeId::of::<T>()).is_some()
     }
@@ -54,10 +56,12 @@ impl Default for Resources {
 
 /// 当前工作目录
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // reserved for future resource injection
 pub struct Cwd(pub PathBuf);
 
 /// 显示用的工作目录（用于路径重写）
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // reserved for future resource injection
 pub struct DisplayCwd(pub PathBuf);
 
 /// 是否尊重 .gitignore
@@ -68,10 +72,12 @@ pub struct RespectGitignore(pub bool);
 #[derive(Debug)]
 pub struct GitignoreFilter {
     gitignore: ignore::gitignore::Gitignore,
+    #[allow(dead_code)] // reserved for future git root access
     git_root: PathBuf,
 }
 
 impl GitignoreFilter {
+    #[allow(dead_code)] // reserved for future git root access
     pub fn new(gitignore: ignore::gitignore::Gitignore, git_root: PathBuf) -> Self {
         Self { gitignore, git_root }
     }
@@ -116,6 +122,7 @@ impl GitignoreFilter {
         self.gitignore.matched(&normalized, false).is_ignore()
     }
     
+    #[allow(dead_code)] // reserved for future git root access
     pub fn git_root(&self) -> &Path {
         &self.git_root
     }
@@ -123,6 +130,7 @@ impl GitignoreFilter {
 
 /// 工具重试配置
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)] // reserved for future retry configuration
 pub struct ToolRetries {
     pub enabled: bool,
     pub max_attempts: usize,

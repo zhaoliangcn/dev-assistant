@@ -62,7 +62,7 @@ impl ContextManager {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // reserved for future token budget management
     pub fn estimate_token_usage(&self) -> usize {
         self.history.used_tokens
     }

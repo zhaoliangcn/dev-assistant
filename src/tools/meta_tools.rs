@@ -33,6 +33,7 @@ fn finish_handler(args: &ToolArgs, _context: &ToolContext) -> Result<ToolResult,
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!("[finish] {}", summary),
     })
 }
@@ -73,6 +74,7 @@ fn restart_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult,
             success: false,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: format!(
                 "[restart] ❌ Restart is only available when working on the dev-assistant-rs project itself.\n\
                  Current project: {}\n\
@@ -93,6 +95,7 @@ fn restart_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult,
         success: true,
         security_evaluation: None,
         restart_requested: true,
+        error_category: None,
         content: format!(
             "[restart] Restart requested. State will be saved to: {}\n\
              The process will restart after cargo build completes.",

@@ -74,6 +74,7 @@ fn spawn_subagent_handler(args: &ToolArgs, _context: &ToolContext) -> Result<Too
         success: true,
         security_evaluation: None,
         restart_requested: false,
+                error_category: None,
         content: format!(
             "[spawn_subagent] Task: {}\nContext: {}\nAgent Type: {}",
             task, context, agent_type

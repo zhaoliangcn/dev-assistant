@@ -70,6 +70,7 @@ impl AsyncTool for AsyncWriteFileTool {
                             success: false,
                             security_evaluation: None,
                             restart_requested: false,
+                error_category: None,
                             content: format!(
                                 "[async_write_file] ❌ Failed to read existing file for append: {}",
                                 e
@@ -102,6 +103,7 @@ impl AsyncTool for AsyncWriteFileTool {
             success: true,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: info,
         })
     }
@@ -172,6 +174,7 @@ impl AsyncTool for AsyncEditFileTool {
                     success: false,
                     security_evaluation: None,
                     restart_requested: false,
+                error_category: None,
                     content: format!(
                         "[async_edit_file] ❌ File not found: {}",
                         file_path
@@ -205,6 +208,7 @@ impl AsyncTool for AsyncEditFileTool {
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
+                error_category: None,
                 content: format!(
                     "[async_edit_file] ❌ Pattern '{}' not found in {}",
                     old_str, file_path
@@ -232,6 +236,7 @@ impl AsyncTool for AsyncEditFileTool {
             success: true,
             security_evaluation: None,
             restart_requested: false,
+                error_category: None,
             content: info,
         })
     }

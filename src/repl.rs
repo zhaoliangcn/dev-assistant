@@ -10,6 +10,30 @@ use crate::utils::message_level::MessageLevel;
 use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
 
+// ── 状态指示器 ─────────────────────────────────────────────────────────
+
+/// 根据上一轮输出的最后一条消息，推导下一步的上下文状态提示。
+fn derive_thinking_status(last_msg: Option<&str>) -> &'static str {
+    let msg = match last_msg {
+        Some(m) => m,
+        None => return "LLM 正在思考...",
+    };
+
+    if msg.contains("工具") || msg.contains("tool") || msg.contains("执行") {
+        "正在执行工具调用..."
+    } else if msg.contains("发送请求") || msg.contains("LLM") || msg.contains("API") {
+        "等待 LLM 响应..."
+    } else if msg.contains("分析") || msg.contains("分析") || msg.contains("检查") {
+        "正在分析代码..."
+    } else if msg.contains("读取") || msg.contains("read") || msg.contains("搜索") || msg.contains("search") {
+        "正在读取文件..."
+    } else if msg.contains("完成") || msg.contains("done") || msg.contains("成功") || msg.contains("success") {
+        "处理完成，生成回复中..."
+    } else {
+        "LLM 正在思考..."
+    }
+}
+
 /// 状态持久化文件名（相对于工作目录）。
 pub const STATE_FILE: &str = ".dev-assistant-state.json";
 
@@ -183,6 +207,8 @@ pub async fn process_user_message(
     };
     ui::render_block(&user_block, markdown_renderer)?;
 
+    let mut step_round: usize = 0;
+
     let result = loop {
         // Drain buffered messages and render blocks
         for (level, msg) in output.drain() {
@@ -214,9 +240,12 @@ pub async fn process_user_message(
             ui::render_block(&block, markdown_renderer)?;
         }
 
-        // Show "thinking" indicator in the input area
+        // 检测上一轮操作，生成上下文状态提示
+        let status = derive_thinking_status(output.last_message());
+        step_round += 1;
+        let spinner = if step_round % 2 == 0 { "⏳" } else { "⌛" };
         session_log.log_thinking();
-        ui::render_input_panel(Some("⏳ LLM 正在思考，请稍候..."))?;
+        ui::render_input_panel(Some(&format!("{} {}", spinner, status)))?;
 
         tokio::select! {
             step_result = agent.step(&mut output) => {
@@ -317,8 +346,7 @@ pub fn handle_restart(
             MessageLevel::Error,
             &format!("保存状态失败: {}。未重启。", e),
         );
-        let messages = agent.get_display_messages();
-        ui::render(&messages, agent.display_messages(), None, verbose)?;
+        render_agent_messages(agent, verbose)?;
         return Ok(ReplAction::Quit);
     }
 
@@ -326,8 +354,7 @@ pub fn handle_restart(
         MessageLevel::Info,
         "正在运行 cargo build...",
     );
-    let messages = agent.get_display_messages();
-    ui::render(&messages, agent.display_messages(), None, verbose)?;
+    render_agent_messages(agent, verbose)?;
     std::io::stdout().flush().ok();
 
     // perform_restart 会在成功时 exec() 替换进程，永远不会返回；
@@ -341,10 +368,29 @@ pub fn handle_restart(
     );
 
     if should_continue {
-        let messages = agent.get_display_messages();
-        ui::render(&messages, agent.display_messages(), None, verbose)?;
+        render_agent_messages(agent, verbose)?;
         Ok(ReplAction::Continue)
     } else {
         Ok(ReplAction::Quit)
     }
+}
+
+/// 将 agent 的显示消息转换为 MessageBlock 并渲染（新 API）。
+fn render_agent_messages(agent: &Agent, verbose: bool) -> Result<(), AppError> {
+    let md = MarkdownRenderer::new();
+    let mut blocks: Vec<ui::MessageBlock> = Vec::new();
+
+    for (role, content) in agent.get_display_messages() {
+        blocks.push(ui::MessageBlock::from((role.as_str(), content.as_str())));
+    }
+    // 也包含状态消息（非 verbose 模式下跳过 Debug/Info）
+    for (role, content) in agent.display_messages() {
+        if !verbose && (role == "调试" || role == "信息") {
+            continue;
+        }
+        blocks.push(ui::MessageBlock::from((role.as_str(), content.as_str())));
+    }
+
+    ui::render_blocks(&blocks, &md)?;
+    Ok(())
 }

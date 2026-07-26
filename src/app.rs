@@ -366,7 +366,40 @@ impl App {
                 }
 
                 // 尝试内置 SlashCommand（/help /clear /exit 等）
-                if let Some((cmd, _args)) = ui::input::SlashCommand::parse(&input) {
+                if let Some((cmd, args)) = ui::input::SlashCommand::parse(&input) {
+                    // /expand 特殊处理：需要调用 ui::get_last_truncated_content
+                    if matches!(cmd, ui::input::SlashCommand::Expand) {
+                        if let Some(full_content) = ui::get_last_truncated_content() {
+                            let block = ui::MessageBlock::System {
+                                content: format!("📖 展开完整内容:\n{}", full_content),
+                            };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        } else {
+                            let block = ui::MessageBlock::System {
+                                content: "ℹ️ 没有找到被折叠的内容".to_string(),
+                            };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        }
+                        continue;
+                    }
+
+                    // /grep 特殊处理：需要搜索文件内容
+                    if matches!(cmd, ui::input::SlashCommand::Grep) {
+                        let pattern = args.join(" ");
+                        let results = run_grep(&working_dir, &pattern)?;
+                        if results.is_empty() {
+                            let block = ui::MessageBlock::System {
+                                content: format!("🔍 未找到匹配 \"{}\" 的内容", pattern),
+                            };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        } else {
+                            let content = format!("🔍 搜索 \"{}\" 找到 {} 个匹配:\n\n{}", pattern, results.len(), results.join("\n"));
+                            let block = ui::MessageBlock::System { content };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        }
+                        continue;
+                    }
+
                     match cmd.execute() {
                         ui::input::SlashAction::Exit => {
                             println!("👋 Goodbye!");
@@ -450,4 +483,94 @@ impl App {
     fn needs_restart_check(&self) -> bool {
         false
     }
+}
+
+// ── /grep 命令 ───────────────────────────────────────────────────────
+
+/// 在项目目录中搜索文本，返回带高亮的匹配行列表。
+///
+/// 每行格式：`文件路径:行号: 匹配内容`（匹配词用黄色反色高亮）
+fn run_grep(working_dir: &std::path::Path, pattern: &str) -> Result<Vec<String>, AppError> {
+    use std::io::BufRead;
+
+    if pattern.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let regex = regex::Regex::new(pattern).map_err(|e| {
+        AppError::Config(format!("无效的正则表达式 '{}': {}", pattern, e))
+    })?;
+
+    let mut results: Vec<String> = Vec::new();
+    let max_results = 50; // 最多显示 50 条结果
+    let max_file_size: u64 = 1024 * 1024; // 跳过大于 1MB 的文件
+
+    // 递归遍历 .rs 和 .md 以及 Cargo.toml 等文本文件
+    let entries = walkdir::WalkDir::new(working_dir)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            // 跳过 .git, target, node_modules 等目录
+            if e.file_type().is_dir() {
+                return name != ".git" && name != "target" && name != "node_modules"
+                    && name != ".kb" && name != ".mimocode";
+            }
+            true
+        })
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file()
+                && e.path().extension().map_or(false, |ext| {
+                    matches!(ext.to_str(), Some("rs" | "md" | "toml" | "json" | "yaml" | "yml" | "sh" | "txt"))
+                })
+        });
+
+    for entry in entries {
+        if results.len() >= max_results {
+            break;
+        }
+
+        let path = entry.path();
+        // 跳过过大文件
+        if let Ok(meta) = std::fs::metadata(path) {
+            if meta.len() > max_file_size {
+                continue;
+            }
+        }
+
+        // 计算相对路径
+        let rel_path = path.strip_prefix(working_dir)
+            .unwrap_or(path);
+
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let reader = std::io::BufReader::new(file);
+
+        for (line_num, line_result) in reader.lines().enumerate() {
+            if results.len() >= max_results {
+                break;
+            }
+            let line = match line_result {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+
+            if regex.is_match(&line) {
+                // 高亮显示匹配词：黄色反色
+                let highlighted = regex.replace_all(&line, |caps: &regex::Captures| {
+                    format!("\x1b[7;33m{}\x1b[0m", &caps[0])
+                });
+                results.push(format!(
+                    "\x1b[2m{}:{}\x1b[0m: {}",
+                    rel_path.display(),
+                    line_num + 1,
+                    highlighted
+                ));
+            }
+        }
+    }
+
+    Ok(results)
 }

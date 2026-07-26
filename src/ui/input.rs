@@ -96,6 +96,10 @@ pub enum SlashCommand {
     Verbose,
     /// /quiet — 安静模式
     Quiet,
+    /// /expand — 展开上一条被折叠的内容
+    Expand,
+    /// /grep — 搜索文件内容（支持正则）
+    Grep,
 }
 
 impl SlashCommand {
@@ -108,6 +112,8 @@ impl SlashCommand {
             "exit" | "quit" => Some(Self::Exit),
             "verbose" => Some(Self::Verbose),
             "quiet" => Some(Self::Quiet),
+            "expand" => Some(Self::Expand),
+            "grep" | "search" => Some(Self::Grep),
             _ => None,
         }
     }
@@ -156,6 +162,17 @@ impl SlashCommand {
                 println!("🔇 切换到安静模式");
                 SlashAction::ChangeMode(false)
             }
+            SlashCommand::Expand => {
+                // /expand 由调用方在 REPL 循环中处理（需要访问 ui::get_last_truncated_content）
+                // execute() 返回 Continue 并打印占位提示
+                println!("📖 /expand 命令正在展开上一段被折叠的内容...");
+                SlashAction::Continue
+            }
+            SlashCommand::Grep => {
+                // /grep 由调用方在 REPL 循环中处理（需要访问文件系统和工作目录）
+                println!("🔍 /grep 命令正在搜索文件内容...");
+                SlashAction::Continue
+            }
         }
     }
 
@@ -164,6 +181,9 @@ impl SlashCommand {
         println!("  /help      - 显示本帮助");
         println!("  /history   - 显示对话历史");
         println!("  /clear     - 清屏");
+        println!("  /expand    - 展开上一段被折叠的内容");
+        println!("  /grep      - 搜索文件内容（支持正则，用法: /grep <模式> [路径]）");
+        println!("  /search    - 同 /grep");
         println!("  /exit      - 退出程序");
         println!("  /quit      - 退出程序（同 /exit）");
         println!("  /verbose   - 切换到详细模式（显示所有消息）");
@@ -235,5 +255,46 @@ mod tests {
     #[test]
     fn test_execute_clear() {
         assert_eq!(SlashCommand::Clear.execute(), SlashAction::Continue);
+    }
+
+    #[test]
+    fn test_expand_parsed() {
+        let (cmd, _) = SlashCommand::parse("/expand").unwrap();
+        assert_eq!(cmd, SlashCommand::Expand);
+    }
+
+    #[test]
+    fn test_expand_from_str() {
+        assert_eq!(SlashCommand::from_str("expand"), Some(SlashCommand::Expand));
+    }
+
+    #[test]
+    fn test_expand_execute_returns_continue() {
+        assert_eq!(SlashCommand::Expand.execute(), SlashAction::Continue);
+    }
+
+    #[test]
+    fn test_grep_parsed() {
+        let (cmd, args) = SlashCommand::parse("/grep fn main").unwrap();
+        assert_eq!(cmd, SlashCommand::Grep);
+        assert_eq!(args, vec!["fn", "main"]);
+    }
+
+    #[test]
+    fn test_search_parsed() {
+        let (cmd, args) = SlashCommand::parse("/search pattern").unwrap();
+        assert_eq!(cmd, SlashCommand::Grep);
+        assert_eq!(args, vec!["pattern"]);
+    }
+
+    #[test]
+    fn test_grep_from_str() {
+        assert_eq!(SlashCommand::from_str("grep"), Some(SlashCommand::Grep));
+        assert_eq!(SlashCommand::from_str("search"), Some(SlashCommand::Grep));
+    }
+
+    #[test]
+    fn test_grep_execute_returns_continue() {
+        assert_eq!(SlashCommand::Grep.execute(), SlashAction::Continue);
     }
 }

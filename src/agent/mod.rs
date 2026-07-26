@@ -523,8 +523,21 @@ impl Agent {
 
         let total = stages.len();
         let mut context = String::new();
+        let pipeline_start = std::time::Instant::now();
+
+        // 初始进度条
+        let _ = crate::ui::render_progress_bar(0, total, &stages[0].name, &pipeline_start, "准备就绪");
 
         for (i, stage) in stages.into_iter().enumerate() {
+            // 更新进度条（当前阶段进行中）
+            let _ = crate::ui::render_progress_bar(
+                i,
+                total,
+                &stage.name,
+                &pipeline_start,
+                "进行中...",
+            );
+
             self.add_display_message(
                 crate::utils::message_level::MessageLevel::Info,
                 &format!("🔄 阶段 {}/{}: {}...", i + 1, total, stage.name),
@@ -595,6 +608,9 @@ impl Agent {
                 }
             }
         }
+
+        // 完成：100% 进度
+        let _ = crate::ui::render_progress_bar(total, total, "全部完成", &pipeline_start, "🎉 流水线执行完成！");
 
         self.add_display_message(
             crate::utils::message_level::MessageLevel::Success,

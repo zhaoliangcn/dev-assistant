@@ -23,6 +23,18 @@ impl UIMessageOutput {
     pub fn drain(&mut self) -> Vec<(MessageLevel, String)> {
         std::mem::take(&mut self.buffer)
     }
+
+    /// 获取最后一条消息的内容（不消费缓冲区）。
+    /// 用于在下一轮 step 前生成上下文状态提示。
+    pub fn last_message(&self) -> Option<&str> {
+        self.buffer.last().map(|(_, msg)| msg.as_str())
+    }
+
+    /// 获取最后一条消息的级别。
+    #[allow(dead_code)]
+    pub fn last_level(&self) -> Option<MessageLevel> {
+        self.buffer.last().map(|(level, _)| *level)
+    }
 }
 
 impl MessageOutput for UIMessageOutput {

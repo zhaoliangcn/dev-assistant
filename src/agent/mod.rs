@@ -6,7 +6,7 @@ pub mod identity;
 pub mod token_counter;
 
 pub use context::ContextManager;
-pub use identity::AgentIdentity;
+pub use identity::{AgentIdentity, PipelineStage};
 
 use std::sync::Arc;
 
@@ -404,6 +404,198 @@ impl Agent {
     #[allow(dead_code)]
     pub fn depth(&self) -> usize {
         self.depth
+    }
+
+    /// 运行流水线：按 设计→编码→审查→修复→记录 五个阶段顺序执行。
+    ///
+    /// 每个阶段创建一个对应身份的子 Agent，上一个阶段的输出作为
+    /// 下一个阶段的上下文传入。
+    pub async fn run_pipeline(
+        &mut self,
+        task: &str,
+        verbose: bool,
+    ) -> Result<(), AppError> {
+        let stages = vec![
+            PipelineStage {
+                name: "🏗 架构设计".to_string(),
+                agent_type: AgentIdentity::Architect,
+                task_template: format!(
+                    "请为以下任务设计架构方案。\n\n\
+                     需求：\n\
+                     {}\n\n\
+                     请输出：\n\
+                     1. 模块结构和职责划分\n\
+                     2. 接口定义（输入/输出）\n\
+                     3. 数据流设计\n\
+                     4. 关键设计决策和理由\n\n\
+                     请使用 kb_store 记录架构决策。",
+                    task
+                ),
+                max_iterations: 10,
+            },
+            PipelineStage {
+                name: "💻 代码实现".to_string(),
+                agent_type: AgentIdentity::Implementer,
+                task_template: format!(
+                    "请按照架构设计实现代码。\n\n\
+                     任务：\n\
+                     {}\n\n\
+                     上一阶段输出（架构设计）：\n\
+                     {{context}}\n\n\
+                     请输出：\n\
+                     1. 完整的代码实现\n\
+                     2. 单元测试\n\
+                     3. 确保代码编译通过\n\n\
+                     注意：严格遵循架构设计，不擅自修改接口定义。",
+                    task
+                ),
+                max_iterations: 20,
+            },
+            PipelineStage {
+                name: "🔍 代码审查".to_string(),
+                agent_type: AgentIdentity::Reviewer,
+                task_template: format!(
+                    "请审查代码实现。\n\n\
+                     任务：\n\
+                     {}\n\n\
+                     上一阶段输出（代码实现）：\n\
+                     {{context}}\n\n\
+                     请检查：\n\
+                     1. 代码质量和可读性\n\
+                     2. 安全性（路径遍历、命令注入等）\n\
+                     3. 性能问题\n\
+                     4. 是否符合架构设计规范\n\
+                     5. 错误处理是否完善\n\n\
+                     请输出问题清单（含严重程度）和改进建议。",
+                    task
+                ),
+                max_iterations: 10,
+            },
+            PipelineStage {
+                name: "🔧 问题修复".to_string(),
+                agent_type: AgentIdentity::Debugger,
+                task_template: format!(
+                    "请根据审查结果修复代码问题。\n\n\
+                     任务：\n\
+                     {}\n\n\
+                     上一阶段输出（审查报告）：\n\
+                     {{context}}\n\n\
+                     请：\n\
+                     1. 修复所有发现的问题\n\
+                     2. 确保代码编译通过\n\
+                     3. 验证修复效果\n\n\
+                     注意：只修复审查中提出的问题，不要引入新的功能变更。",
+                    task
+                ),
+                max_iterations: 15,
+            },
+            PipelineStage {
+                name: "📋 进度记录".to_string(),
+                agent_type: AgentIdentity::General,
+                task_template: format!(
+                    "请记录任务完成进度。\n\n\
+                     任务：\n\
+                     {}\n\n\
+                     已完成的工作：\n\
+                     {{context}}\n\n\
+                     请使用 kb_store 工具记录：\n\
+                     1. 完成的功能列表\n\
+                     2. 修改的文件清单\n\
+                     3. 测试结果概要\n\
+                     4. 未解决的问题（如果有）\n\n\
+                     然后使用 git add 和 git commit 提交代码变更。",
+                    task
+                ),
+                max_iterations: 5,
+            },
+        ];
+
+        let total = stages.len();
+        let mut context = String::new();
+
+        for (i, stage) in stages.into_iter().enumerate() {
+            self.add_display_message(
+                crate::utils::message_level::MessageLevel::Info,
+                &format!("🔄 阶段 {}/{}: {}...", i + 1, total, stage.name),
+            );
+
+            // 替换 context 占位符
+            let stage_task = stage.task_template.replace("{context}", &context);
+
+            let subagent_tools = self.tools
+                .new_subagent_registry_with_identity(&stage.agent_type);
+
+            let mut subagent = match Agent::new_subagent(
+                self.llm.clone(),
+                subagent_tools,
+                self.depth + 1,
+                &stage_task,
+                "",
+                stage.max_iterations,
+                self.context.max_tokens,
+                Some(stage.agent_type),
+            ) {
+                Ok(agent) => agent,
+                Err(e) => {
+                    self.add_display_message(
+                        crate::utils::message_level::MessageLevel::Error,
+                        &format!("❌ 创建阶段 \"{}\" 的子代理失败: {}", stage.name, e),
+                    );
+                    return Err(e);
+                }
+            };
+
+            let mut sub_output = crate::ui::UIMessageOutput::new(verbose);
+            let result = Box::pin(subagent.run(stage_task, &mut sub_output)).await;
+
+            // 收集子代理输出消息到主 Agent 的显示缓冲区
+            for (level, msg) in sub_output.drain() {
+                self.add_display_message(level, &msg);
+            }
+
+            match result {
+                Ok(agent_result) if agent_result.success => {
+                    self.add_display_message(
+                        crate::utils::message_level::MessageLevel::Success,
+                        &format!("✅ 阶段 \"{}\" 完成", stage.name),
+                    );
+                    // 将阶段输出保存为下一阶段的上下文
+                    context = agent_result.message;
+                }
+                Ok(agent_result) => {
+                    self.add_display_message(
+                        crate::utils::message_level::MessageLevel::Error,
+                        &format!(
+                            "❌ 阶段 \"{}\" 失败: {}",
+                            stage.name, agent_result.message
+                        ),
+                    );
+                    return Err(AppError::Config(format!(
+                        "流水线阶段 '{}' 失败: {}",
+                        stage.name, agent_result.message
+                    )));
+                }
+                Err(e) => {
+                    self.add_display_message(
+                        crate::utils::message_level::MessageLevel::Error,
+                        &format!("❌ 阶段 \"{}\" 出错: {}", stage.name, e),
+                    );
+                    return Err(e);
+                }
+            }
+        }
+
+        self.add_display_message(
+            crate::utils::message_level::MessageLevel::Success,
+            "🎉 流水线执行完成！所有阶段已成功完成。",
+        );
+
+        Ok(())
+    }
+
+    /// 获取历史消息列表（用于 UI 展示等）
+    pub fn history_messages(&self) -> &[crate::llm::LlmMessage] {
+        &self.context.history.messages
     }
 
     // -----------------------------------------------------------------------

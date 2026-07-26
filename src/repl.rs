@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::agent::{Agent, AgentStep};
 use crate::session::SessionLogger;
-use crate::ui::{self, UIMessageOutput};
+use crate::ui::{self, UIMessageOutput, MarkdownRenderer};
 use crate::utils::message_level::MessageLevel;
 use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
@@ -166,43 +166,57 @@ pub async fn process_user_message(
     working_dir: &Path,
     restart_args: &[String],
     verbose: bool,
+    markdown_renderer: &MarkdownRenderer,
 ) -> Result<ReplAction, AppError> {
     // Clear stale display messages from previous turn so they
     // don't accumulate and stack on each render.
     agent.reset_display_for_new_turn();
-
-    // Clear the screen before agent execution so that any tracing
-    // logs (which go to stderr) don't appear inside the split-pane UI.
-    print!("\x1b[2J\x1b[H");
-    {
-        std::io::stdout().flush().map_err(AppError::Io)?;
-    }
 
     // ── Step-by-step agent loop with real-time UI updates ──
     let mut output = UIMessageOutput::new(verbose);
     session_log.log_user(input);
     agent.start_turn(input.to_string(), &mut output);
 
+    // 渲染用户消息
+    let user_block = ui::MessageBlock::User {
+        content: input.to_string(),
+    };
+    ui::render_block(&user_block, markdown_renderer)?;
+
     let result = loop {
-        // Drain buffered messages and re-render UI
+        // Drain buffered messages and render blocks
         for (level, msg) in output.drain() {
             let label = level.label();
             session_log.log_status(label, &msg);
             agent.add_display_message(level, &msg);
+            
+            // 根据消息级别渲染不同类型的块
+            let block = match level {
+                MessageLevel::Error => ui::MessageBlock::Error { content: msg },
+                MessageLevel::Warning => ui::MessageBlock::System { content: format!("⚠️ {}", msg) },
+                MessageLevel::Info => {
+                    // 检测消息内容，尝试分类
+                    if msg.starts_with("💭") || msg.contains("思考") || msg.contains("thinking") {
+                        ui::MessageBlock::Thinking { content: msg }
+                    } else if msg.starts_with("🔧") || msg.contains("工具") {
+                        ui::MessageBlock::System { content: msg }
+                    } else {
+                        ui::MessageBlock::System { content: format!("ℹ️ {}", msg) }
+                    }
+                }
+                MessageLevel::Debug => ui::MessageBlock::System { content: format!("🐛 {}", msg) },
+                MessageLevel::Success => ui::MessageBlock::ToolResult {
+                    tool_name: "操作".to_string(),
+                    success: true,
+                    content: msg,
+                },
+            };
+            ui::render_block(&block, markdown_renderer)?;
         }
-        let messages = agent.get_display_messages();
-        ui::render(&messages, &agent.display_messages(), None, verbose)?;
 
-        // Show "thinking" indicator in the input area so it doesn't
-        // get drowned out by subsequent messages in the message panel.
+        // Show "thinking" indicator in the input area
         session_log.log_thinking();
-        let messages = agent.get_display_messages();
-        ui::render(
-            &messages,
-            &agent.display_messages(),
-            Some("⏳ LLM 正在思考，请稍候..."),
-            verbose,
-        )?;
+        ui::render_input_panel(Some("⏳ LLM 正在思考，请稍候..."))?;
 
         tokio::select! {
             step_result = agent.step(&mut output) => {
@@ -261,6 +275,25 @@ pub async fn process_user_message(
     if result.restart_requested {
         return handle_restart(agent, working_dir, restart_args, verbose);
     }
+
+    Ok(ReplAction::Continue)
+}
+
+/// 处理 /pipeline 命令：启动多阶段流水线（设计→编码→审查→修复→记录）。
+///
+/// 每个阶段创建一个对应身份的子 Agent，上一个阶段的输出作为
+/// 下一个阶段的上下文传入。
+pub async fn handle_pipeline_command(
+    agent: &mut Agent,
+    task: &str,
+    verbose: bool,
+) -> Result<ReplAction, AppError> {
+    agent.add_display_message(
+        MessageLevel::Info,
+        &format!("🚀 启动流水线: {}", task),
+    );
+
+    agent.run_pipeline(task, verbose).await?;
 
     Ok(ReplAction::Continue)
 }

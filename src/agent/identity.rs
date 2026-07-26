@@ -244,6 +244,15 @@ impl Default for AgentIdentity {
     }
 }
 
+/// 流水线阶段定义
+#[derive(Debug, Clone)]
+pub struct PipelineStage {
+    pub name: String,
+    pub agent_type: AgentIdentity,
+    pub task_template: String,
+    pub max_iterations: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

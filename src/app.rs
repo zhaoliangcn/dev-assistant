@@ -13,7 +13,7 @@ use crate::security::SecurityPolicy;
 use crate::session::SessionLogger;
 use crate::skills::{default_skills_dir, discover_skills, Skill};
 use crate::tools::{async_tool::AsyncToolRegistry, ToolRegistry};
-use crate::ui::{self, CliMessageOutput};
+use crate::ui::{self, CliMessageOutput, MarkdownRenderer};
 use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
 
@@ -300,7 +300,9 @@ impl App {
         let restart_args = self.config.restart_args.clone();
         let verbose = self.config.verbose;
 
-        // 先打印欢迎信息和创建会话日志
+        // 初始化 UI 和 Markdown 渲染器
+        let markdown_renderer = MarkdownRenderer::new();
+        ui::init_ui()?;
         println!("🚀 Dev-Assistant Rust CLI");
         println!("Project: {}", self.config.working_dir.display());
         println!("Type '/quit' or '/exit' to quit.\n");
@@ -310,9 +312,8 @@ impl App {
         session_log.log_status("信息", &format!("模型: {}", self.agent.active_model()));
 
         loop {
-            // Render the split-pane UI: messages on top, input at bottom
-            let messages = self.agent.get_display_messages();
-            ui::render(&messages, &self.agent.display_messages(), None, verbose)?;
+            // 更新输入面板
+            ui::render_input_panel(None)?;
 
             let mut input = String::new();
             let bytes_read = std::io::stdin()
@@ -329,11 +330,40 @@ impl App {
 
             // ── Slash 命令分发 ──
             if input.starts_with('/') {
+                // 处理 /pipeline 命令（需要异步上下文）
+                if input.starts_with("/pipeline") {
+                    let task = input.strip_prefix("/pipeline").unwrap_or("").trim().to_string();
+                    if task.is_empty() {
+                        let block = ui::MessageBlock::Error {
+                            content: "用法: /pipeline <任务描述>\n例如: /pipeline 实现一个缓存系统".to_string(),
+                        };
+                        ui::render_block(&block, &markdown_renderer)?;
+                        continue;
+                    }
+                    self.agent.add_display_message(
+                        crate::utils::message_level::MessageLevel::Info,
+                        &format!("🚀 启动流水线: {}", task),
+                    );
+                    let block = ui::MessageBlock::System {
+                        content: format!("🚀 启动流水线: {}", task),
+                    };
+                    ui::render_block(&block, &markdown_renderer)?;
+                    match self.agent.run_pipeline(&task, verbose).await {
+                        Ok(()) => {}
+                        Err(e) => {
+                            let block = ui::MessageBlock::Error {
+                                content: format!("流水线执行失败: {}", e),
+                            };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        }
+                    }
+                    continue;
+                }
+
                 match handle_slash(&input, &mut self.agent, &working_dir) {
                     Some(SlashOutcome::Quit) => break,
                     Some(SlashOutcome::Continue) => {
-                        let messages = self.agent.get_display_messages();
-                        ui::render(&messages, &self.agent.display_messages(), None, verbose)?;
+                        ui::render_input_panel(None)?;
                         continue;
                     }
                     None => {}
@@ -352,6 +382,7 @@ impl App {
                 &working_dir,
                 &restart_args,
                 verbose,
+                &markdown_renderer,
             )
             .await?;
 

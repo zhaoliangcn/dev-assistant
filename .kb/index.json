@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "updated": "2026-07-26T07:11:41.868542+00:00",
+  "entries": {
+    "ADR-002-pipeline-command-design": {
+      "path": "decisions/ADR-002-pipeline-command-design.md",
+      "type": "decision",
+      "title": "流水线 (/pipeline) 命令设计与实现",
+      "tags": [
+        "pipeline",
+        "slash-command",
+        "subagent",
+        "workflow"
+      ],
+      "status": "accepted",
+      "author": "dev-assistant",
+      "created": "2026-07-26",
+      "updated": "2026-07-26T07:11:41.868542+00:00"
+    }
+  }
+}

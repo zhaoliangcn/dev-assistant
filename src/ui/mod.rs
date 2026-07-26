@@ -1,4 +1,8 @@
+pub mod blocks;
+pub mod markdown;
 pub mod output_impls;
+pub use blocks::MessageBlock;
+pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};
 
 use std::io::{self, Write};
@@ -23,14 +27,102 @@ fn prefix_width(prefix: &str) -> usize {
     UnicodeWidthStr::width(prefix)
 }
 
-// ── 主渲染函数 ────────────────────────────────────────────────────────
+// ── 新 API：块级渲染 ──────────────────────────────────────────────────
 
-/// Render the full UI with three panels:
-///   - 输出面板 (conversation panel): message history
-///   - 工具面板 (tool status panel): tool execution status
-///   - 输入面板 (input panel): current input or status
-///
-/// `verbose` — when false, only show user messages and assistant responses
+/// 渲染单个消息块（追加模式，不清屏）
+/// 
+/// 这是新的核心渲染 API，支持流式输出，保留终端滚动历史。
+pub fn render_block(
+    block: &MessageBlock,
+    markdown_renderer: &MarkdownRenderer,
+) -> io::Result<()> {
+    let mut stdout = io::stdout();
+    let term_width = get_terminal_width().unwrap_or(80);
+    
+    // 分隔线块
+    if matches!(block, MessageBlock::Divider) {
+        writeln!(stdout, "{}", "─".repeat(term_width))?;
+        stdout.flush()?;
+        return Ok(());
+    }
+    
+    let prefix = block.prefix();
+    let pw = prefix_width(prefix);
+    
+    // 获取内容（需要 Markdown 渲染的块先渲染）
+    let content = if block.needs_markdown() {
+        markdown_renderer.render(&block.content())
+    } else {
+        block.content()
+    };
+    
+    // 打印消息分隔线
+    writeln!(stdout)?;
+    writeln!(stdout, "{}", "─".repeat(term_width))?;
+    
+    for (i, line) in content.lines().enumerate() {
+        if line.is_empty() {
+            writeln!(stdout)?;
+        } else if i == 0 {
+            writeln!(stdout, "{} │ {}", prefix, line)?;
+        } else {
+            writeln!(stdout, "{:width$} │ {}", "", line, width = pw)?;
+        }
+    }
+    
+    stdout.flush()?;
+    Ok(())
+}
+
+/// 渲染消息块列表（追加模式）
+pub fn render_blocks(
+    blocks: &[MessageBlock],
+    markdown_renderer: &MarkdownRenderer,
+) -> io::Result<()> {
+    for block in blocks {
+        render_block(block, markdown_renderer)?;
+    }
+    Ok(())
+}
+
+/// 更新输入面板（清除旧内容，显示新状态）
+pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
+    let mut stdout = io::stdout();
+    
+    // 移动到行首并清除当前行
+    write!(stdout, "\x1b[1G\x1b[K")?;
+    
+    match status_line {
+        Some(status) => writeln!(stdout, "│ 输入面板 — {}", status)?,
+        None => write!(stdout, "│ > ")?,
+    }
+    
+    // 清除行尾残留内容
+    write!(stdout, "\x1b[J")?;
+    stdout.flush()?;
+    
+    Ok(())
+}
+
+/// 初始化 UI（显示标题栏）
+pub fn init_ui() -> io::Result<()> {
+    let mut stdout = io::stdout();
+    let term_width = get_terminal_width().unwrap_or(80);
+    
+    writeln!(stdout, "{}", "═".repeat(term_width))?;
+    writeln!(stdout, "  Dev-Assistant — 消息窗口")?;
+    writeln!(stdout, "{}", "═".repeat(term_width))?;
+    writeln!(stdout)?;
+    
+    stdout.flush()?;
+    Ok(())
+}
+
+// ── 兼容旧 API：render() ──────────────────────────────────────────────
+
+/// Render the full UI with three panels (兼容旧 API，使用追加模式)
+/// 
+/// 注意：此函数现在使用追加模式渲染，不再清除屏幕。
 pub fn render(
     conversation: &[(String, String)],
     status: &[(String, String)],
@@ -40,18 +132,8 @@ pub fn render(
     let mut stdout = io::stdout();
     let term_width = get_terminal_width().unwrap_or(80);
 
-    // 清屏并将光标移到左上角
-    print!("\x1b[2J\x1b[H");
-    stdout.flush()?;
-
-    // ── 标题栏 ──
-    writeln!(stdout, "{}", "═".repeat(term_width))?;
-    writeln!(stdout, "  Dev-Assistant — 消息窗口")?;
-    writeln!(stdout, "{}", "═".repeat(term_width))?;
-
     // ── 工具面板（工具执行状态）──
     if !status.is_empty() {
-        // 非 verbose 模式下只显示成功/错误/警告，隐藏信息/调试
         let status_visible: Vec<&(String, String)> = status.iter()
             .filter(|(role, _)| {
                 if verbose { return true; }
@@ -73,7 +155,6 @@ pub fn render(
                     } else if i == 0 {
                         writeln!(stdout, "│ {} │ {}", prefix, line)?;
                     } else {
-                        // 后续行缩进对齐第一行的前缀位置
                         writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
                     }
                 }
@@ -87,7 +168,6 @@ pub fn render(
     writeln!(stdout, "│ 输出面板")?;
     writeln!(stdout, "{}", "─".repeat(term_width))?;
 
-    // 过滤消息：非 verbose 模式下只显示用户、助手对话和重要状态
     let visible: Vec<&(String, String)> = conversation.iter()
         .filter(|(role, _)| {
             if verbose { return true; }
@@ -111,7 +191,6 @@ pub fn render(
                 } else if i == 0 {
                     writeln!(stdout, "│ {} │ {}", prefix, line)?;
                 } else {
-                    // 后续行缩进对齐第一行的前缀位置
                     writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
                 }
             }
@@ -132,7 +211,6 @@ pub fn render(
             write!(stdout, "│ > ")?;
         }
     }
-    // 清除可能残留的旧内容
     write!(stdout, "\x1b[J")?;
     stdout.flush()?;
 

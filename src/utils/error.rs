@@ -45,4 +45,28 @@ impl AppError {
             _ => false,
         }
     }
+    
+    /// 判断错误是否可重试
+    /// 
+    /// 只有瞬时错误才应该重试：
+    /// - RateLimited: 需要等待后重试
+    /// - Io(Interrupted): 被中断，可以重试
+    /// - Http(timeout/connect): 网络超时/连接失败
+    /// - Llm: LLM 服务暂时不可用
+    /// 
+    /// 不可重试的错误：
+    /// - NotFound: 文件不存在
+    /// - PermissionDenied: 权限拒绝
+    /// - ToolNotFound: 工具不存在
+    /// - Security: 安全策略阻止
+    /// - Config: 配置错误
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            AppError::RateLimited(_) => true,
+            AppError::Io(e) => matches!(e.kind(), std::io::ErrorKind::Interrupted),
+            AppError::Http(e) => e.is_timeout() || e.is_connect(),
+            AppError::Llm(_) => true,
+            _ => false,
+        }
+    }
 }

@@ -86,7 +86,9 @@ impl ContextManager {
             .collect();
 
         let mut result: Vec<(String, String)> = Vec::new();
-        for msg in &self.history.messages[self.display.history_start..] {
+        // 确保 history_start 在有效范围内，防止越界访问
+        let history_start = self.display.history_start.min(self.history.messages.len());
+        for msg in &self.history.messages[history_start..] {
             if msg.role == "system" {
                 continue;
             }

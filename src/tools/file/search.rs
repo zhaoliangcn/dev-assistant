@@ -7,7 +7,7 @@ use tracing::debug;
 use walkdir::WalkDir;
 
 use super::read_shared::SKIP_DIRS;
-use crate::tools::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
+use crate::tools::{common, ToolArgs, ToolContext, ToolDefinition, ToolResult};
 use crate::utils::error::AppError;
 
 pub fn glob_tool() -> ToolDefinition {
@@ -95,6 +95,11 @@ fn glob_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, Ap
                     continue;
                 }
             }
+        }
+
+        // 检查 gitignore
+        if common::check_gitignore(entry_path, &context.resources).is_some() {
+            continue;
         }
 
         if glob_set.is_match(entry.path()) {

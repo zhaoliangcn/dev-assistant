@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info};
 
-use crate::tools::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
+use crate::tools::{common, ToolArgs, ToolContext, ToolDefinition, ToolResult};
 use crate::utils::error::AppError;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -541,10 +541,8 @@ fn analyze_codebase_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_else(|| vec!["target/**".to_string(), ".git/**".to_string(), "node_modules/**".to_string()]);
 
-    let batch_size = args.arguments["batch_size"]
-        .as_u64()
-        .map(|n| n as usize)
-        .unwrap_or(5);
+    let batch_size = common::get_lenient_usize(&args.arguments["batch_size"], "batch_size", 5)
+        .map_err(|e| AppError::Llm(e))?;
 
     let analysis_depth = args.arguments["analysis_depth"].as_str().unwrap_or("standard");
 
@@ -765,7 +763,7 @@ fn generate_report(records: &[AnalysisRecord], report_type: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+
 
     #[test]
     fn analysis_type_from_str() {
@@ -811,6 +809,7 @@ mod tests {
         };
         let context = ToolContext {
             working_dir: temp_dir.path().to_path_buf(),
+            resources: None,
         };
 
         let result = analyze_codebase_handler(&args, &context).unwrap();

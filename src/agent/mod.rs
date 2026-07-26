@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::llm::{LlmClient, LlmResponse, ToolCall};
 use crate::persist::SessionStore;
 use crate::skills::Skill;
-use crate::tools::{ToolRegistry, ToolResult};
+use crate::tools::{async_tool::AsyncToolRegistry, ToolRegistry, ToolResult};
 use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
 use tracing::debug;
@@ -52,6 +52,7 @@ pub enum AgentStep {
 pub struct Agent {
     context: ContextManager,
     tools: ToolRegistry,
+    async_tools: Option<AsyncToolRegistry>,
     llm: Arc<LlmClient>,
     max_iterations: usize,
     depth: usize,
@@ -64,6 +65,7 @@ impl Agent {
     pub fn new(
         context: ContextManager,
         tools: ToolRegistry,
+        async_tools: Option<AsyncToolRegistry>,
         llm: Arc<LlmClient>,
         config: AgentConfig,
         skills: Vec<Skill>,
@@ -72,12 +74,22 @@ impl Agent {
         Self {
             context,
             tools,
+            async_tools,
             llm,
             max_iterations: config.max_iterations,
             depth: 0,
             skills,
             session_store,
         }
+    }
+
+    /// 获取所有工具的 schemas（同步工具 + 异步工具）
+    pub fn get_all_tool_schemas(&self) -> Vec<crate::llm::ToolSchema> {
+        let mut schemas = self.tools.get_tool_schemas();
+        if let Some(ref async_tools) = self.async_tools {
+            schemas.extend(async_tools.get_tool_schemas());
+        }
+        schemas
     }
 
     // ----- UI 展示缓冲区委托 -----
@@ -202,7 +214,7 @@ impl Agent {
         output.info(&format!("↻ 第 {} 轮：向 LLM 发送请求...", self.context.consecutive_no_tool_rounds + 1));
 
         let messages = self.context.build_messages();
-        let tool_schemas = self.tools.get_tool_schemas();
+        let tool_schemas = self.get_all_tool_schemas();
 
         let response = self.llm.call(messages, tool_schemas).await?;
 
@@ -307,7 +319,7 @@ impl Agent {
             }
             LlmResponse::Error(err) => {
                 output.error(&format!("LLM 错误: {}", err));
-                return Err(AppError::Llm(format!("LLM error: {}", err)));
+                Err(AppError::Llm(format!("LLM error: {}", err)))
             }
         }
     }
@@ -379,6 +391,7 @@ impl Agent {
         Ok(Self {
             context: ctx,
             tools,
+            async_tools: None,
             llm,
             max_iterations,
             depth,
@@ -411,19 +424,49 @@ impl Agent {
                 continue;
             }
 
-            // 根据工具的 skip_security 标记决定走 execute_approved 还是 execute。
-            // finish/restart 等元工具在 ToolDefinition 中标了 skip_security: true。
-            let result = match self.tools.execute_with_policy(
-                &tool_call.function.name,
-                tool_call.function.arguments.clone(),
-            ) {
-                Ok(r) => r,
-                Err(e) => ToolResult {
-                    success: false,
-                    content: format!("[error] Tool '{}' execution failed: {}", tool_call.function.name, e),
-                    security_evaluation: None,
-                    restart_requested: false,
-                },
+            // 首先检查异步工具注册表
+            let result = if let Some(ref async_tools) = self.async_tools {
+                match async_tools.execute_with_policy(
+                    &tool_call.function.name,
+                    tool_call.function.arguments.clone(),
+                ).await {
+                    Ok(r) => r,
+                    Err(AppError::ToolNotFound(_)) => {
+                        // 异步工具不存在，回退到同步工具
+                        match self.tools.execute_with_policy(
+                            &tool_call.function.name,
+                            tool_call.function.arguments.clone(),
+                        ) {
+                            Ok(r) => r,
+                            Err(e) => ToolResult {
+                                success: false,
+                                content: format!("[error] Tool '{}' execution failed: {}", tool_call.function.name, e),
+                                security_evaluation: None,
+                                restart_requested: false,
+                            },
+                        }
+                    }
+                    Err(e) => ToolResult {
+                        success: false,
+                        content: format!("[error] Tool '{}' execution failed: {}", tool_call.function.name, e),
+                        security_evaluation: None,
+                        restart_requested: false,
+                    },
+                }
+            } else {
+                // 没有异步工具注册表，使用同步工具
+                match self.tools.execute_with_policy(
+                    &tool_call.function.name,
+                    tool_call.function.arguments.clone(),
+                ) {
+                    Ok(r) => r,
+                    Err(e) => ToolResult {
+                        success: false,
+                        content: format!("[error] Tool '{}' execution failed: {}", tool_call.function.name, e),
+                        security_evaluation: None,
+                        restart_requested: false,
+                    },
+                }
             };
 
             // Security 评估由 ToolRegistry::execute 处理：Critical/High/Medium

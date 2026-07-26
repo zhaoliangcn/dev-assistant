@@ -2,9 +2,13 @@ use std::env;
 use std::path::{Component, Path, PathBuf};
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::utils::error::AppError;
+
+pub mod approval;
+pub use approval::*;
 
 fn load_whitelist() -> Vec<String> {
     env::var("COMMAND_WHITELIST")
@@ -86,7 +90,7 @@ fn contains_symlink(target: &Path, base: &Path) -> bool {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DangerLevel {
     Low,
     Medium,

@@ -1,13 +1,8 @@
 //! 读取类工具：`read_file`、`batch_read_files`。
 
-use std::path::Path;
-
-use globset::Glob;
-use walkdir::WalkDir;
-
 use super::io::read_file_content;
-use super::read_shared::{DEFAULT_READ_LIMIT, SKIP_DIRS};
-use crate::tools::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
+use super::read_shared::{DEFAULT_READ_LIMIT, generate_code_summary, generate_read_info, resolve_glob_patterns};
+use crate::tools::{common, ToolArgs, ToolContext, ToolDefinition, ToolKind, ToolMetadata, ToolNamespace, ToolResult};
 use crate::utils::error::AppError;
 
 pub fn read_file_tool() -> ToolDefinition {
@@ -75,14 +70,25 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
         .as_str()
         .ok_or_else(|| AppError::Llm("file_path is required".to_string()))?;
 
-    let offset = args.arguments["offset"].as_u64().unwrap_or(1).max(1) as usize;
+    let offset = common::get_lenient_usize(&args.arguments["offset"], "offset", 1)
+        .map_err(|e| AppError::Llm(e))?
+        .max(1);
 
-    let limit = args.arguments["limit"]
-        .as_u64()
-        .map(|v| v as usize)
-        .unwrap_or(DEFAULT_READ_LIMIT);
+    let limit = common::get_lenient_usize(&args.arguments["limit"], "limit", DEFAULT_READ_LIMIT)
+        .map_err(|e| AppError::Llm(e))?;
 
-    let full_path = context.working_dir.join(file_path);
+    let full_path = common::resolve_model_path(&context.working_dir, file_path);
+    
+    // 检查 gitignore
+    if let Some(reason) = common::check_gitignore(&full_path, &context.resources) {
+        return Ok(ToolResult {
+            success: false,
+            security_evaluation: None,
+            restart_requested: false,
+            content: format!("[read_file] ❌ Gitignore ignored: {}", reason),
+        });
+    }
+    
     let content = match read_file_content(&full_path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -134,23 +140,7 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
     let displayed = lines[start..end].join("\n");
     let displayed_len = displayed.chars().count();
 
-    let mut info = format!(
-        "[read_file] {} (lines {}-{} of {}, {} chars, {} KB)",
-        file_path,
-        start + 1,
-        end,
-        total_lines,
-        displayed_len,
-        (displayed_len as f64 / 1024.0).round()
-    );
-
-    if offset > 1 || end < total_lines {
-        info.push_str(&format!(
-            "\nShowing {}/{} lines. Use offset/limit to read other sections.",
-            end - start,
-            total_lines
-        ));
-    }
+    let info = generate_read_info(file_path, start, end, total_lines, displayed_len);
 
     Ok(ToolResult {
         success: true,
@@ -179,10 +169,8 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         });
     }
 
-    let max_chars_per_file = args.arguments["max_chars_per_file"]
-        .as_u64()
-        .map(|v| v as usize)
-        .unwrap_or(3000);
+    let max_chars_per_file = common::get_lenient_usize(&args.arguments["max_chars_per_file"], "max_chars_per_file", 3000)
+        .map_err(|e| AppError::Llm(e))?;
 
     let summarize = args.arguments["summarize"].as_bool().unwrap_or(true);
 
@@ -200,6 +188,17 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         }
 
         let full_path = context.working_dir.join(&file_path);
+        
+        // 检查 gitignore
+        if let Some(reason) = common::check_gitignore(&full_path, &context.resources) {
+            fail_count += 1;
+            result.push_str(&format!(
+                "\n[batch_read_files] ❌ Gitignore ignored: {}: {}\n",
+                file_path, reason
+            ));
+            continue;
+        }
+        
         match read_file_content(&full_path) {
             Ok(content) => {
                 success_count += 1;
@@ -252,118 +251,36 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
     })
 }
 
-fn generate_code_summary(content: &str, file_path: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let total_lines = lines.len();
+// ToolMetadata 实现
 
-    let mut functions = Vec::new();
-    let mut structs = Vec::new();
-    let mut imports = Vec::new();
-    let mut comments = Vec::new();
+pub struct ReadFileToolMetadata;
 
-    for (i, line) in lines.iter().enumerate() {
-        if line.starts_with("pub fn ") || line.starts_with("fn ") {
-            let func_name = line.split_whitespace().nth(1).unwrap_or("");
-            functions.push(format!("  - {} (line {})", func_name, i + 1));
-        } else if line.starts_with("pub struct ") || line.starts_with("struct ") {
-            let struct_name = line.split_whitespace().nth(1).unwrap_or("");
-            structs.push(format!("  - {} (line {})", struct_name, i + 1));
-        } else if line.starts_with("use ") {
-            imports.push(line.trim().to_string());
-        } else if (line.starts_with("//") || line.starts_with("/*")) && i < 10 {
-            comments.push(line.trim().to_string());
-        }
+impl ToolMetadata for ReadFileToolMetadata {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Read
     }
-
-    let mut summary = format!("\n=== 文件摘要: {} ===\n", file_path);
-    summary.push_str(&format!("总行数: {}\n", total_lines));
-
-    if !imports.is_empty() {
-        summary.push_str("\n主要导入:\n");
-        for imp in imports.iter().take(5) {
-            summary.push_str(&format!("  {}\n", imp));
-        }
-        if imports.len() > 5 {
-            summary.push_str(&format!("  ... 还有 {} 个导入\n", imports.len() - 5));
-        }
+    
+    fn tool_namespace(&self) -> ToolNamespace {
+        ToolNamespace::DevAssistant
     }
-
-    if !structs.is_empty() {
-        summary.push_str("\n结构体:\n");
-        for s in &structs {
-            summary.push_str(&format!("{}\n", s));
-        }
+    
+    fn description_template(&self) -> &str {
+        "Read a file from the filesystem. Supports offset/limit for reading large files in chunks."
     }
-
-    if !functions.is_empty() {
-        summary.push_str("\n函数:\n");
-        for f in &functions {
-            summary.push_str(&format!("{}\n", f));
-        }
-    }
-
-    if !comments.is_empty() {
-        summary.push_str("\n头部注释:\n");
-        for c in &comments {
-            summary.push_str(&format!("{}\n", c));
-        }
-    }
-
-    summary.push_str("=== 摘要结束 ===\n");
-    summary
 }
 
-fn resolve_glob_patterns(patterns: &[String], working_dir: &Path) -> Vec<String> {
-    let mut files: Vec<String> = Vec::new();
+pub struct BatchReadFilesToolMetadata;
 
-    for pattern in patterns {
-        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-            let glob = match Glob::new(pattern) {
-                Ok(glob) => glob,
-                Err(e) => {
-                    files.push(format!("[error] Invalid glob pattern '{}': {}", pattern, e));
-                    continue;
-                }
-            };
-
-            let glob_set = match globset::GlobSetBuilder::new().add(glob).build() {
-                Ok(gs) => gs,
-                Err(e) => {
-                    files.push(format!("[error] Failed to build glob '{}': {}", pattern, e));
-                    continue;
-                }
-            };
-
-            for entry in WalkDir::new(working_dir)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                let entry_path = entry.path();
-                if entry_path.is_dir() {
-                    if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
-                        if SKIP_DIRS.contains(&name) || name.starts_with('.') {
-                            continue;
-                        }
-                    }
-                }
-
-                if glob_set.is_match(entry_path) {
-                    if let Ok(relative) = entry_path.strip_prefix(working_dir) {
-                        files.push(relative.to_string_lossy().to_string());
-                    }
-                }
-            }
-        } else {
-            let full_path = working_dir.join(pattern);
-            if full_path.exists() {
-                files.push(pattern.clone());
-            } else {
-                files.push(format!("[not_found] {}", pattern));
-            }
-        }
+impl ToolMetadata for BatchReadFilesToolMetadata {
+    fn kind(&self) -> ToolKind {
+        ToolKind::Read
     }
-
-    files.sort();
-    files.dedup();
-    files
+    
+    fn tool_namespace(&self) -> ToolNamespace {
+        ToolNamespace::DevAssistant
+    }
+    
+    fn description_template(&self) -> &str {
+        "Read multiple files at once. Efficient for code review tasks."
+    }
 }

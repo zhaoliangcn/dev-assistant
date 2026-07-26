@@ -6,6 +6,9 @@
 //! - [`write`]：`write_file`、`edit_file`
 //! - [`search`]：`glob`、`list_directory`、`file_exists`
 
+pub mod async_io;
+pub mod async_read;
+pub mod async_write;
 pub mod io;
 pub mod read;
 pub mod read_shared;

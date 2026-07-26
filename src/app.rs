@@ -12,7 +12,7 @@ use crate::prompt::build_system_prompt;
 use crate::security::SecurityPolicy;
 use crate::session::SessionLogger;
 use crate::skills::{default_skills_dir, discover_skills, Skill};
-use crate::tools::ToolRegistry;
+use crate::tools::{async_tool::AsyncToolRegistry, ToolRegistry};
 use crate::ui::{self, CliMessageOutput};
 use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
@@ -79,7 +79,32 @@ impl App {
             &config.working_dir,
             !config.no_approval,
         ));
-        let tools = ToolRegistry::new(config.working_dir.clone(), security);
+        
+        // 创建 Resources 依赖注入容器
+        let mut resources = crate::tools::resources::Resources::new();
+        
+        // 初始化工作目录
+        resources.insert(crate::tools::resources::Cwd(config.working_dir.clone()));
+        resources.insert(crate::tools::resources::DisplayCwd(config.working_dir.clone()));
+        
+        // 默认启用 gitignore 过滤
+        resources.insert(crate::tools::resources::RespectGitignore(true));
+        
+        // 初始化 GitignoreFilter
+        let gitignore_filter = crate::tools::resources::GitignoreFilter::from_path(&config.working_dir);
+        resources.insert(gitignore_filter);
+        
+        let shared_resources = resources.into_shared();
+        
+        // 创建共享的 ApprovalManager
+        let approval_manager = Arc::new(crate::security::approval::ApprovalManager::new());
+        
+        let tools = ToolRegistry::new_with_resources(
+            config.working_dir.clone(), 
+            security.clone(), 
+            shared_resources.clone(),
+            approval_manager.clone(),
+        );
         let llm_client = Arc::new(LlmClient::from_configs(provider_configs)?);
 
         // 发现项目技能
@@ -110,7 +135,19 @@ impl App {
                 tracing::warn!(error = %e, "无法创建会话持久化存储，将跳过持久化");
             })
             .ok();
-        let mut agent = Agent::new(context, tools, llm_client, agent_config, discovered_skills.clone(), session_store);
+        
+        // 创建异步工具注册表并注册异步文件工具（共享同一个 ApprovalManager）
+        let mut async_tools = AsyncToolRegistry::new(
+            config.working_dir.clone(), 
+            security.clone(),
+            approval_manager,
+        );
+        async_tools.register_tool(Arc::new(crate::tools::file::async_read::AsyncReadFileTool));
+        async_tools.register_tool(Arc::new(crate::tools::file::async_read::AsyncBatchReadFilesTool));
+        async_tools.register_tool(Arc::new(crate::tools::file::async_write::AsyncWriteFileTool));
+        async_tools.register_tool(Arc::new(crate::tools::file::async_write::AsyncEditFileTool));
+        
+        let mut agent = Agent::new(context, tools, Some(async_tools), llm_client, agent_config, discovered_skills.clone(), session_store);
 
         // 恢复持久化的活跃模型
         let saved_model = agent.active_model_name().map(String::from);

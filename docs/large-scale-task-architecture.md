@@ -639,19 +639,36 @@ dev-assistant --background --working-dir /path/to/project
 
 **交付物**：完整的长时间任务执行能力，TaskOrchestrator 自动分解、调度、恢复。
 
-### Phase 4：专业 Agent 模板 📋
+### Phase 4：专业 Agent 模板 ✅
 
 **目标**：预定义的专业 Agent 类型，提高任务执行质量。
 
 | 步骤 | 内容 | 涉及文件 | 状态 |
 |------|------|---------|------|
-| 4.1 | 实现 `AgentIdentity` 枚举和固定 System Prompt | `src/agent/identity.rs` | 📋 |
-| 4.2 | 定义各专业 Agent 的默认工具集 | `src/agent/identity.rs` | 📋 |
-| 4.3 | 任务模板系统（从 KB templates/ 加载） | `src/agent/template.rs` | 📋 |
-| 4.4 | 增量编译和测试集成 | `src/orchestrator/build.rs` | 📋 |
-| 4.5 | 端到端测试：完整游戏引擎开发流程模拟 | 测试文件 | 📋 |
+| 4.1 | 实现 `AgentIdentity` 枚举和固定 System Prompt | `src/agent/identity.rs` | ✅ |
+| 4.2 | 定义各专业 Agent 的默认工具集 | `src/agent/identity.rs` | ✅ |
+| 4.3 | 修改 `spawn_subagent` 支持 `agent_type` 参数 | `src/tools/subagent.rs` | ✅ |
+| 4.4 | 修改 `new_subagent()` 支持按身份创建 | `src/agent/mod.rs` | ✅ |
+| 4.5 | 新增 `new_subagent_registry_with_identity()` 方法 | `src/tools/mod.rs` | ✅ |
+| 4.6 | Orchestrator 集成 `task.agent_type` | `src/orchestrator/mod.rs` | ✅ |
 
 **交付物**：完整的专业 Agent 系统，支持自动化大型软件开发。
+
+### Phase 5：代码库分析工具 ✅
+
+**目标**：支持大型代码库的自动分析和报告生成。
+
+| 步骤 | 内容 | 涉及文件 | 状态 |
+|------|------|---------|------|
+| 5.1 | 实现 `AnalysisRecord`、`AnalysisType`、`Severity` 数据结构 | `src/tools/analysis.rs` | ✅ |
+| 5.2 | 实现 `FileBatch` 分批策略 | `src/tools/analysis.rs` | ✅ |
+| 5.3 | 实现 `analyze_codebase` 工具 | `src/tools/analysis.rs` | ✅ |
+| 5.4 | 实现 `record_analysis` 工具 | `src/tools/analysis.rs` | ✅ |
+| 5.5 | 实现 `get_analysis_summary` 工具 | `src/tools/analysis.rs` | ✅ |
+| 5.6 | 实现 `finish_analysis` 工具 | `src/tools/analysis.rs` | ✅ |
+| 5.7 | 在 `ToolRegistry` 中注册分析工具 | `src/tools/mod.rs` | ✅ |
+
+**交付物**：代码库分析工具集，支持文件发现、分批分析、结果持久化和报告生成。
 
 ---
 
@@ -689,7 +706,9 @@ dev-assistant --background --working-dir /path/to/project
 | Phase 1：子代理机制 | ✅ 通过 |
 | Phase 2：KnowledgeBase | ✅ 通过 |
 | Phase 3：Orchestrator | ✅ 通过 |
-| **总计** | **87 个测试** | ✅ 全部通过 |
+| Phase 4：专业 Agent 模板 | ✅ 通过 |
+| Phase 5：代码库分析工具 | ✅ 通过 |
+| **总计** | **99 个测试** | ✅ 全部通过 |
 
 ---
 
@@ -722,4 +741,61 @@ resume_task
 
 # 取消任务
 cancel_task
+```
+
+### 12.3 专业 Agent 模板
+
+```bash
+# 创建架构师子代理
+spawn_subagent({
+    "task": "设计渲染引擎的模块结构",
+    "agent_type": "architect"
+})
+
+# 创建实现者子代理
+spawn_subagent({
+    "task": "实现物理碰撞检测模块",
+    "agent_type": "implementer"
+})
+
+# 创建审查员子代理
+spawn_subagent({
+    "task": "审查代码质量",
+    "agent_type": "reviewer"
+})
+```
+
+### 12.4 代码库分析
+
+```bash
+# 启动代码库分析
+analyze_codebase({
+    "include_patterns": ["**/*.rs"],
+    "exclude_patterns": ["target/**"],
+    "batch_size": 5,
+    "analysis_depth": "standard"
+})
+
+# 记录分析结果
+record_analysis({
+    "file_path": "src/main.rs",
+    "analysis_type": "structure",
+    "summary": "模块结构分析完成",
+    "issues": [{
+        "severity": "high",
+        "description": "未使用的导入",
+        "location": "第 15 行"
+    }]
+})
+
+# 查看分析进度
+get_analysis_summary({
+    "group_by": "severity"
+})
+
+# 生成综合报告
+finish_analysis({
+    "report_type": "detailed",
+    "output_file": "analysis_report.md"
+})
 ```

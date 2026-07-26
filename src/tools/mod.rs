@@ -8,7 +8,7 @@ use tracing::{debug, warn};
 
 use crate::agent::AgentIdentity;
 use crate::llm::ToolSchema;
-use crate::security::{SecurityEvaluation, SecurityPolicy};
+use crate::security::{ApprovalManager, SecurityEvaluation, SecurityPolicy};
 use crate::utils::error::AppError;
 
 pub mod file;
@@ -19,6 +19,12 @@ pub mod spec;
 pub mod subagent;
 pub mod system_tools;
 pub mod task_tools;
+pub mod common;
+pub mod cache;
+pub mod async_tool;
+pub mod resources;
+pub mod retry;
+
 
 pub type ToolHandler =
     dyn Fn(&ToolArgs, &ToolContext) -> Result<ToolResult, AppError> + Sync + Send + 'static;
@@ -26,11 +32,13 @@ pub type ToolHandler =
 /// 工具注册中心。持有所有工具定义和安全策略。
 ///
 /// 安全策略使用 `Arc<SecurityPolicy>` 共享，避免生命周期参数污染类型签名。
-
 pub struct ToolRegistry {
     tools: HashMap<String, ToolDefinition>,
     working_dir: PathBuf,
     pub security: Arc<SecurityPolicy>,
+    pub approval_manager: Arc<ApprovalManager>,
+    pub retry_manager: retry::RetryManager,
+    pub resources: Option<crate::tools::resources::SharedResources>,
     #[allow(dead_code)]
     schema_tokens: Cell<usize>,
 }
@@ -60,6 +68,8 @@ pub struct ToolArgs {
 /// 签名。
 pub struct ToolContext {
     pub working_dir: PathBuf,
+    /// 可选的资源容器，用于依赖注入
+    pub resources: Option<crate::tools::resources::SharedResources>,
 }
 
 pub struct ToolResult {
@@ -69,12 +79,88 @@ pub struct ToolResult {
     pub restart_requested: bool,
 }
 
+/// 工具命名空间
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolNamespace {
+    DevAssistant,
+    MCP,
+}
+
+/// 工具类型分类
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKind {
+    Read,
+    Edit,
+    Delete,
+    ListDir,
+    Write,
+    Move,
+    Search,
+    Lsp,
+    Execute,
+    Plan,
+    WebSearch,
+    WebFetch,
+    KnowledgeBase,
+    #[serde(other)]
+    Other,
+}
+
+impl ToolKind {
+    pub fn is_read_only(&self) -> bool {
+        matches!(self, ToolKind::Read | ToolKind::Search | ToolKind::ListDir | ToolKind::WebSearch | ToolKind::WebFetch | ToolKind::KnowledgeBase)
+    }
+    
+    pub fn requires_approval(&self) -> bool {
+        !self.is_read_only()
+    }
+}
+
+/// 工具元数据 trait
+pub trait ToolMetadata: Send + Sync {
+    fn kind(&self) -> ToolKind;
+    fn tool_namespace(&self) -> ToolNamespace;
+    fn description_template(&self) -> &str;
+    
+    fn is_read_only(&self) -> bool {
+        self.kind().is_read_only()
+    }
+    
+    fn requires_approval(&self) -> bool {
+        self.kind().requires_approval()
+    }
+}
+
 impl ToolRegistry {
     pub fn new(working_dir: PathBuf, security: Arc<SecurityPolicy>) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
             working_dir,
             security,
+            approval_manager: Arc::new(ApprovalManager::new()),
+            retry_manager: retry::RetryManager::default(),
+            resources: None,
+            schema_tokens: Cell::new(0),
+        };
+        registry.register_builtin_tools();
+        registry
+    }
+    
+    pub fn new_with_resources(
+        working_dir: PathBuf, 
+        security: Arc<SecurityPolicy>,
+        resources: crate::tools::resources::SharedResources,
+        approval_manager: Arc<ApprovalManager>,
+    ) -> Self {
+        let mut registry = Self {
+            tools: HashMap::new(),
+            working_dir,
+            security,
+            approval_manager,
+            retry_manager: retry::RetryManager::default(),
+            resources: Some(resources),
             schema_tokens: Cell::new(0),
         };
         registry.register_builtin_tools();
@@ -141,7 +227,7 @@ impl ToolRegistry {
     /// 执行工具：先做安全评估，再根据评估结果决定是否执行。
     ///
     /// - `Critical`：阻止执行，返回带评估信息的失败结果
-    /// - `High` / `Medium`：返回需要审批的失败结果（调用方负责提示用户）
+    /// - `High` / `Medium`：检查审批管理器，有有效审批则执行，否则返回需要审批的结果
     /// - `Low`：直接执行
     pub fn execute(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
         debug!(tool = name, "Executing tool");
@@ -157,19 +243,25 @@ impl ToolRegistry {
                     restart_requested: false,
                 })
             }
-            crate::security::DangerLevel::High | crate::security::DangerLevel::Medium => {
-                warn!(tool = name, level = ?evaluation.danger_level, reason = %evaluation.reason, "Tool requires approval");
-                Ok(ToolResult {
-                    success: false,
-                    content: format!(
-                        "⚠️  This command requires approval ({}): {}\n\
-                         Press Enter to approve, or type 'cancel' to skip.",
-                        evaluation.danger_level.as_str(),
-                        evaluation.reason
-                    ),
-                    security_evaluation: Some(evaluation),
-                    restart_requested: false,
-                })
+            ref level @ (crate::security::DangerLevel::High | crate::security::DangerLevel::Medium) => {
+                // 检查是否已有有效审批
+                if self.approval_manager.requires_approval(name, name, level) {
+                    warn!(tool = name, level = ?level, reason = %evaluation.reason, "Tool requires approval");
+                    Ok(ToolResult {
+                        success: false,
+                        content: format!(
+                            "⚠️  This command requires approval ({}): {}\n\
+                             Press Enter to approve, or type 'cancel' to skip.",
+                            level.as_str(),
+                            evaluation.reason
+                        ),
+                        security_evaluation: Some(evaluation),
+                        restart_requested: false,
+                    })
+                } else {
+                    debug!(tool = name, level = ?level, "Tool execution approved by permission store");
+                    self.execute_tool(name, arguments)
+                }
             }
             crate::security::DangerLevel::Low => self.execute_tool(name, arguments),
         }
@@ -196,6 +288,9 @@ impl ToolRegistry {
             tools: HashMap::new(),
             working_dir: self.working_dir.clone(),
             security: self.security.clone(),
+            approval_manager: self.approval_manager.clone(),
+            retry_manager: self.retry_manager.clone(),
+            resources: self.resources.clone(),
             schema_tokens: Cell::new(0),
         };
         // 子 Agent 只能使用文件工具、系统工具和 finish
@@ -225,6 +320,9 @@ impl ToolRegistry {
             tools: HashMap::new(),
             working_dir: self.working_dir.clone(),
             security: self.security.clone(),
+            approval_manager: self.approval_manager.clone(),
+            retry_manager: self.retry_manager.clone(),
+            resources: self.resources.clone(),
             schema_tokens: Cell::new(0),
         };
 
@@ -291,9 +389,15 @@ impl ToolRegistry {
         let args = ToolArgs { arguments };
         let context = ToolContext {
             working_dir: self.working_dir.clone(),
+            resources: self.resources.clone(),
         };
 
-        let result = (tool.handler)(&args, &context);
+        // 使用重试管理器执行工具，只对可重试错误进行重试
+        let result = self.retry_manager.execute_with_retry_sync_condition(
+            name,
+            || (tool.handler)(&args, &context),
+            |e| e.is_retryable(),
+        );
         result.map(|r| ToolResult {
             security_evaluation: None,
             ..r

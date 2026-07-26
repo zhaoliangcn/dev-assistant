@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tracing::{debug, warn};
 
-use crate::security::{ApprovalManager, SecurityEvaluation, SecurityPolicy};
+use crate::security::{ApprovalManager, SecurityPolicy};
 use crate::utils::error::AppError;
 
 
@@ -170,7 +170,8 @@ impl AsyncToolRegistry {
                 })
             }
             ref level @ (crate::security::DangerLevel::High | crate::security::DangerLevel::Medium) => {
-                if self.approval_manager.requires_approval(name, name, level) {
+                let scope_id = crate::security::approval::extract_approval_scope(name, &arguments);
+                if self.approval_manager.requires_approval(name, &scope_id, level) {
                     warn!(tool = name, level = ?level, reason = %evaluation.reason, "Tool requires approval");
                     Ok(ToolResult {
                         success: false,

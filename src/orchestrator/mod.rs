@@ -246,8 +246,8 @@ impl TaskOrchestrator {
             // 限制并行执行数量
             let batch: Vec<_> = ready_tasks.into_iter().take(self.max_concurrent).collect();
 
-            // 并行执行任务
-            let mut handles = Vec::new();
+            // 并行执行任务，保留 task_id 与 handle 的映射以便 panic 时定位
+            let mut handles: Vec<(TaskId, tokio::task::JoinHandle<TaskExecutionResult>)> = Vec::new();
             for task_id in &batch {
                 let task = match self.graph.get_task(task_id).cloned() {
                     Some(t) => t,
@@ -268,6 +268,7 @@ impl TaskOrchestrator {
                         summary: "依赖失败，已跳过".to_string(),
                         retries: 0,
                     });
+                    tasks_since_checkpoint += 1;
                     continue;
                 }
 
@@ -288,21 +289,21 @@ impl TaskOrchestrator {
                 let task_clone = task.clone();
                 let max_iterations = self.max_iterations;
                 let max_tokens = self.max_tokens;
+                let spawned_id = task.id.clone();
 
-                handles.push(tokio::spawn(async move {
-                    let result = execute_single_task(
+                handles.push((spawned_id, tokio::spawn(async move {
+                    execute_single_task(
                         task_clone,
                         llm,
                         tools,
                         max_iterations,
                         max_tokens,
-                    ).await;
-                    result
-                }));
+                    ).await
+                })));
             }
 
             // 等待所有并行任务完成
-            for handle in handles {
+            for (spawned_id, handle) in handles {
                 match handle.await {
                     Ok(exec_result) => {
                         let task_id = exec_result.task_id.clone();
@@ -357,7 +358,37 @@ impl TaskOrchestrator {
                         }
                     }
                     Err(e) => {
-                        warn!("任务执行线程 panic: {}", e);
+                        warn!("任务 {} 执行线程 panic: {}", spawned_id, e);
+
+                        // 从 running_tasks 中移除
+                        self.running_tasks.retain(|rt| rt.task_id != spawned_id);
+
+                        // 标记为失败，避免任务永远挂起
+                        self.graph.fail(&spawned_id);
+
+                        // 获取任务描述用于结果记录
+                        let description = self.graph.get_task(&spawned_id)
+                            .map(|t| t.description.clone())
+                            .unwrap_or_default();
+
+                        task_results.push(TaskExecutionResult {
+                            task_id: spawned_id.clone(),
+                            description,
+                            success: false,
+                            summary: format!("任务执行线程 panic: {}", e),
+                            retries: self.graph.get_task(&spawned_id)
+                                .map(|t| t.retry_count)
+                                .unwrap_or(0),
+                        });
+                        tasks_since_checkpoint += 1;
+
+                        // 保存检查点
+                        if self.checkpoint_enabled && tasks_since_checkpoint >= self.checkpoint_interval {
+                            if let Err(e) = self.save_checkpoint() {
+                                warn!("保存检查点失败: {}", e);
+                            }
+                            tasks_since_checkpoint = 0;
+                        }
                     }
                 }
             }

@@ -128,7 +128,8 @@ impl PermissionEntry {
             return true; // 永久有效
         }
         let now = now_timestamp();
-        (now - self.approved_at) < self.validity_seconds
+        // 使用 saturating_sub 防止 approved_at 来自未来时间时的 u64 下溢
+        now.saturating_sub(self.approved_at) < self.validity_seconds
     }
 }
 
@@ -354,9 +355,61 @@ impl ApprovalManager {
     }
 
     fn extract_scope_id(&self, request: &ApprovalRequest) -> String {
-        // 简化实现：使用工具名作为 scope_id
-        // 实际应用中可以从 arguments 中提取路径等信息
-        request.tool_name.clone()
+        // 尝试从参数中提取具体作用域（路径、命令等），失败时回退到工具名。
+        if let Ok(args) = serde_json::from_str::<serde_json::Value>(&request.arguments) {
+            extract_approval_scope(&request.tool_name, &args)
+        } else {
+            request.tool_name.clone()
+        }
+    }
+}
+
+/// 从工具参数中提取审批作用域标识符。
+///
+/// 对文件类工具返回路径，对命令类工具返回命令字符串，
+/// 无法提取时回退到工具名本身。
+pub fn extract_approval_scope(tool_name: &str, arguments: &serde_json::Value) -> String {
+    match tool_name {
+        "read_file" | "edit_file" | "write_file" | "file_exists"
+        | "async_read_file" | "async_edit_file" | "async_write_file" => arguments
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| tool_name.to_string()),
+        "list_directory" => arguments
+            .get("dir_path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| tool_name.to_string()),
+        "batch_read_files" | "async_batch_read_files" => arguments
+            .get("files")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_else(|| tool_name.to_string()),
+        "exec_command" => {
+            let command = arguments.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            let args = arguments
+                .get("args")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default();
+            if args.is_empty() {
+                command.to_string()
+            } else {
+                format!("{} {}", command, args)
+            }
+        }
+        _ => tool_name.to_string(),
     }
 }
 

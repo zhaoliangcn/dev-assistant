@@ -272,6 +272,10 @@ impl Agent {
                         );
                     }
 
+                    // 先把工具结果写入历史，再处理 finish/restart 等终止语义，
+                    // 否则这些工具的结果会丢失在上下文中。
+                    self.context.add_tool_result(tool_call, &result.content);
+
                     if tool_call.function.name == "finish" {
                         return Ok(AgentStep::Done(AgentResult {
                             success: true,
@@ -287,8 +291,6 @@ impl Agent {
                             restart_requested: true,
                         }));
                     }
-
-                    self.context.add_tool_result(tool_call, &result.content);
                 }
 
                 // 压缩上下文，防止 token 无限制增长

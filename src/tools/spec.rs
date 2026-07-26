@@ -122,7 +122,7 @@ impl SpecEvaluation {
 /// 新增工具只需在此处添加一行，无需修改 `evaluate_tool` 主体。
 pub fn tool_security_spec(tool_name: &str) -> Option<ToolSecuritySpec> {
     match tool_name {
-        "read_file" | "edit_file" => Some(ToolSecuritySpec {
+        "read_file" | "edit_file" | "async_read_file" | "async_edit_file" => Some(ToolSecuritySpec {
             path_field: "file_path",
             validation: PathValidation::Exists,
             multiple: false,
@@ -132,12 +132,12 @@ pub fn tool_security_spec(tool_name: &str) -> Option<ToolSecuritySpec> {
             validation: PathValidation::PathExists,
             multiple: false,
         }),
-        "write_file" => Some(ToolSecuritySpec {
+        "write_file" | "async_write_file" => Some(ToolSecuritySpec {
             path_field: "file_path",
             validation: PathValidation::ExistsParent,
             multiple: false,
         }),
-        "batch_read_files" => Some(ToolSecuritySpec {
+        "batch_read_files" | "async_batch_read_files" => Some(ToolSecuritySpec {
             path_field: "files",
             validation: PathValidation::PathExists,
             multiple: true,

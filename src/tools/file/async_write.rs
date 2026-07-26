@@ -243,7 +243,6 @@ mod tests {
     use crate::security::SecurityPolicy;
     use crate::tools::async_tool::AsyncToolRegistry;
     use serde_json::json;
-    use std::path::PathBuf;
     use std::sync::Arc;
     use tempfile::tempdir;
 

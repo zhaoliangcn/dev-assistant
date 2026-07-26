@@ -156,7 +156,7 @@ impl ReadCache {
 
         let path_buf = path.to_path_buf();
         
-        // 第一次获取锁：检查缓存是否存在
+        // 第一次获取锁：检查缓存是否存在且未过期
         let cache_result = {
             let mut cache = self.cache.write().unwrap();
             if let Some(entry) = cache.get_mut(&path_buf) {
@@ -169,13 +169,9 @@ impl ReadCache {
                     return None;
                 }
 
-                // 获取当前缓存内容和 mtime
+                // 获取当前缓存内容和 mtime，暂不做命中统计
                 let content = entry.content.clone();
                 let cached_mtime = entry.mtime;
-                
-                // touch 并增加命中计数
-                entry.touch();
-                *self.hits.write().unwrap() += 1;
                 
                 Some((content, cached_mtime))
             } else {
@@ -209,7 +205,14 @@ impl ReadCache {
                 }
             }
 
-            // 命中缓存
+            // 确认是真正命中后再更新访问时间和命中计数，
+            // 避免文件已修改时被错误计为命中。
+            if let Ok(mut cache) = self.cache.write() {
+                if let Some(entry) = cache.get_mut(&path_buf) {
+                    entry.touch();
+                }
+            }
+            *self.hits.write().unwrap() += 1;
             debug!(path = ?path, "Cache hit");
             return Some(content);
         }

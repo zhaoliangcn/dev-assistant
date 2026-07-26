@@ -53,6 +53,16 @@ impl ConversationHistory {
     ) {
         debug!(role = ?role, len = content.len(), "Adding message to context");
         let role_str: String = role.into();
+
+        // 在移动 tool_calls 之前先统计其 JSON 的 token
+        let tool_calls_tokens = if let Some(ref calls) = tool_calls {
+            serde_json::to_string(calls)
+                .map(|json| TokenCounter::estimate(&json))
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
         let message = LlmMessage {
             role: role_str,
             content: Some(content.clone()),
@@ -61,7 +71,7 @@ impl ConversationHistory {
         };
 
         self.messages.push(message);
-        self.used_tokens += TokenCounter::estimate(&content);
+        self.used_tokens += TokenCounter::estimate(&content) + tool_calls_tokens;
     }
 
     pub fn add_tool_result(&mut self, tool_call: &ToolCall, result: &str) {

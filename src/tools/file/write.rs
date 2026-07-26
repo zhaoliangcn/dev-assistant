@@ -95,13 +95,18 @@ fn normalize_newlines(s: &str) -> String {
 /// 1. Exact match after newline normalization
 /// 2. Trimmed match (ignore leading/trailing whitespace differences)
 /// 3. Dedented match (remove common leading whitespace from all lines)
-fn fuzzy_find(haystack: &str, needle: &str) -> Option<usize> {
+///
+/// Returns `Some((start, length))` of the matched substring in the normalized
+/// haystack, or `None` if no match is found. The returned length reflects the
+/// actual matched text, which may differ from `needle.len()` when fuzzy logic
+/// strips whitespace or indentation.
+fn fuzzy_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
     let haystack = normalize_newlines(haystack);
     let needle = normalize_newlines(needle);
 
     // Exact match
     if let Some(pos) = haystack.find(&needle) {
-        return Some(pos);
+        return Some((pos, needle.len()));
     }
 
     // Fuzzy match: trim both sides
@@ -110,7 +115,7 @@ fn fuzzy_find(haystack: &str, needle: &str) -> Option<usize> {
         return None;
     }
     if let Some(pos) = haystack.find(needle_trimmed) {
-        return Some(pos);
+        return Some((pos, needle_trimmed.len()));
     }
 
     // Try matching with normalized indentation
@@ -123,7 +128,7 @@ fn fuzzy_find(haystack: &str, needle: &str) -> Option<usize> {
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(pos) = haystack.find(&needle_dedented) {
-                return Some(pos);
+                return Some((pos, needle_dedented.len()));
             }
         }
     }
@@ -175,9 +180,9 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
         Err(e) => return Err(AppError::Io(e)),
     };
 
-    let match_pos = fuzzy_find(&content, old_content);
+    let match_result = fuzzy_find(&content, old_content);
 
-    if match_pos.is_none() {
+    if match_result.is_none() {
         // Return file content with line numbers so LLM can retry with correct content
         let lines: Vec<&str> = content.lines().collect();
         let numbered: String = lines
@@ -200,16 +205,16 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
         });
     }
 
-    let pos = match_pos.unwrap();
-    let matched = &content[pos..pos + old_content.len()];
+    let (pos, matched_len) = match_result.unwrap();
+    let matched = &content[pos..pos + matched_len];
     let before = &content[..pos];
-    let after = &content[pos + old_content.len()..];
+    let after = &content[pos + matched_len..];
 
     let result = format!("{}{}{}", before, new_content, after);
     write_file_content(&full_path, &result)?;
 
     // Check if the old content appears again later (potential multi-replace)
-    let has_duplicate = content[pos + old_content.len()..].contains(old_content)
+    let has_duplicate = content[pos + matched_len..].contains(old_content)
         || content[..pos].contains(old_content);
 
     Ok(ToolResult {

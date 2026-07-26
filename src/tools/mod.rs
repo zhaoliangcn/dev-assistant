@@ -244,8 +244,9 @@ impl ToolRegistry {
                 })
             }
             ref level @ (crate::security::DangerLevel::High | crate::security::DangerLevel::Medium) => {
-                // 检查是否已有有效审批
-                if self.approval_manager.requires_approval(name, name, level) {
+                // 检查是否已有有效审批，使用参数中的具体作用域（如路径）
+                let scope_id = crate::security::approval::extract_approval_scope(name, &arguments);
+                if self.approval_manager.requires_approval(name, &scope_id, level) {
                     warn!(tool = name, level = ?level, reason = %evaluation.reason, "Tool requires approval");
                     Ok(ToolResult {
                         success: false,

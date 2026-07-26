@@ -313,15 +313,27 @@ impl SecurityPolicy {
             }
         }
 
-        // SECURITY: Allow shell execution with -c flag. The tool description
-        // explicitly instructs the LLM to use command="sh" with args=["-c", "..."]
-        // for shell features (pipes, redirects, etc.). Dangerous commands within
-        // the shell string are still caught by the regex checks below.
+        // SECURITY: Allow shell execution with -c flag, but still scan the shell
+        // string for dangerous commands. The tool description explicitly instructs
+        // the LLM to use command="sh" with args=["-c", "..."] for shell features.
         if (command == "sh" || command == "bash" || command == "zsh" || command == "fish")
-            && args.contains(&"-c") {
+            && args.contains(&"-c")
+        {
+            if let Some(idx) = args.iter().position(|&a| a == "-c") {
+                if let Some(shell_cmd) = args.get(idx + 1) {
+                    for (pattern, level, reason) in &self.dangerous_commands {
+                        if pattern.is_match(shell_cmd) {
+                            return SecurityEvaluation {
+                                danger_level: level.clone(),
+                                reason: reason.clone(),
+                            };
+                        }
+                    }
+                }
+            }
             return SecurityEvaluation {
                 danger_level: DangerLevel::Low,
-                reason: format!("Shell execution with -c — allowed by policy"),
+                reason: "Shell execution with -c — allowed by policy".to_string(),
             };
         }
 
@@ -554,17 +566,15 @@ mod tests {
 
     #[test]
     fn evaluate_command_shell_with_c_still_catches_dangerous() {
-        // NOTE: 当前 evaluate_command 对 sh -c 分支直接返回 Low，
-        // 并未对 shell 内含的 rm -rf 做二次扫描。此测试反映当前实际行为。
-        // 若未来加入 shell 内容二次扫描，需同步更新断言为 Critical。
+        // sh -c 允许使用 shell 特性，但 shell 字符串仍需经过危险命令扫描。
         let dir = tempdir().unwrap();
         let p = policy_in(dir.path());
 
         let eval = p.evaluate_command("sh", &["-c", "rm -rf src"]);
         assert_eq!(
             eval.danger_level,
-            DangerLevel::Low,
-            "current code does not second-pass shell content; got reason: {}",
+            DangerLevel::Critical,
+            "sh -c should still scan shell content for dangerous commands; got reason: {}",
             eval.reason
         );
     }

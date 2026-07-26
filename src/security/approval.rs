@@ -42,6 +42,7 @@ pub struct ApprovalRequirement {
 
 impl ApprovalRequirement {
     /// 创建默认的审批需求
+    #[allow(dead_code)]
     pub fn default_for_danger(level: &DangerLevel) -> Self {
         match level {
             DangerLevel::Critical => Self {
@@ -78,6 +79,7 @@ impl ApprovalRequirement {
 
 /// 审批类型
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ApprovalType {
     /// 自动审批（无需用户确认）
     Auto,
@@ -103,6 +105,7 @@ pub enum ApprovalScope {
 
 /// 已审批的权限记录
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PermissionEntry {
     /// 审批的工具名
     pub tool_name: String,

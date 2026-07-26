@@ -596,6 +596,7 @@ impl Agent {
     }
 
     /// 获取历史消息列表（用于 UI 展示等）
+    #[allow(dead_code)]
     pub fn history_messages(&self) -> &[crate::llm::LlmMessage] {
         &self.context.history.messages
     }

@@ -283,6 +283,7 @@ pub async fn process_user_message(
 ///
 /// 每个阶段创建一个对应身份的子 Agent，上一个阶段的输出作为
 /// 下一个阶段的上下文传入。
+#[allow(dead_code)]
 pub async fn handle_pipeline_command(
     agent: &mut Agent,
     task: &str,

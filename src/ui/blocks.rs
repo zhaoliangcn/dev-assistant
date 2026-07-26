@@ -107,3 +107,82 @@ impl MessageBlock {
         )
     }
 }
+
+/// 从 (role, content) 元组构造 MessageBlock。
+///
+/// 用于将旧式 `(String, String)` 消息列表转换为块类型，
+/// 兼容现有 display_messages 格式。
+impl From<(&str, &str)> for MessageBlock {
+    fn from((role, content): (&str, &str)) -> Self {
+        if role.starts_with("▸ 你") || role == "你" || role == "👤 你" || role == "user" {
+            MessageBlock::User { content: content.to_string() }
+        } else if role.starts_with("◂ 助手") || role == "助手" || role == "🤖 助手" || role == "assistant" {
+            MessageBlock::Assistant { content: content.to_string(), is_streaming: false }
+        } else if role.starts_with("💭") || role == "思考" || role == "thinking" {
+            MessageBlock::Thinking { content: content.to_string() }
+        } else if role.starts_with("▸ 成功") || role == "成功" || role == "✅ 结果" || role == "success" {
+            MessageBlock::ToolResult {
+                tool_name: String::new(),
+                success: true,
+                content: content.to_string(),
+            }
+        } else if role.starts_with("▸ 错误") || role == "错误" || role == "❌ 失败" || role == "🔥 错误" || role == "error" {
+            MessageBlock::Error { content: content.to_string() }
+        } else if role.starts_with("▸ 警告") || role == "警告" || role == "⚠️ 警告" || role == "warning" {
+            MessageBlock::System { content: content.to_string() }
+        } else if role.starts_with("🔧") || role == "工具" || role == "tool" {
+            MessageBlock::ToolCall {
+                tool_name: role.trim_start_matches("🔧 ").to_string(),
+                args: serde_json::Value::Null,
+            }
+        } else {
+            MessageBlock::System { content: content.to_string() }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_user() {
+        let block = MessageBlock::from(("你", "hello"));
+        assert!(matches!(block, MessageBlock::User { .. }));
+        assert_eq!(block.content(), "hello");
+    }
+
+    #[test]
+    fn test_from_assistant() {
+        let block = MessageBlock::from(("助手", "world"));
+        assert!(matches!(block, MessageBlock::Assistant { .. }));
+        assert_eq!(block.content(), "world");
+    }
+
+    #[test]
+    fn test_from_error() {
+        let block = MessageBlock::from(("错误", "something broke"));
+        assert!(matches!(block, MessageBlock::Error { .. }));
+    }
+
+    #[test]
+    fn test_from_success() {
+        let block = MessageBlock::from(("成功", "done"));
+        assert!(matches!(block, MessageBlock::ToolResult { .. }));
+        if let MessageBlock::ToolResult { success, .. } = block {
+            assert!(success);
+        }
+    }
+
+    #[test]
+    fn test_from_thinking() {
+        let block = MessageBlock::from(("💭", "analyzing..."));
+        assert!(matches!(block, MessageBlock::Thinking { .. }));
+    }
+
+    #[test]
+    fn test_from_unknown_falls_back_to_system() {
+        let block = MessageBlock::from(("unknown_role", "data"));
+        assert!(matches!(block, MessageBlock::System { .. }));
+    }
+}

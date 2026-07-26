@@ -298,14 +298,16 @@ impl App {
 
         let working_dir = self.config.working_dir.clone();
         let restart_args = self.config.restart_args.clone();
-        let verbose = self.config.verbose;
+        let mut verbose = self.config.verbose;
 
         // 初始化 UI 和 Markdown 渲染器
         let markdown_renderer = MarkdownRenderer::new();
+        // 初始化输入系统（行编辑 + 历史记录）
+        let mut input_system = ui::input::InputSystem::new();
         ui::init_ui()?;
         println!("🚀 Dev-Assistant Rust CLI");
         println!("Project: {}", self.config.working_dir.display());
-        println!("Type '/quit' or '/exit' to quit.\n");
+        println!("Type '/exit' or '/quit' to quit.\n");
 
         let mut session_log = SessionLogger::create(&self.config.working_dir)?;
         session_log.log_status("信息", &format!("项目目录: {}", self.config.working_dir.display()));
@@ -315,22 +317,25 @@ impl App {
             // 更新输入面板
             ui::render_input_panel(None)?;
 
-            let mut input = String::new();
-            let bytes_read = std::io::stdin()
-                .read_line(&mut input)
-                .map_err(AppError::Io)?;
-
-            if bytes_read == 0 {
-                print!("\x1b[2J\x1b[H");
-                println!("👋 Goodbye!");
-                break;
-            }
-
-            let input = input.trim().to_string();
+            // 使用 InputSystem 读取输入（支持行编辑和历史记录）
+            let input = match input_system.read_line("│ > ") {
+                Ok(Some(input)) => input,
+                Ok(None) => {
+                    // EOF (Ctrl+D)
+                    println!("\n👋 Goodbye!");
+                    break;
+                }
+                Err(e) => {
+                    return Err(AppError::Io(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("输入错误: {}", e),
+                    )));
+                }
+            };
 
             // ── Slash 命令分发 ──
             if input.starts_with('/') {
-                // 处理 /pipeline 命令（需要异步上下文）
+                // 优先处理 /pipeline 命令（需要异步上下文）
                 if input.starts_with("/pipeline") {
                     let task = input.strip_prefix("/pipeline").unwrap_or("").trim().to_string();
                     if task.is_empty() {
@@ -360,13 +365,47 @@ impl App {
                     continue;
                 }
 
+                // 尝试内置 SlashCommand（/help /clear /exit 等）
+                if let Some((cmd, _args)) = ui::input::SlashCommand::parse(&input) {
+                    match cmd.execute() {
+                        ui::input::SlashAction::Exit => {
+                            println!("👋 Goodbye!");
+                            break;
+                        }
+                        ui::input::SlashAction::Continue => {
+                            // /clear 时同时清除 agent 显示缓冲区
+                            if matches!(cmd, ui::input::SlashCommand::Clear) {
+                                self.agent.clear_display_to(self.agent.history_len());
+                            }
+                            continue;
+                        }
+                        ui::input::SlashAction::ChangeMode(new_verbose) => {
+                            verbose = new_verbose;
+                            // 显示模式切换消息
+                            let msg = if new_verbose { "详细模式" } else { "安静模式" };
+                            self.agent.add_display_message(
+                                crate::utils::message_level::MessageLevel::Info,
+                                &format!("🔊 切换到{}", msg),
+                            );
+                            continue;
+                        }
+                    }
+                }
+
+                // 委托给现有的应用级 handle_slash（/model /status /background 等）
                 match handle_slash(&input, &mut self.agent, &working_dir) {
                     Some(SlashOutcome::Quit) => break,
                     Some(SlashOutcome::Continue) => {
-                        ui::render_input_panel(None)?;
                         continue;
                     }
-                    None => {}
+                    None => {
+                        // 未知命令
+                        let block = ui::MessageBlock::Error {
+                            content: format!("未知命令: {}\n输入 /help 查看可用命令", input),
+                        };
+                        ui::render_block(&block, &markdown_renderer)?;
+                        continue;
+                    }
                 }
             }
 

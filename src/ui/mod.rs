@@ -1,6 +1,8 @@
 pub mod blocks;
+pub mod input;
 pub mod markdown;
 pub mod output_impls;
+pub mod style;
 pub use blocks::MessageBlock;
 pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};
@@ -29,6 +31,52 @@ fn prefix_width(prefix: &str) -> usize {
 
 // ── 新 API：块级渲染 ──────────────────────────────────────────────────
 
+/// 将消息块渲染为字符串（纯渲染，无 IO 操作）。
+///
+/// 方便测试：传入 blocks 和终端宽度，返回 ANSI 格式化的字符串。
+/// 测试中无需 mock stdout，直接断言输出内容即可。
+pub fn render_blocks_to_string(
+    blocks: &[MessageBlock],
+    markdown_renderer: &MarkdownRenderer,
+    term_width: usize,
+) -> String {
+    let mut buf = Vec::new();
+
+    for block in blocks {
+        // 分隔线块
+        if matches!(block, MessageBlock::Divider) {
+            let _ = writeln!(buf, "{}", "─".repeat(term_width));
+            continue;
+        }
+
+        let prefix = block.prefix();
+        let pw = prefix_width(prefix);
+
+        // 获取内容（需要 Markdown 渲染的块先渲染）
+        let content = if block.needs_markdown() {
+            markdown_renderer.render(&block.content())
+        } else {
+            block.content()
+        };
+
+        // 消息分隔线
+        let _ = writeln!(buf);
+        let _ = writeln!(buf, "{}", "─".repeat(term_width));
+
+        for (i, line) in content.lines().enumerate() {
+            if line.is_empty() {
+                let _ = writeln!(buf);
+            } else if i == 0 {
+                let _ = writeln!(buf, "{} │ {}", prefix, line);
+            } else {
+                let _ = writeln!(buf, "{:width$} │ {}", "", line, width = pw);
+            }
+        }
+    }
+
+    String::from_utf8(buf).unwrap_or_default()
+}
+
 /// 渲染单个消息块（追加模式，不清屏）
 /// 
 /// 这是新的核心渲染 API，支持流式输出，保留终端滚动历史。
@@ -36,40 +84,10 @@ pub fn render_block(
     block: &MessageBlock,
     markdown_renderer: &MarkdownRenderer,
 ) -> io::Result<()> {
-    let mut stdout = io::stdout();
     let term_width = get_terminal_width().unwrap_or(80);
-    
-    // 分隔线块
-    if matches!(block, MessageBlock::Divider) {
-        writeln!(stdout, "{}", "─".repeat(term_width))?;
-        stdout.flush()?;
-        return Ok(());
-    }
-    
-    let prefix = block.prefix();
-    let pw = prefix_width(prefix);
-    
-    // 获取内容（需要 Markdown 渲染的块先渲染）
-    let content = if block.needs_markdown() {
-        markdown_renderer.render(&block.content())
-    } else {
-        block.content()
-    };
-    
-    // 打印消息分隔线
-    writeln!(stdout)?;
-    writeln!(stdout, "{}", "─".repeat(term_width))?;
-    
-    for (i, line) in content.lines().enumerate() {
-        if line.is_empty() {
-            writeln!(stdout)?;
-        } else if i == 0 {
-            writeln!(stdout, "{} │ {}", prefix, line)?;
-        } else {
-            writeln!(stdout, "{:width$} │ {}", "", line, width = pw)?;
-        }
-    }
-    
+    let output = render_blocks_to_string(&[block.clone()], markdown_renderer, term_width);
+    let mut stdout = io::stdout();
+    write!(stdout, "{}", output)?;
     stdout.flush()?;
     Ok(())
 }

@@ -1,0 +1,12 @@
+{
+  "file_path": "src/tools/spec.rs",
+  "analysis_type": "Security",
+  "summary": "工具安全规则。为每个工具绑定ToolSecuritySpec，定义路径提取和校验类型。支持Exists/ExistsParent/PathExists/None四种校验类型。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 875218000
+  },
+  "batch_number": 1
+}

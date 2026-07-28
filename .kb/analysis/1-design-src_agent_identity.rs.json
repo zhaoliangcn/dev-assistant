@@ -1,0 +1,12 @@
+{
+  "file_path": "src/agent/identity.rs",
+  "analysis_type": "Design",
+  "summary": "Agent身份枚举（Architect/Implementer/Reviewer/Tester/Debugger/General），每个身份有独立的system prompt和默认工具集。支持PipelineStage流水线执行。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 866935000
+  },
+  "batch_number": 1
+}

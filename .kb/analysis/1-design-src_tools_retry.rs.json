@@ -1,0 +1,12 @@
+{
+  "file_path": "src/tools/retry.rs",
+  "analysis_type": "Design",
+  "summary": "工具重试机制。支持指数退避、异步/同步重试、自定义重试条件。设计参考grok-build。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 869506000
+  },
+  "batch_number": 1
+}

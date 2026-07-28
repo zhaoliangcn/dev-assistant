@@ -1,0 +1,12 @@
+{
+  "file_path": "src/tools/kb.rs",
+  "analysis_type": "Design",
+  "summary": "KnowledgeBase工具。kb_store和kb_query两个工具，支持Markdown+YAML frontmatter格式。索引文件.kb/index.json维护元数据，支持标签、关键词检索。结构完整，功能全面。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 868328000
+  },
+  "batch_number": 1
+}

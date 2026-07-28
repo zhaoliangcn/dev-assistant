@@ -1,0 +1,19 @@
+{
+  "file_path": "src/tools/system_tools.rs",
+  "analysis_type": "Security",
+  "summary": "exec_command工具。Unix平台使用进程组管理，支持超时终止（默认300秒）。不经过shell执行，减少命令注入风险。超时可通过环境变量配置。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Low",
+      "description": "Windows平台进程组管理未实现",
+      "location": "system_tools.rs:80-90",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 874716000
+  },
+  "batch_number": 1
+}

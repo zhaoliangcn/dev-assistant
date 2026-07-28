@@ -1,0 +1,12 @@
+{
+  "file_path": "src/agent/context.rs",
+  "analysis_type": "Structure",
+  "summary": "上下文管理器，薄协调层，委托给ConversationHistory、TokenCounter、ContextCompressor、DisplayBuffer。支持状态持久化（JSON序列化），提供get_display_messages方法用于UI展示。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 866697000
+  },
+  "batch_number": 1
+}

@@ -1,0 +1,25 @@
+{
+  "file_path": "src/security/mod.rs",
+  "analysis_type": "Security",
+  "summary": "安全策略模块。提供路径规范化（防止路径遍历）、危险命令检测（正则匹配）、危险文件过滤（.env/.key/.pem/.crt）、符号链接检测。多层安全防护设计良好。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "危险命令正则仅匹配rm -rf/sudo等，缺少对wget/curl下载到可执行路径等复合攻击的检测",
+      "location": "security/mod.rs:118-165",
+      "suggestion": null
+    },
+    {
+      "severity": "Low",
+      "description": "contains_symlink函数在路径不存在时逐级向上检查，性能可能受影响",
+      "location": "security/mod.rs:60-88",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 868809000
+  },
+  "batch_number": 1
+}

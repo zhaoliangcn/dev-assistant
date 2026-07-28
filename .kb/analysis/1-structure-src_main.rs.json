@@ -1,0 +1,12 @@
+{
+  "file_path": "src/main.rs",
+  "analysis_type": "Structure",
+  "summary": "CLI入口。使用clap解析参数，支持--message/--project/--provider/--model/--no-approval/--verbose/--max-iterations/--max-tokens/--resume/--background等选项。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 876784000
+  },
+  "batch_number": 1
+}

@@ -1,0 +1,25 @@
+{
+  "file_path": "src/agent/mod.rs",
+  "analysis_type": "Logic",
+  "summary": "Agent核心模块。管理对话上下文、工具调用、LLM交互、技能激活、子代理创建、流水线执行。支持上下文压缩、会话持久化。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "Agent模块达1003行，职责过重，建议拆分",
+      "location": "agent/mod.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "Low",
+      "description": "技能匹配逻辑仅通过关键词匹配，可能不够精确",
+      "location": "agent/mod.rs:start_turn",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 876161000
+  },
+  "batch_number": 1
+}

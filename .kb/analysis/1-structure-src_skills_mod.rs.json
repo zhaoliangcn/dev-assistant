@@ -1,0 +1,12 @@
+{
+  "file_path": "src/skills/mod.rs",
+  "analysis_type": "Structure",
+  "summary": "技能发现和解析模块。从skills/目录读取SKILL.md文件，解析YAML frontmatter。支持按名称排序，注入到system prompt。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 873407000
+  },
+  "batch_number": 1
+}

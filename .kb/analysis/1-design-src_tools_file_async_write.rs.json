@@ -1,0 +1,12 @@
+{
+  "file_path": "src/tools/file/async_write.rs",
+  "analysis_type": "Design",
+  "summary": "异步写入工具。提供async_write_file和async_edit_file，支持追加模式、缓存失效、模糊匹配。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 877442000
+  },
+  "batch_number": 1
+}

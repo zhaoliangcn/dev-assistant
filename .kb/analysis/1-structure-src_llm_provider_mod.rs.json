@@ -1,0 +1,12 @@
+{
+  "file_path": "src/llm/provider/mod.rs",
+  "analysis_type": "Structure",
+  "summary": "Provider工厂函数，支持OpenAI兼容、Anthropic Claude、Ollama三种provider。包含多家中国大模型供应商（商汤、DeepSeek、月之暗面、智谱、百度、阿里云、硅基流动）。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 867704000
+  },
+  "batch_number": 1
+}

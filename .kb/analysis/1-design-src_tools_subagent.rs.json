@@ -1,0 +1,12 @@
+{
+  "file_path": "src/tools/subagent.rs",
+  "analysis_type": "Design",
+  "summary": "子代理工具定义。spawn_subagent工具在process_tool_calls中被拦截处理，handler是dummy实现。支持agent_type/max_iterations/max_tokens参数。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 874470000
+  },
+  "batch_number": 1
+}

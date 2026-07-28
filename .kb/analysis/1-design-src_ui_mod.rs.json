@@ -1,0 +1,12 @@
+{
+  "file_path": "src/ui/mod.rs",
+  "analysis_type": "Design",
+  "summary": "UI模块。提供分块渲染API，支持Markdown渲染（含语法高亮）、消息块类型定义、输入面板渲染。替换了旧的split-pane布局。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 871424000
+  },
+  "batch_number": 1
+}

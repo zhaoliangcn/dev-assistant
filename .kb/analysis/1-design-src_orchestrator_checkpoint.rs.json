@@ -1,0 +1,12 @@
+{
+  "file_path": "src/orchestrator/checkpoint.rs",
+  "analysis_type": "Design",
+  "summary": "检查点管理器。保存/恢复任务执行状态，支持崩溃恢复。存储到.kb/checkpoints/目录，有存档和自动清理机制。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 872994000
+  },
+  "batch_number": 1
+}

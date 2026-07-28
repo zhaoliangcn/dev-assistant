@@ -1,0 +1,19 @@
+{
+  "file_path": "src/tools/analysis.rs",
+  "analysis_type": "Design",
+  "summary": "代码分析工具集。提供analyze_codebase、record_analysis、get_analysis_summary、finish_analysis四个工具。支持按文件/类型/严重程度/目录分组统计。分析结果持久化到.kb/analysis/目录。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "分析工具与Agent工具的接口设计复杂度较高，大量重复代码",
+      "location": "analysis.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 867967000
+  },
+  "batch_number": 1
+}

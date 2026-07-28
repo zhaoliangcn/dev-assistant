@@ -1,0 +1,12 @@
+{
+  "file_path": "src/persist/mod.rs",
+  "analysis_type": "Design",
+  "summary": "会话持久化存储。使用append-only JSONL格式，记录所有对话事件、工具调用、上下文压缩。Unix平台文件权限设置为0o600。设计完整，是审计追踪的基础设施。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 870494000
+  },
+  "batch_number": 1
+}

@@ -1,0 +1,12 @@
+{
+  "file_path": "src/security/approval.rs",
+  "analysis_type": "Security",
+  "summary": "审批管理系统。提供 ApprovalManager、PermissionStore、ApprovalRequirement 等组件。支持会话级/一次性/自动审批，带有效期和范围控制。PermissionStore 线程安全。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785054499,
+    "nanos_since_epoch": 212511000
+  },
+  "batch_number": 1
+}

@@ -1,0 +1,12 @@
+{
+  "file_path": "src/ui/markdown.rs",
+  "analysis_type": "Performance",
+  "summary": "Markdown渲染器。使用pulldown-cmark解析，syntect语法高亮。全局缓存SyntaxSet和ThemeSet（LazyLock），避免重复加载。base16-ocean.dark主题。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 871804000
+  },
+  "batch_number": 1
+}

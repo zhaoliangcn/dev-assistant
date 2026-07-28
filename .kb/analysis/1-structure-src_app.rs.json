@@ -1,0 +1,12 @@
+{
+  "file_path": "src/app.rs",
+  "analysis_type": "Structure",
+  "summary": "应用协调层。组装Agent、ToolRegistry、LlmClient、SecurityPolicy、Resources等组件。支持交互模式和非交互模式。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 876490000
+  },
+  "batch_number": 1
+}

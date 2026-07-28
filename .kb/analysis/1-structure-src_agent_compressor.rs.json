@@ -1,0 +1,19 @@
+{
+  "file_path": "src/agent/compressor.rs",
+  "analysis_type": "Structure",
+  "summary": "上下文压缩策略模块。当token数超过阈值时只保留最近6轮对话，防止上下文无限增长。提供CompressionInfo结构体记录压缩详情。设计简洁，职责单一。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Low",
+      "description": "ROUNDS_TO_KEEP硬编码为6，应支持配置化",
+      "location": "compressor.rs:6",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 866342000
+  },
+  "batch_number": 1
+}

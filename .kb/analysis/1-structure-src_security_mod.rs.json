@@ -1,0 +1,12 @@
+{
+  "file_path": "src/security/mod.rs",
+  "analysis_type": "Structure",
+  "summary": "安全策略模块。提供路径验证（支持 canonicalize 和 fallback 归一化路径检查）、命令危险级别评估、敏感文件检查、命令白名单。包含 symlink 保护（O_NOFOLLOW + contains_symlink 检查）。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785054499,
+    "nanos_since_epoch": 212215000
+  },
+  "batch_number": 1
+}

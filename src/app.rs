@@ -294,7 +294,7 @@ impl App {
 
     /// 交互模式：进入 REPL。
     async fn run_interactive(&mut self) -> Result<(), AppError> {
-        use crate::repl::{handle_restart, handle_slash, process_user_message, ReplAction, SlashOutcome};
+        use crate::repl::{handle_restart, handle_slash, process_user_message, ReplAction};
 
         let working_dir = self.config.working_dir.clone();
         let restart_args = self.config.restart_args.clone();
@@ -465,21 +465,16 @@ impl App {
                 }
 
                 // 委托给现有的应用级 handle_slash（/model /status /background 等）
-                match handle_slash(&input, &mut self.agent, &working_dir) {
-                    Some(SlashOutcome::Quit) => break,
-                    Some(SlashOutcome::Continue) => {
-                        // 刷新显示缓冲区中的消息到屏幕
-                        crate::repl::render_agent_messages(&self.agent, verbose)?;
-                        continue;
-                    }
-                    None => {
-                        // 未知命令
-                        let block = ui::MessageBlock::Error {
-                            content: format!("未知命令: {}\n输入 /help 查看可用命令", input),
-                        };
-                        ui::render_block(&block, &markdown_renderer)?;
-                        continue;
-                    }
+                if let Some(_outcome) = handle_slash(&input, &mut self.agent, &working_dir) {
+                    // 命令已处理并渲染到终端，继续下一轮
+                    continue;
+                } else {
+                    // 未知命令
+                    let block = ui::MessageBlock::Error {
+                        content: format!("未知命令: {}\n输入 /help 查看可用命令", input),
+                    };
+                    ui::render_block(&block, &markdown_renderer)?;
+                    continue;
                 }
             }
 

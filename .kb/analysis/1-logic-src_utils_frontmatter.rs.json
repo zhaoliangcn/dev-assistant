@@ -1,0 +1,12 @@
+{
+  "file_path": "src/utils/frontmatter.rs",
+  "analysis_type": "Logic",
+  "summary": "通用YAML Frontmatter解析工具。支持标量、数组、嵌套map三种类型。被skills和kb模块共享使用。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 873817000
+  },
+  "batch_number": 1
+}

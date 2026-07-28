@@ -1,0 +1,12 @@
+{
+  "file_path": "src/prompt.rs",
+  "analysis_type": "Structure",
+  "summary": "系统提示词构建。动态生成工具说明和技能说明，嵌入固定行为规则。测试覆盖全面。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 879638000
+  },
+  "batch_number": 1
+}

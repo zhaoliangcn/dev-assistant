@@ -1,0 +1,12 @@
+{
+  "file_path": "src/tools/resources.rs",
+  "analysis_type": "Design",
+  "summary": "类型安全资源容器，使用TypeId作为Key。支持Cwd、DisplayCwd、RespectGitignore、GitignoreFilter等预定义资源类型。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 870128000
+  },
+  "batch_number": 1
+}

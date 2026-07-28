@@ -1,0 +1,19 @@
+{
+  "file_path": "src/llm/client.rs",
+  "analysis_type": "Design",
+  "summary": "多provider容器，支持运行时切换模型。使用Mutex实现内部可变性。含指数退避重试（最大5次）应对429限流。120秒HTTP超时。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "重试策略仅针对429限流，其他临时错误（如502）未重试",
+      "location": "client.rs:85-100",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 867422000
+  },
+  "batch_number": 1
+}

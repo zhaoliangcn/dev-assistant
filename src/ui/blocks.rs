@@ -10,9 +10,9 @@ pub enum MessageBlock {
         content: String,
     },
     /// 助手消息
-    #[allow(dead_code)]
     Assistant {
         content: String,
+        #[allow(dead_code)]
         is_streaming: bool,
     },
     /// 思考状态

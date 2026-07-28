@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-07-26T07:11:41.868542+00:00",
+  "updated": "2026-07-26T08:28:00.143228+00:00",
   "entries": {
     "ADR-002-pipeline-command-design": {
       "path": "decisions/ADR-002-pipeline-command-design.md",
@@ -16,6 +16,18 @@
       "author": "dev-assistant",
       "created": "2026-07-26",
       "updated": "2026-07-26T07:11:41.868542+00:00"
+    },
+    "architecture-analysis": {
+      "path": "summaries/architecture-analysis.md",
+      "type": "summary",
+      "title": "项目代码架构分析报告",
+      "tags": [
+        "architecture",
+        "analysis",
+        "dev-assistant-rs"
+      ],
+      "status": "completed",
+      "updated": "2026-07-26T08:28:00.143228+00:00"
     }
   }
 }

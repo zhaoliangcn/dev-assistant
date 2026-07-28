@@ -1,0 +1,12 @@
+{
+  "file_path": "src/utils/error.rs",
+  "analysis_type": "Design",
+  "summary": "错误类型定义。使用thiserror，包含Http/Json/Io/Glob/Walkdir/Env/Llm/RateLimited/ToolNotFound/Security/Config/SubagentDepthLimit等变体。提供is_rate_limited和is_retryable方法。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 874201000
+  },
+  "batch_number": 1
+}

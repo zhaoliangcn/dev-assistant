@@ -1,0 +1,19 @@
+{
+  "file_path": "src/tools/file/io.rs",
+  "analysis_type": "Security",
+  "summary": "安全IO原语。Unix平台使用O_NOFOLLOW防止symlink TOCTOU攻击。读写操作都经过安全防护。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Low",
+      "description": "Windows平台缺少O_NOFOLLOW等效防护",
+      "location": "io.rs:29-38",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 868571000
+  },
+  "batch_number": 1
+}

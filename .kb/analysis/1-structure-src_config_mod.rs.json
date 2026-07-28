@@ -1,0 +1,12 @@
+{
+  "file_path": "src/config/mod.rs",
+  "analysis_type": "Structure",
+  "summary": "配置加载模块。TOML文件优先（.dev-assistant-models.toml），支持${VAR}环境变量占位符解析，fallback到环境变量。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 878520000
+  },
+  "batch_number": 1
+}

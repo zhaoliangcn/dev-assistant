@@ -1,0 +1,19 @@
+{
+  "file_path": "src/security/approval.rs",
+  "analysis_type": "Design",
+  "summary": "审批管理器。支持Auto/OneTime/Session三种审批类型，Command/Path/Tool三种审批范围。权限有过期机制，线程安全。设计完整但实际未完全接线到UI交互。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "审批管理器已实现但未与UI交互流程完全集成，用户无法实际确认审批",
+      "location": "approval.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 869148000
+  },
+  "batch_number": 1
+}

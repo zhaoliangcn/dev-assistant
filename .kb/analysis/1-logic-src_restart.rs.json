@@ -1,0 +1,19 @@
+{
+  "file_path": "src/restart.rs",
+  "analysis_type": "Logic",
+  "summary": "restart流程。cargo build编译验证后使用exec()替换当前进程，PID保持不变。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Low",
+      "description": "仅支持Unix平台（使用了std::os::unix::process::CommandExt）",
+      "location": "restart.rs:1",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 879286000
+  },
+  "batch_number": 1
+}

@@ -1,0 +1,19 @@
+{
+  "file_path": "src/agent/token_counter.rs",
+  "analysis_type": "Logic",
+  "summary": "Token估算器。CJK字符按2 tokens/字符，非CJK按0.75 tokens/字符。支持估算整个消息列表。测试覆盖全面。",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Low",
+      "description": "token估算策略较为粗略，与实际模型tokenizer可能有偏差",
+      "location": "token_counter.rs:15-40",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 867192000
+  },
+  "batch_number": 1
+}

@@ -23,7 +23,7 @@ fn derive_thinking_status(last_msg: Option<&str>) -> &'static str {
         "正在执行工具调用..."
     } else if msg.contains("发送请求") || msg.contains("LLM") || msg.contains("API") {
         "等待 LLM 响应..."
-    } else if msg.contains("分析") || msg.contains("分析") || msg.contains("检查") {
+    } else if msg.contains("分析") || msg.contains("检查") {
         "正在分析代码..."
     } else if msg.contains("读取") || msg.contains("read") || msg.contains("搜索") || msg.contains("search") {
         "正在读取文件..."
@@ -94,8 +94,6 @@ pub const STATE_FILE: &str = ".dev-assistant-state.json";
 pub enum SlashOutcome {
     /// 命令已处理完毕，REPL 应继续下一轮读取
     Continue,
-    /// 用户请求退出
-    Quit,
 }
 
 /// REPL 主循环每轮的动作。
@@ -104,25 +102,18 @@ pub enum ReplAction {
     Quit,
 }
 
-/// 处理一条 slash 命令（以 `/` 开头）。
+/// 处理应用级 slash 命令（`/model`、`/status`、`/background`）。
 ///
-/// 返回 `None` 表示输入不是 slash 命令，调用方应按普通消息处理。
+/// 返回 `None` 表示输入不是本层能处理的命令，调用方应按普通消息处理。
+/// 注意：`/exit`、`/quit`、`/clear`、`/help` 等通用命令由 `input::SlashCommand` 处理。
+///
+/// 所有命令的输出直接通过 `ui::render_block` 渲染到终端，避免存入 `DisplayBuffer`
+/// 后被 `reset_display_for_new_turn()` 清空。
 pub fn handle_slash(
     input: &str,
     agent: &mut Agent,
     working_dir: &Path,
 ) -> Option<SlashOutcome> {
-    if input == "/exit" || input == "/quit" {
-        print!("\x1b[2J\x1b[H");
-        println!("👋 Goodbye!");
-        return Some(SlashOutcome::Quit);
-    }
-
-    if input == "/clear" {
-        agent.clear_display_to(agent.history_len());
-        return Some(SlashOutcome::Continue);
-    }
-
     if input.starts_with("/model") {
         return Some(handle_model_command(input, agent, working_dir));
     }
@@ -143,23 +134,19 @@ fn handle_model_command(
     agent: &mut Agent,
     working_dir: &Path,
 ) -> SlashOutcome {
+    let md = MarkdownRenderer::new();
     let parts: Vec<&str> = input.split_whitespace().collect();
 
     if parts.len() == 1 {
         // 列出所有模型，标记当前活跃模型
         let active = agent.active_model().to_string();
         let models: Vec<String> = agent.list_models().into_iter().map(|s| s.to_string()).collect();
-        agent.add_display_message(
-            MessageLevel::Info,
-            "可用模型:",
-        );
+        let mut content = "📋 可用模型:\n".to_string();
         for m in &models {
             let marker = if m.as_str() == active.as_str() { "→" } else { " " };
-            agent.add_display_message(
-                MessageLevel::Info,
-                &format!("{} {}", marker, m),
-            );
+            content.push_str(&format!("{} {}\n", marker, m));
         }
+        let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
         return SlashOutcome::Continue;
     }
 
@@ -167,60 +154,59 @@ fn handle_model_command(
     let model_name = parts[1];
     match agent.switch_model(model_name) {
         Ok(()) => {
-            agent.add_display_message(
-                MessageLevel::Success,
-                &format!("切换到模型: {}", model_name),
-            );
             agent.set_active_model(model_name.to_string());
+            let _ = ui::render_block(
+                &ui::MessageBlock::ToolResult {
+                    tool_name: "模型".to_string(),
+                    success: true,
+                    content: format!("✅ 切换到模型: {}", model_name),
+                },
+                &md,
+            );
             // 立即保存状态
             let state_path = working_dir.join(STATE_FILE);
             let _ = agent.save_state(&state_path);
         }
         Err(e) => {
-            agent.add_display_message(
-                MessageLevel::Error,
-                &format!("切换失败: {}", e),
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error {
+                    content: format!("❌ 切换失败: {}", e),
+                },
+                &md,
             );
         }
     }
     SlashOutcome::Continue
 }
 
-fn handle_status_command(agent: &mut Agent) -> SlashOutcome {
+fn handle_status_command(_agent: &mut Agent) -> SlashOutcome {
+    let md = MarkdownRenderer::new();
     use crate::tools::task_tools::get_global_task_manager;
     
-    if let Some(manager) = get_global_task_manager() {
+    let content = if let Some(manager) = get_global_task_manager() {
         let graph_arc = manager.graph();
         let graph = graph_arc.lock().unwrap();
         let summary = graph.progress_summary();
         let total = graph.total_count();
         let completed = graph.completed_count();
         drop(graph);
-        agent.add_display_message(
-            MessageLevel::Info,
-            &format!(
-                "📊 任务状态:\n\
-                 - 总任务数: {}\n\
-                 - 已完成: {}\n\
-                 \n{}",
-                total,
-                completed,
-                summary,
-            ),
-        );
+        format!(
+            "📊 任务状态:\n\
+             - 总任务数: {}\n\
+             - 已完成: {}\n\
+             \n{}",
+            total, completed, summary,
+        )
     } else {
-        agent.add_display_message(
-            MessageLevel::Info,
-            "当前没有正在运行的后台任务",
-        );
-    }
+        "当前没有正在运行的后台任务".to_string()
+    };
+    let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
     SlashOutcome::Continue
 }
 
-fn handle_background_command(agent: &mut Agent) -> SlashOutcome {
-    agent.add_display_message(
-        MessageLevel::Info,
-        "⚠️ 后台模式需要通过命令行参数 --background 启动\n\
+fn handle_background_command(_agent: &mut Agent) -> SlashOutcome {
+    let md = MarkdownRenderer::new();
+    let content = "⚠️ 后台模式需要通过命令行参数 --background 启动\n\
          使用方式: dev-assistant --background\n\
          \n\
          在后台模式下，任务将自动执行并定期保存检查点。\n\
@@ -228,8 +214,8 @@ fn handle_background_command(agent: &mut Agent) -> SlashOutcome {
          - /status: 查询任务状态\n\
          - /pause: 暂停任务\n\
          - /resume: 恢复任务\n\
-         - /cancel: 取消任务",
-    );
+         - /cancel: 取消任务".to_string();
+    let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
     SlashOutcome::Continue
 }
 

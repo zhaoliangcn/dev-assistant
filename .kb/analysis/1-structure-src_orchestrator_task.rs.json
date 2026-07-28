@@ -1,0 +1,12 @@
+{
+  "file_path": "src/orchestrator/task.rs",
+  "analysis_type": "Structure",
+  "summary": "任务队列和依赖图数据结构。Task结构体支持依赖、优先级、重试、Agent类型分配。DependencyGraph支持拓扑排序和进度追踪。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785057754,
+    "nanos_since_epoch": 872616000
+  },
+  "batch_number": 1
+}

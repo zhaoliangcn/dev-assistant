@@ -1,4 +1,5 @@
 use std::io;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -18,8 +19,12 @@ pub enum AppError {
     Env(String),
     #[error("LLM error: {0}")]
     Llm(String),
-    #[error("LLM rate limited: {0}")]
-    RateLimited(String),
+    /// LLM rate limited。`retry_after` 是服务端建议的等待时间（若有）。
+    #[error("LLM rate limited: {message}")]
+    RateLimited {
+        message: String,
+        retry_after: Option<Duration>,
+    },
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
     #[error("Security error: {0}")]
@@ -38,14 +43,40 @@ impl AppError {
     /// 作为兼容旧 provider 实现的兜底。
     pub fn is_rate_limited(&self) -> bool {
         match self {
-            AppError::RateLimited(_) => true,
+            AppError::RateLimited { .. } => true,
             AppError::Llm(msg) => {
                 msg.contains("status 429") || msg.contains("Too Many Requests")
             }
             _ => false,
         }
     }
-    
+
+    /// 如果错误是服务端错误（5xx / server error）返回 true。
+    ///
+    /// 此类错误通常是瞬时的，适合自动重试。
+    pub fn is_server_error(&self) -> bool {
+        match self {
+            AppError::Llm(msg) => {
+                msg.contains("status 502") || msg.contains("Bad Gateway")
+                    || msg.contains("status 503") || msg.contains("Service Unavailable")
+                    || msg.contains("status 504") || msg.contains("Gateway Timeout")
+                    || msg.contains("status 5")
+            }
+            AppError::Http(e) => {
+                e.status().map_or(false, |s| s.as_u16() >= 500)
+            }
+            _ => false,
+        }
+    }
+
+    /// 如果错误是 rate limit，返回服务端建议的等待时间（Retry-After 头）。
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            AppError::RateLimited { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
+
     /// 判断错误是否可重试
     /// 
     /// 只有瞬时错误才应该重试：
@@ -62,7 +93,7 @@ impl AppError {
     /// - Config: 配置错误
     pub fn is_retryable(&self) -> bool {
         match self {
-            AppError::RateLimited(_) => true,
+            AppError::RateLimited { .. } => true,
             AppError::Io(e) => matches!(e.kind(), std::io::ErrorKind::Interrupted),
             AppError::Http(e) => e.is_timeout() || e.is_connect(),
             AppError::Llm(_) => true,

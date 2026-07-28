@@ -313,6 +313,8 @@ impl App {
         session_log.log_status("信息", &format!("项目目录: {}", self.config.working_dir.display()));
         session_log.log_status("信息", &format!("模型: {}", self.agent.active_model()));
 
+        let mut round_num: usize = 0;
+
         loop {
             // 更新输入面板
             ui::render_input_panel(None)?;
@@ -400,6 +402,43 @@ impl App {
                         continue;
                     }
 
+                    // /history 特殊处理：需要访问 agent 的历史数据
+                    if matches!(cmd, ui::input::SlashCommand::History) {
+                        let messages = self.agent.history_messages();
+                        if messages.is_empty() {
+                            let block = ui::MessageBlock::System {
+                                content: "📋 暂无对话历史".to_string(),
+                            };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        } else {
+                            let mut history_lines: Vec<String> = Vec::new();
+                            for (i, msg) in messages.iter().enumerate() {
+                                let role_str = match msg.role.as_str() {
+                                    "system" => "⚙ 系统",
+                                    "user" => "👤 用户",
+                                    "assistant" => "🤖 助手",
+                                    "tool" => "🔧 工具",
+                                    _ => "📝 未知",
+                                };
+                                let content = msg.content.as_deref().unwrap_or("");
+                                let preview: String = content.chars().take(120).collect();
+                                if content.chars().count() > 120 {
+                                    history_lines.push(format!("  #{} {}: {}...", i + 1, role_str, preview));
+                                } else {
+                                    history_lines.push(format!("  #{} {}: {}", i + 1, role_str, preview));
+                                }
+                            }
+                            let content = format!(
+                                "📋 对话历史（共 {} 条）:\n{}",
+                                messages.len(),
+                                history_lines.join("\n"),
+                            );
+                            let block = ui::MessageBlock::System { content };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        }
+                        continue;
+                    }
+
                     match cmd.execute() {
                         ui::input::SlashAction::Exit => {
                             println!("👋 Goodbye!");
@@ -429,6 +468,8 @@ impl App {
                 match handle_slash(&input, &mut self.agent, &working_dir) {
                     Some(SlashOutcome::Quit) => break,
                     Some(SlashOutcome::Continue) => {
+                        // 刷新显示缓冲区中的消息到屏幕
+                        crate::repl::render_agent_messages(&self.agent, verbose)?;
                         continue;
                     }
                     None => {
@@ -445,6 +486,17 @@ impl App {
             if input.is_empty() {
                 continue;
             }
+
+            // ── 轮次分隔 ──
+            round_num += 1;
+            let round_header = format!(
+                "\x1b[1m── 第 {} 轮 ──\x1b[0m",
+                round_num
+            );
+            ui::render_block(
+                &ui::MessageBlock::System { content: round_header },
+                &markdown_renderer,
+            )?;
 
             // 处理一次用户消息
             let action = process_user_message(

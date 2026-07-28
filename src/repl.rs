@@ -1,6 +1,6 @@
 //! 交互式 REPL：slash 命令分发 + 主循环辅助函数。
 
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 
 use crate::agent::{Agent, AgentStep};
@@ -32,6 +32,59 @@ fn derive_thinking_status(last_msg: Option<&str>) -> &'static str {
     } else {
         "LLM 正在思考..."
     }
+}
+
+/// 根据消息内容将 Info 级别消息分类为具体的 MessageBlock 类型。
+///
+/// 优先通过前导 emoji 判断，避免字符串误匹配。
+fn classify_info_message(msg: &str) -> ui::MessageBlock {
+    // 按 emoji 前缀精确判断
+    if msg.starts_with("💭") {
+        ui::MessageBlock::Thinking { content: msg.to_string() }
+    } else if msg.starts_with("🔧") || msg.starts_with("↻") {
+        ui::MessageBlock::System { content: msg.to_string() }
+    } else if msg.starts_with("✅") {
+        ui::MessageBlock::ToolResult {
+            tool_name: String::new(),
+            success: true,
+            content: msg.to_string(),
+        }
+    } else if msg.starts_with("❌") || msg.starts_with("🔥") {
+        ui::MessageBlock::Error { content: msg.to_string() }
+    } else if msg.starts_with("⚠️") {
+        ui::MessageBlock::System { content: msg.to_string() }
+    } else if msg.starts_with("ℹ️") || msg.starts_with("📝") {
+        ui::MessageBlock::System { content: msg.to_string() }
+    } else {
+        // 兜底：无 emoji 时再尝试文本匹配
+        if msg.contains("思考") || msg.contains("thinking") || msg.contains("分析") {
+            ui::MessageBlock::Thinking { content: msg.to_string() }
+        } else if msg.contains("工具") || msg.contains("执行") {
+            ui::MessageBlock::System { content: msg.to_string() }
+        } else {
+            ui::MessageBlock::System { content: format!("ℹ️ {}", msg) }
+        }
+    }
+}
+
+/// 刷新待处理的 Thinking 合并块。
+/// 如果有累积的 Thinking 消息，渲染为合并后的一条。
+fn flush_pending_thinking(
+    pending: &mut Option<String>,
+    count: &mut usize,
+    markdown_renderer: &MarkdownRenderer,
+) -> io::Result<()> {
+    if let Some(latest_msg) = pending.take() {
+        let merged = if *count > 1 {
+            format!("{} ↩ ({} 条更新)", latest_msg, count)
+        } else {
+            latest_msg
+        };
+        let block = ui::MessageBlock::Thinking { content: merged };
+        ui::render_block(&block, markdown_renderer)?;
+        *count = 0;
+    }
+    Ok(())
 }
 
 /// 状态持久化文件名（相对于工作目录）。
@@ -208,6 +261,9 @@ pub async fn process_user_message(
     ui::render_block(&user_block, markdown_renderer)?;
 
     let mut step_round: usize = 0;
+    // Thinking 块合并状态
+    let mut pending_thinking: Option<String> = None;
+    let mut thinking_count: usize = 0;
 
     let result = loop {
         // Drain buffered messages and render blocks
@@ -215,30 +271,48 @@ pub async fn process_user_message(
             let label = level.label();
             session_log.log_status(label, &msg);
             agent.add_display_message(level, &msg);
-            
+
             // 根据消息级别渲染不同类型的块
             let block = match level {
-                MessageLevel::Error => ui::MessageBlock::Error { content: msg },
-                MessageLevel::Warning => ui::MessageBlock::System { content: format!("⚠️ {}", msg) },
+                MessageLevel::Error => {
+                    // 先刷新待处理的 Thinking 块
+                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                    ui::MessageBlock::Error { content: msg }
+                }
+                MessageLevel::Warning => {
+                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                    ui::MessageBlock::System { content: format!("⚠️ {}", msg) }
+                }
                 MessageLevel::Info => {
-                    // 检测消息内容，尝试分类
-                    if msg.starts_with("💭") || msg.contains("思考") || msg.contains("thinking") {
-                        ui::MessageBlock::Thinking { content: msg }
-                    } else if msg.starts_with("🔧") || msg.contains("工具") {
-                        ui::MessageBlock::System { content: msg }
+                    let b = classify_info_message(&msg);
+                    if matches!(b, ui::MessageBlock::Thinking { .. }) {
+                        // 连续 Thinking 块：合并
+                        pending_thinking = Some(msg);
+                        thinking_count += 1;
+                        continue; // 跳过渲染，等非 Thinking 块或 flush
                     } else {
-                        ui::MessageBlock::System { content: format!("ℹ️ {}", msg) }
+                        flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                        b
                     }
                 }
-                MessageLevel::Debug => ui::MessageBlock::System { content: format!("🐛 {}", msg) },
-                MessageLevel::Success => ui::MessageBlock::ToolResult {
-                    tool_name: "操作".to_string(),
-                    success: true,
-                    content: msg,
-                },
+                MessageLevel::Debug => {
+                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                    ui::MessageBlock::System { content: format!("🐛 {}", msg) }
+                }
+                MessageLevel::Success => {
+                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                    ui::MessageBlock::ToolResult {
+                        tool_name: "操作".to_string(),
+                        success: true,
+                        content: msg,
+                    }
+                }
             };
             ui::render_block(&block, markdown_renderer)?;
         }
+
+        // 刷新本轮剩余的待处理 Thinking 块
+        flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
 
         // 检测上一轮操作，生成上下文状态提示
         let status = derive_thinking_status(output.last_message());
@@ -273,7 +347,45 @@ pub async fn process_user_message(
         let label = level.label();
         session_log.log_status(label, &msg);
         agent.add_display_message(level, &msg);
+
+        // 渲染到终端（与主循环使用相同的分类逻辑）
+        let block = match level {
+            MessageLevel::Error => {
+                flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                ui::MessageBlock::Error { content: msg }
+            }
+            MessageLevel::Warning => {
+                flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                ui::MessageBlock::System { content: format!("⚠️ {}", msg) }
+            }
+            MessageLevel::Info => {
+                let b = classify_info_message(&msg);
+                if matches!(b, ui::MessageBlock::Thinking { .. }) {
+                    pending_thinking = Some(msg);
+                    thinking_count += 1;
+                    continue;
+                } else {
+                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                    b
+                }
+            }
+            MessageLevel::Debug => {
+                flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                ui::MessageBlock::System { content: format!("🐛 {}", msg) }
+            }
+            MessageLevel::Success => {
+                flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+                ui::MessageBlock::ToolResult {
+                    tool_name: "操作".to_string(),
+                    success: true,
+                    content: msg,
+                }
+            }
+        };
+        ui::render_block(&block, markdown_renderer)?;
     }
+    // 刷新本轮剩余的待处理 Thinking 块
+    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
 
     // 处理用户中断的情况：回到输入提示，不处理结果
     let result = match result {
@@ -376,7 +488,7 @@ pub fn handle_restart(
 }
 
 /// 将 agent 的显示消息转换为 MessageBlock 并渲染（新 API）。
-fn render_agent_messages(agent: &Agent, verbose: bool) -> Result<(), AppError> {
+pub fn render_agent_messages(agent: &Agent, verbose: bool) -> Result<(), AppError> {
     let md = MarkdownRenderer::new();
     let mut blocks: Vec<ui::MessageBlock> = Vec::new();
 

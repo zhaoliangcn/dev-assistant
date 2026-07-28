@@ -634,7 +634,7 @@ impl Agent {
     fn categorize_error(e: &AppError) -> crate::tools::ErrorCategory {
         match e {
             // 可重试的临时性错误
-            AppError::RateLimited(_) => crate::tools::ErrorCategory::Transient,
+            AppError::RateLimited { .. } => crate::tools::ErrorCategory::Transient,
             AppError::Llm(_) => crate::tools::ErrorCategory::Llm,
             AppError::Http(e) if e.is_timeout() || e.is_connect() => crate::tools::ErrorCategory::Transient,
             AppError::Io(e) if e.kind() == std::io::ErrorKind::Interrupted => crate::tools::ErrorCategory::Transient,

@@ -4,7 +4,6 @@ use serde_json::Value;
 
 /// 消息块类型
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // reserved for future block-based UI rendering
 pub enum MessageBlock {
     /// 用户消息
     User {
@@ -21,7 +20,6 @@ pub enum MessageBlock {
         content: String,
     },
     /// 工具调用
-    #[allow(dead_code)]
     ToolCall {
         tool_name: String,
         args: Value,
@@ -48,6 +46,7 @@ pub enum MessageBlock {
         summary: Option<String>,
     },
     /// 分隔线
+    #[allow(dead_code)]
     Divider,
 }
 
@@ -85,7 +84,7 @@ impl MessageBlock {
     }
 
     /// 获取块的角色标签（用于 display_messages 兼容）
-    #[allow(dead_code)] // reserved for future block-based UI rendering
+    #[allow(dead_code)]
     pub fn role_label(&self) -> &'static str {
         match self {
             MessageBlock::User { .. } => "你",

@@ -3,14 +3,23 @@ use std::time::Duration;
 
 use rand::RngExt;
 use reqwest::Client;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::models::*;
 use super::provider::{create_provider, LlmProvider};
 use crate::utils::error::AppError;
 
+/// 最大重试次数（连续 429 的自动重试上限）。
 const MAX_RETRIES: u32 = 5;
-const BASE_DELAY_MS: u64 = 1000;
+
+/// 退避初始延迟（毫秒）。
+const BASE_DELAY_MS: u64 = 2000;
+
+/// 退避乘数（指数退避的底数）。
+const BACKOFF_MULTIPLIER: f64 = 2.0;
+
+/// 最大延迟上限（防止无限增长）。
+const MAX_DELAY: Duration = Duration::from_secs(120);
 
 /// 多 provider 容器，支持运行时切换模型。
 ///
@@ -94,40 +103,110 @@ impl LlmClient {
         messages: Vec<LlmMessage>,
         tools: Vec<ToolSchema>,
     ) -> Result<LlmResponse, AppError> {
-        let active_idx = *self.active_idx.lock().unwrap();
-        let cfg = &self.provider_configs[active_idx];
-        let provider = &self.providers[active_idx];
+        let start_idx = *self.active_idx.lock().unwrap();
+        let total_providers = self.providers.len();
+        let mut last_error: Option<AppError> = None;
 
-        debug!(model = %cfg.name, provider = %cfg.provider, "Calling LLM API");
+        // 从当前活跃 provider 开始尝试，逐个故障转移
+        for offset in 0..total_providers {
+            let idx = (start_idx + offset) % total_providers;
+            let cfg = &self.provider_configs[idx];
+            let provider = &self.providers[idx];
 
-        let request = LlmRequest {
-            model: cfg.model.clone(),
-            messages,
-            tools: Some(tools),
-            temperature: cfg.temperature.unwrap_or(0.2),
-            max_tokens: cfg.max_tokens.unwrap_or(8192),
-        };
-
-        let mut attempt = 0u32;
-        loop {
-            match provider.chat(&self.http_client, &request).await {
-                Ok(resp) => return Ok(resp),
-                Err(ref e) if e.is_rate_limited() && attempt < MAX_RETRIES => {
-                    attempt += 1;
-                    let delay_ms = BASE_DELAY_MS * 2u64.pow(attempt - 1)
-                        + rand::rng().random_range(0..500);
-                    warn!(
-                        attempt = attempt,
-                        max_retries = MAX_RETRIES,
-                        delay_ms = delay_ms,
-                        "429 rate limit hit, retrying after backoff"
-                    );
-                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                    continue;
-                }
-                Err(e) => return Err(e),
+            // 如果不是第一个尝试的 provider，记录故障转移日志
+            if offset > 0 {
+                warn!(
+                    from_provider = %self.provider_configs[start_idx].name,
+                    to_provider = %cfg.name,
+                    "429/5xx 故障转移：切换到 {}",
+                    cfg.name,
+                );
+                // 更新活跃索引以便后续调用使用新 provider
+                *self.active_idx.lock().unwrap() = idx;
             }
+
+            debug!(model = %cfg.name, provider = %cfg.provider, "Calling LLM API");
+
+            let request = LlmRequest {
+                model: cfg.model.clone(),
+                messages: messages.clone(),
+                tools: Some(tools.clone()),
+                temperature: cfg.temperature.unwrap_or(0.2),
+                max_tokens: cfg.max_tokens.unwrap_or(8192),
+            };
+
+            let mut attempt = 0u32;
+
+            loop {
+                match provider.chat(&self.http_client, &request).await {
+                    Ok(resp) => return Ok(resp),
+                    Err(ref e) if (e.is_rate_limited() || e.is_server_error()) && attempt < MAX_RETRIES => {
+                        attempt += 1;
+
+                        // 优先使用服务端建议的 Retry-After，否则用指数退避
+                        let delay = match e.retry_after() {
+                            Some(server_delay) if server_delay <= MAX_DELAY => server_delay,
+                            _ => {
+                                let base = BASE_DELAY_MS as f64 * BACKOFF_MULTIPLIER.powi(attempt as i32 - 1);
+                                let jitter_range = (base * 0.25) as u64;
+                                let jitter = if jitter_range > 0 {
+                                    rand::rng().random_range(0..=jitter_range)
+                                } else {
+                                    0
+                                };
+                                Duration::from_millis(base as u64 + jitter).min(MAX_DELAY)
+                            }
+                        };
+
+                        let error_type = if e.is_rate_limited() { "429" } else { "5xx" };
+
+                        info!(
+                            attempt = attempt,
+                            max_retries = MAX_RETRIES,
+                            delay_ms = delay.as_millis() as u64,
+                            error_type = error_type,
+                            model = %cfg.name,
+                            "API 请求失败（{}），等待后重试",
+                            error_type,
+                        );
+
+                        if attempt >= 3 {
+                            warn!(
+                                attempt = attempt,
+                                max_retries = MAX_RETRIES,
+                                delay_ms = delay.as_millis() as u64,
+                                error_type = error_type,
+                                model = %cfg.name,
+                                "API 持续返回 {}，准备故障转移",
+                                error_type,
+                            );
+                        }
+
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    Err(e) => {
+                        // retries exhausted or non-retryable error
+                        last_error = Some(e);
+                        break;
+                    }
+                }
+            }
+
+            // 如果这是最后一个 provider，不再继续尝试
+            if offset == total_providers - 1 {
+                break;
+            }
+
+            // retries exhausted on this provider, try the next one
+            // 在两个 provider 之间增加短暂延迟，避免连续冲击下一个 API
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
+
+        // 所有 provider 均失败
+        Err(last_error.unwrap_or_else(|| {
+            AppError::Llm("所有 LLM provider 均不可用，请检查网络连接或 API 配置".to_string())
+        }))
     }
 }
 

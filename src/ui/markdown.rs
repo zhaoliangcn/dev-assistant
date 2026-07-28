@@ -7,6 +7,27 @@ use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
 
+/// 移除 ANSI 转义序列，返回纯文本（用于宽度计算）。
+fn strip_ansi_escapes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // 跳过 ESC[...m 序列
+            if chars.next() == Some('[') {
+                for ch in chars.by_ref() {
+                    if ch == 'm' {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// 全局语法集缓存（~150 种语法定义，加载约 30-50ms）。
 /// 使用 LazyLock 确保只加载一次，避免每次创建 MarkdownRenderer 时重复加载。
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
@@ -31,10 +52,19 @@ impl MarkdownRenderer {
     pub fn render(&self, markdown: &str) -> String {
         let mut output = String::new();
         let parser = Parser::new_ext(markdown, Options::all());
-        
+
         let mut code_block_lang = String::new();
         let mut in_code_block = false;
-        
+
+        // ── 表格渲染状态 ──
+        let mut in_table = false;
+        let mut in_table_head = false;
+        let mut in_cell = false;
+        let mut current_row: Vec<String> = Vec::new();
+        let mut current_cell = String::new();
+        let mut table_header: Vec<String> = Vec::new();
+        let mut table_rows: Vec<Vec<String>> = Vec::new();
+
         for event in parser {
             match event {
                 Event::Start(tag) => {
@@ -46,13 +76,63 @@ impl MarkdownRenderer {
                                 _ => String::new(),
                             };
                         }
-                        _ => self.render_start_tag(&mut output, &tag),
+                        Tag::Table(_) => {
+                            in_table = true;
+                            table_header.clear();
+                            table_rows.clear();
+                            current_row.clear();
+                        }
+                        Tag::TableHead => {
+                            in_table_head = true;
+                        }
+                        Tag::TableRow => {
+                            current_row.clear();
+                        }
+                        Tag::TableCell => {
+                            in_cell = true;
+                            current_cell.clear();
+                        }
+                        _ => {
+                            if !in_table {
+                                self.render_start_tag(&mut output, &tag);
+                            }
+                        }
                     }
                 }
                 Event::End(tag_end) => {
                     if matches!(tag_end, TagEnd::CodeBlock) {
                         in_code_block = false;
                         code_block_lang.clear();
+                    } else if in_table {
+                        match &tag_end {
+                            TagEnd::TableCell => {
+                                in_cell = false;
+                                current_row.push(current_cell.clone());
+                                current_cell.clear();
+                            }
+                            TagEnd::TableRow => {
+                                if in_table_head {
+                                    table_header = current_row.clone();
+                                    in_table_head = false;
+                                } else {
+                                    if !current_row.is_empty() {
+                                        table_rows.push(current_row.clone());
+                                    }
+                                }
+                                current_row.clear();
+                            }
+                            TagEnd::TableHead => {
+                                // Header rows are captured in TableRow end handler
+                            }
+                            TagEnd::Table => {
+                                self.render_table(&mut output, &table_header, &table_rows);
+                                in_table = false;
+                                table_header.clear();
+                                table_rows.clear();
+                                current_row.clear();
+                            }
+                            _ => {}
+                        }
                     } else {
                         self.render_end_tag(&mut output, &tag_end);
                     }
@@ -60,20 +140,130 @@ impl MarkdownRenderer {
                 Event::Text(text) => {
                     if in_code_block {
                         self.render_code_block(&mut output, &code_block_lang, &text);
+                    } else if in_cell {
+                        current_cell.push_str(&text);
                     } else {
                         output.push_str(&text);
                     }
                 }
-                Event::Code(code) => self.render_inline_code(&mut output, &code),
-                Event::HardBreak => output.push('\n'),
-                Event::SoftBreak => output.push('\n'),
+                Event::Code(code) => {
+                    if in_cell {
+                        current_cell.push_str(&format!("\x1b[38;2;156;189;248m{}\x1b[0m", code));
+                    } else {
+                        self.render_inline_code(&mut output, &code);
+                    }
+                }
+                Event::HardBreak => {
+                    if in_cell {
+                        current_cell.push('\n');
+                    } else {
+                        output.push('\n');
+                    }
+                }
+                Event::SoftBreak => {
+                    if in_cell {
+                        current_cell.push('\n');
+                    } else {
+                        output.push('\n');
+                    }
+                }
                 _ => {}
             }
         }
-        
+
         output
     }
-    
+
+    /// 渲染表格为 ASCII 边框格式。
+    fn render_table(&self, output: &mut String, header: &[String], rows: &[Vec<String>]) {
+        // 计算每列最大宽度
+        let num_cols = header.len().max(
+            rows.iter().map(|r| r.len()).max().unwrap_or(0)
+        );
+        if num_cols == 0 {
+            return;
+        }
+
+        let mut col_widths: Vec<usize> = header.iter().map(|c| strip_ansi_escapes(c).len()).collect();
+        for row in rows {
+            for (i, cell) in row.iter().enumerate() {
+                if i < col_widths.len() {
+                    // 只取第一行宽度（忽略 ANSI 序列）
+                    let plain = strip_ansi_escapes(cell);
+                    col_widths[i] = col_widths[i].max(plain.len());
+                } else {
+                    let plain = strip_ansi_escapes(cell);
+                    col_widths.push(plain.len());
+                }
+            }
+        }
+        // 确保最小宽度
+        for w in &mut col_widths {
+            *w = (*w).max(3);
+        }
+
+        // ── 顶边框 ──
+        output.push_str("┌");
+        for (i, w) in col_widths.iter().enumerate() {
+            output.push_str(&"─".repeat(*w + 2));
+            if i < col_widths.len() - 1 {
+                output.push_str("┬");
+            }
+        }
+        output.push_str("┐\n");
+
+        // ── 表头 ──
+        if !header.is_empty() {
+            output.push_str("│");
+            for (i, cell) in header.iter().enumerate() {
+                let w = col_widths.get(i).copied().unwrap_or(3);
+                let padding = w.saturating_sub(strip_ansi_escapes(cell).len());
+                let left = padding / 2;
+                let right = padding - left;
+                output.push_str(&format!(
+                    " \x1b[1m{}\x1b[0m{}{}│",
+                    cell,
+                    " ".repeat(left),
+                    " ".repeat(right),
+                ));
+            }
+            output.push('\n');
+
+            // ── 表头/数据分隔线 ──
+            output.push_str("├");
+            for (i, w) in col_widths.iter().enumerate() {
+                output.push_str(&"─".repeat(*w + 2));
+                if i < col_widths.len() - 1 {
+                    output.push_str("┼");
+                }
+            }
+            output.push_str("┤\n");
+        }
+
+        // ── 数据行 ──
+        for row in rows {
+            output.push_str("│");
+            for i in 0..num_cols {
+                let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
+                let w = col_widths.get(i).copied().unwrap_or(3);
+                let plain = strip_ansi_escapes(cell);
+                let padding = w.saturating_sub(plain.len());
+                output.push_str(&format!(" {}{}│", cell, " ".repeat(padding)));
+            }
+            output.push('\n');
+        }
+
+        // ── 底边框 ──
+        output.push_str("└");
+        for (i, w) in col_widths.iter().enumerate() {
+            output.push_str(&"─".repeat(*w + 2));
+            if i < col_widths.len() - 1 {
+                output.push_str("┴");
+            }
+        }
+        output.push_str("┘\n");
+    }
+
     /// 渲染围栏代码块。
     ///
     /// 对 `diff` 语言使用专门的 diff 渲染器（绿/红配色），

@@ -61,10 +61,16 @@ impl LlmProvider for OpenAIProvider {
         let status = response.status();
 
         if !status.is_success() {
+            // 先读取 Retry-After 头（response.text() 会消费 response）
+            let retry_after = response.headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(std::time::Duration::from_secs);
             let body_text = response.text().await.unwrap_or_default();
             let msg = format!("LLM API returned error (status {}): {}", status, body_text);
             return Err(if status.as_u16() == 429 {
-                AppError::RateLimited(msg)
+                AppError::RateLimited { message: msg, retry_after }
             } else {
                 AppError::Llm(msg)
             });

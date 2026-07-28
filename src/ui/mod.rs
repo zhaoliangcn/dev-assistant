@@ -10,27 +10,12 @@ pub use output_impls::{CliMessageOutput, UIMessageOutput};
 use std::io::{self, Write};
 use unicode_width::UnicodeWidthStr;
 
-// ── 前缀标签 ──────────────────────────────────────────────────────────
-
-#[allow(dead_code)]
-fn role_prefix(role: &str) -> &'static str {
-    if role.starts_with("▸ 你") || role == "你"       { "👤 你" }
-    else if role.starts_with("◂ 助手") || role == "助手" { "🤖 助手" }
-    else if role.starts_with("⚙ 工具") || role == "工具" { "🔧 工具" }
-    else if role.starts_with("▸ 成功") || role == "成功" { "✅ 成功" }
-    else if role.starts_with("▸ 错误") || role == "错误" { "❌ 错误" }
-    else if role.starts_with("▸ 警告") || role == "警告" { "⚠️ 警告" }
-    else if role.starts_with("▸ 调试") || role == "调试" { "🐛 调试" }
-    else if role.starts_with("▸ 信息") || role == "信息" { "ℹ️ 信息" }
-    else                               { "📝 消息" }
-}
+// ── 新 API：块级渲染 ──────────────────────────────────────────────────
 
 /// 返回前缀字符串的显示宽度（用于多行缩进对齐）。
 fn prefix_width(prefix: &str) -> usize {
     UnicodeWidthStr::width(prefix)
 }
-
-// ── 新 API：块级渲染 ──────────────────────────────────────────────────
 
 /// 折叠后最多保留的行数（超出的显示截断提示）。
 const COLLAPSED_MAX_LINES: usize = 20;
@@ -196,7 +181,8 @@ pub fn render_progress_bar(
     Ok(())
 }
 
-/// 更新输入面板（清除旧内容，显示新状态）
+/// 更新输入提示行（清除旧内容，显示新状态）。
+/// 无状态时仅显示 `> ` 提示符；有状态时显示 `⌛ 状态信息`。
 pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
     let mut stdout = io::stdout();
     
@@ -204,8 +190,8 @@ pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
     write!(stdout, "\x1b[1G\x1b[K")?;
     
     match status_line {
-        Some(status) => writeln!(stdout, "│ 输入面板 — {}", status)?,
-        None => write!(stdout, "│ > ")?,
+        Some(status) => write!(stdout, "{}", status)?,
+        None => write!(stdout, "> ")?,
     }
     
     // 清除行尾残留内容
@@ -226,106 +212,6 @@ pub fn init_ui() -> io::Result<()> {
     writeln!(stdout)?;
     
     stdout.flush()?;
-    Ok(())
-}
-
-// ── 兼容旧 API：render() ──────────────────────────────────────────────
-
-/// Render the full UI with three panels (兼容旧 API，使用追加模式)
-/// 
-/// 注意：此函数现在使用追加模式渲染，不再清除屏幕。
-#[allow(dead_code)]
-pub fn render(
-    conversation: &[(String, String)],
-    status: &[(String, String)],
-    status_line: Option<&str>,
-    verbose: bool,
-) -> io::Result<()> {
-    let mut stdout = io::stdout();
-    let term_width = get_terminal_width().unwrap_or(80);
-
-    // ── 工具面板（工具执行状态）──
-    if !status.is_empty() {
-        let status_visible: Vec<&(String, String)> = status.iter()
-            .filter(|(role, _)| {
-                if verbose { return true; }
-                role == "成功" || role == "错误" || role == "警告"
-            })
-            .collect();
-
-        if !status_visible.is_empty() {
-            writeln!(stdout, "{}", "─".repeat(term_width))?;
-            writeln!(stdout, "│ 工具面板")?;
-            writeln!(stdout, "{}", "─".repeat(term_width))?;
-
-            for (role, content) in status_visible {
-                let prefix = role_prefix(role);
-                let pw = prefix_width(prefix);
-                for (i, line) in content.lines().enumerate() {
-                    if line.is_empty() {
-                        writeln!(stdout, "│")?;
-                    } else if i == 0 {
-                        writeln!(stdout, "│ {} │ {}", prefix, line)?;
-                    } else {
-                        writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
-                    }
-                }
-                writeln!(stdout, "│")?;
-            }
-        }
-    }
-
-    // ── 输出面板（对话历史）──
-    writeln!(stdout, "{}", "─".repeat(term_width))?;
-    writeln!(stdout, "│ 输出面板")?;
-    writeln!(stdout, "{}", "─".repeat(term_width))?;
-
-    let visible: Vec<&(String, String)> = conversation.iter()
-        .filter(|(role, _)| {
-            if verbose { return true; }
-            role.starts_with("▸ 你")
-                || role.starts_with("◂ 助手")
-                || role.starts_with("▸ 成功")
-                || role.starts_with("▸ 错误")
-                || role.starts_with("▸ 警告")
-        })
-        .collect();
-
-    if visible.is_empty() {
-        writeln!(stdout, "│ （等待消息...）")?;
-    } else {
-        for (role, content) in visible {
-            let prefix = role_prefix(role);
-            let pw = prefix_width(prefix);
-            for (i, line) in content.lines().enumerate() {
-                if line.is_empty() {
-                    writeln!(stdout, "│")?;
-                } else if i == 0 {
-                    writeln!(stdout, "│ {} │ {}", prefix, line)?;
-                } else {
-                    writeln!(stdout, "│ {:width$} │ {}", "", line, width = pw)?;
-                }
-            }
-            writeln!(stdout, "│")?;
-        }
-    }
-
-    // ── 分隔线 ──
-    writeln!(stdout, "{}", "─".repeat(term_width))?;
-
-    // ── 输入面板 ──
-    match status_line {
-        Some(status) => {
-            writeln!(stdout, "│ 输入面板 — {}", status)?;
-        }
-        None => {
-            writeln!(stdout, "│ 输入面板")?;
-            write!(stdout, "│ > ")?;
-        }
-    }
-    write!(stdout, "\x1b[J")?;
-    stdout.flush()?;
-
     Ok(())
 }
 

@@ -409,6 +409,15 @@ pub async fn process_user_message(
     );
     session_log.log_assistant(&result.message);
 
+    // 渲染 LLM 最终回复到终端（写入历史后立即展示）
+    if !result.message.is_empty() {
+        let assistant_block = ui::MessageBlock::Assistant {
+            content: result.message.clone(),
+            is_streaming: false,
+        };
+        ui::render_block(&assistant_block, markdown_renderer)?;
+    }
+
     // 持久化：记录最终助手消息（如果 step 循环中尚未记录）
     agent.record_assistant_message_to_store(&result.message);
 

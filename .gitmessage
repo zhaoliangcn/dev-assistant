@@ -1,0 +1,10 @@
+refactor: 优化缓存锁粒度、安全增强及代码重构
+
+- perf(cache): 优化 ReadCache 锁粒度，避免持有锁时执行 IO 操作
+- fix(kb): 修复 KB 内容截断时未使用字符边界安全截断的问题
+- security(session): 为 SessionLogger 文件添加 FD_CLOEXEC 标志
+- security(persist): 为 SessionStore 文件添加 FD_CLOEXEC 标志
+- security(system_tools): killpg 前先检查进程是否存活，避免误杀
+- refactor(main): 提取 Cli::to_restart_args() 方法集中管理重启参数
+- docs(restart): 补充 FD_CLOEXEC 安全说明文档
+- chore(token_counter): 调整 token 估算比率（CJK 1.5, ASCII 0.25）

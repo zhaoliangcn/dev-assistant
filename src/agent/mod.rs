@@ -729,7 +729,9 @@ impl Agent {
                 // 将执行成功的状态与结果内容合并为一条消息（避免 output.info 被 verbose 过滤）
                 let preview = result.content.lines().next().unwrap_or(&result.content);
                 let preview = if preview.len() > 200 {
-                    format!("{}...", &preview[..200])
+                    // 找到第 200 个字符边界，避免切到多字节 UTF-8 字符中间
+                    let end = preview.char_indices().nth(200).map(|(i, _)| i).unwrap_or(preview.len());
+                    format!("{}...", &preview[..end])
                 } else {
                     preview.to_string()
                 };

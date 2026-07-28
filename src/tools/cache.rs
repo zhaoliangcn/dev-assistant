@@ -92,25 +92,41 @@ impl ReadCache {
     /// 
     /// 返回 Some(content) 表示命中缓存
     /// 返回 None 表示需要从磁盘读取
+    ///
+    /// # 锁粒度优化
+    ///
+    /// 1. 先获取读锁检查缓存是否存在（不持有锁时做 IO）
+    /// 2. 如果存在，释放读锁，再进行 IO 检查 mtime
+    /// 3. 如果 IO 确认未修改，再获取写锁更新访问时间
     pub fn read(&self, path: &Path) -> Option<String> {
         if !self.config.enabled {
             return None;
         }
 
         let path_buf = path.to_path_buf();
-        let mut cache = self.cache.write().unwrap();
-        
-        if let Some(entry) = cache.get_mut(&path_buf) {
-            // 检查 TTL
-            let now = now_timestamp();
-            if (now - entry.accessed_at) > self.config.ttl_seconds {
-                debug!(path = ?path, "Cache entry expired (TTL)");
+
+        // Step 1: 获取读锁检查缓存是否存在且未过期（不持有锁时做 IO）
+        let cache_check = {
+            let cache = self.cache.read().unwrap();
+            cache.get(&path_buf).map(|entry| {
+                let now = now_timestamp();
+                let expired = (now - entry.accessed_at) > self.config.ttl_seconds;
+                (entry.content.clone(), entry.mtime, expired)
+            })
+        };
+
+        // Step 2: 如果缓存存在，读锁已释放，进行 IO 检查 mtime
+        if let Some((content, cached_mtime, expired)) = cache_check {
+            if expired {
+                // TTL 过期，移除缓存
+                let mut cache = self.cache.write().unwrap();
                 cache.remove(&path_buf);
                 *self.misses.write().unwrap() += 1;
+                debug!(path = ?path, "Cache entry expired (TTL)");
                 return None;
             }
 
-            // 检查文件是否被修改
+            // 检查文件是否被修改（IO 操作，不持有锁）
             match std::fs::metadata(path) {
                 Ok(metadata) => {
                     let current_mtime = metadata
@@ -120,27 +136,34 @@ impl ReadCache {
                         .map(|d| d.as_secs())
                         .unwrap_or(0);
 
-                    if current_mtime > entry.mtime {
-                        debug!(path = ?path, "Cache entry invalidated (file modified)");
+                    if current_mtime > cached_mtime {
+                        // 文件已修改，移除缓存
+                        let mut cache = self.cache.write().unwrap();
                         cache.remove(&path_buf);
                         *self.misses.write().unwrap() += 1;
+                        debug!(path = ?path, "Cache entry invalidated (file modified)");
                         return None;
                     }
                 }
                 Err(_) => {
                     // 文件不存在或无法访问，移除缓存
-                    debug!(path = ?path, "Cache entry invalidated (file unavailable)");
+                    let mut cache = self.cache.write().unwrap();
                     cache.remove(&path_buf);
                     *self.misses.write().unwrap() += 1;
+                    debug!(path = ?path, "Cache entry invalidated (file unavailable)");
                     return None;
                 }
             }
 
-            // 命中缓存
-            entry.touch();
+            // Step 3: IO 确认未修改，获取写锁更新访问时间
+            if let Ok(mut cache) = self.cache.write() {
+                if let Some(entry) = cache.get_mut(&path_buf) {
+                    entry.touch();
+                }
+            }
             *self.hits.write().unwrap() += 1;
             debug!(path = ?path, "Cache hit");
-            return Some(entry.content.clone());
+            return Some(content);
         }
 
         *self.misses.write().unwrap() += 1;

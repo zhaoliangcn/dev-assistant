@@ -1,4 +1,11 @@
 //! restart 工具的执行流程：编译并重启进程。
+//!
+//! # 安全说明
+//!
+//! 调用 `exec()` 替换进程时，所有文件描述符默认保持打开状态。
+//! 因此 `SessionLogger` 和 `SessionStore` 在创建文件时都设置了
+//! `FD_CLOEXEC` 标志（通过 `libc::O_CLOEXEC`），确保 `exec()` 后
+//! 文件句柄自动关闭，避免资源泄漏。
 
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -12,6 +19,12 @@ use crate::utils::message_level::MessageLevel;
 ///
 /// 返回 `true` 表示需要继续 REPL（构建失败或 exec 失败）；
 /// 返回 `false` 表示已经 exec 成功或将要退出。
+///
+/// # 资源安全
+///
+/// 执行 `exec()` 前无需手动关闭文件句柄，因为 `SessionLogger` 和
+/// `SessionStore` 在创建文件时已设置 `FD_CLOEXEC` 标志，`exec()`
+/// 后内核会自动关闭这些文件描述符。
 pub fn perform_restart(
     working_dir: &Path,
     cli_args: &[String],
@@ -45,6 +58,10 @@ pub fn perform_restart(
                 "构建成功，正在重启 (PID 保持不变)...".to_string(),
             );
 
+            // 调用方需确保所有打开的文件描述符设置了 FD_CLOEXEC 标志，
+            // 否则 exec() 替换进程后这些 fd 会保持打开状态，导致资源泄漏。
+            // SessionLogger 和 SessionStore 在创建文件时已设置 O_CLOEXEC，
+            // 确保 exec() 后内核自动关闭这些文件描述符。
             // exec() replaces the current process on success (same PID).
             // It only returns on error.
             let exec_err = process::Command::new(&exe)

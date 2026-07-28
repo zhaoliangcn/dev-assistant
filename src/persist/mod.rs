@@ -21,6 +21,9 @@ use crate::utils::error::AppError;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
+#[cfg(unix)]
+use libc;
+
 // ---------------------------------------------------------------------------
 // 事件类型
 // ---------------------------------------------------------------------------
@@ -124,6 +127,8 @@ impl SessionStore {
 
         let mut options = OpenOptions::new();
         options.create(true).append(true).write(true);
+        #[cfg(unix)]
+        options.custom_flags(libc::O_CLOEXEC); // SECURITY: Auto-close on exec()
         #[cfg(unix)]
         options.mode(0o600); // SECURITY: 仅所有者可读写
         let file = options.open(&path).map_err(|e| {

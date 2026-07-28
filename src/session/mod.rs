@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::os::unix::fs::OpenOptionsExt;
 
 use chrono::Local;
+use libc;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tracing::{debug, warn};
@@ -61,18 +62,19 @@ impl SessionLogger {
         let filename = format!(".dev-assistant-session-{}.log", timestamp);
         let path = working_dir.join(&filename);
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            
-            .mode(0o600)  // SECURITY: Restrict log file to owner only
-            .open(&path)
-            .map_err(|e: std::io::Error| {
-                AppError::Io(std::io::Error::new(
-                    e.kind(),
-                    format!("创建会话日志文件失败 ({}): {}", path.display(), e),
-                ))
-            })?;
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            options.custom_flags(libc::O_CLOEXEC); // SECURITY: Auto-close on exec()
+            options.mode(0o600); // SECURITY: Restrict log file to owner only
+        }
+        let file = options.open(&path).map_err(|e: std::io::Error| {
+            AppError::Io(std::io::Error::new(
+                e.kind(),
+                format!("创建会话日志文件失败 ({}): {}", path.display(), e),
+            ))
+        })?;
 
         debug!(path = %path.display(), "Session log created");
 

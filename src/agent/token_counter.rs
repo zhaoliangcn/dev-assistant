@@ -1,8 +1,8 @@
 //! Token 计数器：估算字符串和消息列表的 token 数。
 //!
 //! 估算策略：
-//! - CJK 字符约 2 tokens/字符
-//! - 非 CJK 单词约 0.75 tokens/字符
+//! - CJK 字符约 1.5 tokens/字符
+//! - 非 CJK 单词约 0.25 tokens/字符（约 4 字符/token）
 
 use crate::llm::LlmMessage;
 
@@ -27,9 +27,9 @@ impl TokenCounter {
             });
 
             if is_cjk {
-                tokens += word.chars().count() * 2;
+                tokens += (word.chars().count() as f64 * 1.5).ceil() as usize;
             } else {
-                tokens += (word.chars().count() as f64 * 0.75).ceil() as usize;
+                tokens += (word.chars().count() as f64 * 0.25).ceil() as usize;
             }
         }
 
@@ -66,22 +66,22 @@ mod tests {
     }
 
     #[test]
-    fn ascii_words_use_075_ratio() {
-        // "hello world": 2 words × 5 chars/word × 0.75 = ceil(3.75) × 2 ≈ 8 tokens
+    fn ascii_words_use_025_ratio() {
+        // "hello world": 2 words × 5 chars/word × 0.25 = ceil(1.25) × 2 ≈ 4 tokens
         let tokens = TokenCounter::estimate("hello world");
-        assert!((5..=8).contains(&tokens), "expected ~6 tokens, got {}", tokens);
+        assert!((3..=5).contains(&tokens), "expected ~4 tokens, got {}", tokens);
     }
 
     #[test]
-    fn cjk_chars_use_2_ratio() {
-        // 4 CJK chars × 2 = 8 tokens（每个汉字当 1 word）
+    fn cjk_chars_use_1_5_ratio() {
+        // 4 CJK chars × 1.5 = 6 tokens（每个汉字当 1 word）
         let tokens = TokenCounter::estimate("你好世界");
-        assert_eq!(tokens, 8);
+        assert_eq!(tokens, 6);
     }
 
     #[test]
     fn mixed_cjk_ascii_sums_separately() {
-        // CJK 部分按 2/字符，ASCII 部分按 0.75/字符
+        // CJK 部分按 1.5/字符，ASCII 部分按 0.25/字符
         let tokens = TokenCounter::estimate("Hello 世界");
         assert!(tokens > 4, "mixed text should have more tokens than pure ascii, got {}", tokens);
     }

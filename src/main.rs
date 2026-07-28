@@ -79,6 +79,38 @@ struct Cli {
     background: bool,
 }
 
+impl Cli {
+    /// 构建重启时传给子进程的 CLI 参数列表（不含 argv[0]）。
+    ///
+    /// 集中在此处定义，避免与 `AppConfig` 字段重复。
+    fn to_restart_args(&self) -> Vec<String> {
+        let mut args: Vec<String> = vec![
+            "--resume".to_string(),
+            "--project".to_string(),
+            self.project.clone(),
+        ];
+        if self.no_approval {
+            args.push("--no-approval".to_string());
+        }
+        if self.verbose {
+            args.push("--verbose".to_string());
+        }
+        if let Some(ref model) = self.model {
+            args.push("--model".to_string());
+            args.push(model.clone());
+        }
+        args.push("--provider".to_string());
+        args.push(self.provider.clone());
+        if let Some(max_iter) = self.max_iterations {
+            args.push("--max-iterations".to_string());
+            args.push(max_iter.to_string());
+        }
+        args.push("--max-tokens".to_string());
+        args.push(self.max_tokens.to_string());
+        args
+    }
+}
+
 fn main() -> Result<(), AppError> {
     // Load .env if present
     dotenv::dotenv().ok();
@@ -104,32 +136,8 @@ fn main() -> Result<(), AppError> {
     let working_dir = PathBuf::from(&cli.project);
 
     // 重启时传给子进程的 CLI 参数（保持当前会话的所有配置）
-    let restart_args: Vec<String> = {
-        let mut args: Vec<String> = vec![
-            "--resume".to_string(),
-            "--project".to_string(),
-            cli.project.clone(),
-        ];
-        if cli.no_approval {
-            args.push("--no-approval".to_string());
-        }
-        if cli.verbose {
-            args.push("--verbose".to_string());
-        }
-        if let Some(ref model) = cli.model {
-            args.push("--model".to_string());
-            args.push(model.clone());
-        }
-        args.push("--provider".to_string());
-        args.push(cli.provider.clone());
-        if let Some(max_iter) = cli.max_iterations {
-            args.push("--max-iterations".to_string());
-            args.push(max_iter.to_string());
-        }
-        args.push("--max-tokens".to_string());
-        args.push(cli.max_tokens.to_string());
-        args
-    };
+    // 使用 Cli::to_restart_args() 方法集中构建，避免与 AppConfig 字段重复
+    let restart_args = cli.to_restart_args();
 
     let config = AppConfig {
         working_dir,

@@ -623,8 +623,9 @@ fn format_query_results(results: &[KbQueryResult], include_content: bool) -> Str
             if let Some(ref content) = result.content {
                 // 截断过长内容
                 let truncated = if content.len() > MAX_CONTENT_CHARS {
+                    let safe_boundary = content.floor_char_boundary(MAX_CONTENT_CHARS);
                     format!("{}...\n   [内容已截断，共 {} 字符]",
-                        &content[..MAX_CONTENT_CHARS],
+                        &content[..safe_boundary],
                         content.len())
                 } else {
                     content.clone()

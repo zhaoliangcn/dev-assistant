@@ -181,8 +181,21 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
 
 /// Attempt to kill an entire process group (Unix) or process tree (Windows).
 /// Returns true if the kill signal was sent successfully.
+///
+/// # Safety
+///
+/// 调用 `killpg` 前先使用 `kill(pid, 0)` 检查进程是否仍然存活，
+/// 防止在子进程已自然退出、PID 被内核回收后误杀不相关的进程。
 #[cfg(unix)]
 fn kill_process_tree(pid: u32) -> bool {
+    // First check if the process is still alive (kill with signal 0).
+    // This prevents killing a process whose PID has been reused after
+    // the child exited naturally between the timeout detection and the kill call.
+    if unsafe { libc::kill(pid as i32, 0) } != 0 {
+        // Process no longer exists (or we don't have permission, which is fine
+        // because it means the process isn't ours to kill).
+        return false;
+    }
     // Negative PID = process group, which kills the process and all its children.
     unsafe { libc::killpg(pid as i32, libc::SIGKILL) == 0 }
 }

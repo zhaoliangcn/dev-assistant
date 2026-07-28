@@ -169,7 +169,8 @@ impl MessageBlock {
                     .map(|s| {
                         let first_line = s.lines().next().unwrap_or("");
                         if first_line.len() > 60 {
-                            format!("{}...", &first_line[..60])
+                            let truncated: String = first_line.chars().take(60).collect();
+                            format!("{}...", truncated)
                         } else {
                             first_line.to_string()
                         }
@@ -201,7 +202,8 @@ impl MessageBlock {
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 let truncated = if cmd.len() > 100 {
-                    format!("{}... ({} 字符)", &cmd[..100], cmd.len())
+                    let truncated: String = cmd.chars().take(100).collect();
+                    format!("{}... ({} 字符)", truncated, cmd.len())
                 } else {
                     cmd.to_string()
                 };

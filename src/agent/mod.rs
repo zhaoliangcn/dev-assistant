@@ -43,6 +43,7 @@ pub struct SubagentConfig {
 // Agent 结果
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 #[allow(dead_code)] // reserved for future agent configuration API
 pub struct AgentConfig {
     pub max_iterations: usize,
@@ -252,8 +253,11 @@ impl Agent {
                     store.record_assistant_message(&content);
                 }
 
-                // Only return early if LLM has given a substantive response
-                if self.context.get_consecutive_no_tool_rounds() >= 2 {
+                // Only return early if LLM has given a substantive response (not for sub-agents).
+                // Sub-agents use `finish` tool to signal completion, and `max_iterations` already
+                // provides a global upper bound, so the no-tool-rounds optimization is unnecessary
+                // and can cause premature termination of sub-agent tasks.
+                if self.depth == 0 && self.context.get_consecutive_no_tool_rounds() >= 2 {
                     return Ok(AgentStep::Done(AgentResult {
                         success: true,
                         message: content,
@@ -797,7 +801,12 @@ impl Agent {
             "创建子代理 (深度 {}, 类型: {})，任务: {}",
             child_depth,
             agent_type_str,
-            if task.len() > 80 { format!("{}...", &task[..80]) } else { task.to_string() }
+            if task.len() > 80 {
+                let truncated: String = task.chars().take(80).collect();
+                format!("{}...", truncated)
+            } else {
+                task.to_string()
+            }
         ));
 
         let subagent_tools = if let Some(ref identity) = agent_type {

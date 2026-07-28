@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Dev-Assistant 对话{% endblock %}
+
+{% block content %}
+<div class="grid" x-data="chatApp()">
+    <!-- 左侧：对话面板 -->
+    <div class="chat-panel" style="grid-column: span 2;">
+        <div id="message-list" class="message-list"
+             hx-ext="ws"
+             ws-connect="/ws/chat">
+            <!-- 欢迎消息 -->
+            <div class="message system">
+                <div class="message-body">
+                    <p>👋 你好！我是 Dev-Assistant，你的 AI 编程助手。</p>
+                    <p>发送消息开始对话，我会使用各种工具帮助你完成任务。</p>
+                </div>
+            </div>
+            <!-- WebSocket 消息将在此处插入 -->
+            <div id="thinking-indicator" style="display:none;" class="thinking">
+                <span class="spinner"></span> 思考中...
+            </div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="input-area" x-data="{ input: '' }">
+            <form ws-send
+                  hx-ext="ws"
+                  class="input-form"
+                  @submit="if (input.trim()) { input = ''; }">
+                <div class="grid">
+                    <input type="text"
+                           name="content"
+                           x-model="input"
+                           placeholder="输入消息... (Enter 发送)"
+                           autofocus
+                           required>
+                    <button type="submit" class="primary" :disabled="!input.trim()">
+                        发送
+                    </button>
+                </div>
+                <input type="hidden" name="type" value="user_message">
+                <input type="hidden" name="id" x-model="'msg_' + Date.now()">
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

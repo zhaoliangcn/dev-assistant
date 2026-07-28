@@ -26,6 +26,7 @@ mod skills;
 mod tools;
 mod ui;
 mod utils;
+mod web;
 
 use std::path::PathBuf;
 
@@ -77,6 +78,18 @@ struct Cli {
     /// 后台模式：执行长时间运行的任务
     #[arg(long)]
     background: bool,
+
+    /// Web 模式：启动 Web 界面服务
+    #[arg(long)]
+    web: bool,
+
+    /// Web 服务绑定端口（默认 8080）
+    #[arg(long, default_value_t = 8080)]
+    port: u16,
+
+    /// Web 服务绑定主机地址（默认 127.0.0.1）
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
 }
 
 impl Cli {
@@ -145,8 +158,8 @@ fn main() -> Result<(), AppError> {
         max_iterations: cli.max_iterations.unwrap_or(8),
         max_tokens: cli.max_tokens,
         no_approval: cli.no_approval,
-        provider: cli.provider,
-        model: cli.model,
+        provider: cli.provider.clone(),
+        model: cli.model.clone(),
         message: cli.message,
         resume: cli.resume,
         background: cli.background,
@@ -162,7 +175,22 @@ fn main() -> Result<(), AppError> {
         .map_err(|e| AppError::Config(format!("Failed to build tokio runtime: {}", e)))?;
 
     runtime.block_on(async {
-        let mut app = App::build(config)?;
-        app.run().await
+        if cli.web {
+            let web_config = crate::web::WebConfig {
+                host: cli.host,
+                port: cli.port,
+                working_dir: PathBuf::from(&cli.project),
+                verbose: cli.verbose,
+                max_iterations: cli.max_iterations.unwrap_or(8),
+                max_tokens: cli.max_tokens,
+                provider: cli.provider.clone(),
+                model: cli.model.clone(),
+                no_approval: cli.no_approval,
+            };
+            crate::web::serve(web_config).await
+        } else {
+            let mut app = App::build(config)?;
+            app.run().await
+        }
     })
 }

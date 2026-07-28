@@ -727,6 +727,16 @@ impl Agent {
 
             if result.success {
                 output.success(&format!("工具 {} 执行成功", tool_call.function.name));
+                // 将工具执行结果内容输出显示给用户（摘要/首行）
+                let preview = result.content.lines().next().unwrap_or(&result.content);
+                let preview = if preview.len() > 200 {
+                    format!("{}...", &preview[..200])
+                } else {
+                    preview.to_string()
+                };
+                if !preview.is_empty() && preview != "()" {
+                    output.info(&format!("📝 {} 结果：{}", tool_call.function.name, preview));
+                }
             } else {
                 output.error(&format!("工具 {} 执行失败", tool_call.function.name));
             }

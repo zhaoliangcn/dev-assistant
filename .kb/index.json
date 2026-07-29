@@ -1,7 +1,58 @@
 {
   "version": 1,
-  "updated": "2026-07-26T08:28:00.143228+00:00",
+  "updated": "2026-07-29T01:31:08.745691+00:00",
   "entries": {
+    "architecture-analysis": {
+      "path": "summaries/architecture-analysis.md",
+      "type": "summary",
+      "title": "项目代码架构分析报告",
+      "tags": [
+        "architecture",
+        "analysis",
+        "dev-assistant-rs"
+      ],
+      "status": "completed",
+      "updated": "2026-07-26T08:28:00.143228+00:00"
+    },
+    "critical-issues": {
+      "path": "review/critical-issues.md",
+      "type": "issue",
+      "title": "critical-issues",
+      "tags": [
+        "security",
+        "approval",
+        "race-condition",
+        "deadlock"
+      ],
+      "status": "draft",
+      "updated": "2026-07-29T01:31:08.745691+00:00"
+    },
+    "review-tools-2024": {
+      "path": "reviews/tools-code-review-2024.md",
+      "type": "review",
+      "title": "src/tools/ 目录代码审查报告",
+      "tags": [
+        "code-review",
+        "security",
+        "quality"
+      ],
+      "status": "completed",
+      "author": "code-reviewer",
+      "created": "2024-01-01",
+      "updated": "2026-07-29T01:26:41.526001+00:00"
+    },
+    "ADR-003-web-ui-architecture": {
+      "path": "decisions/ADR-003-web-ui-architecture.md",
+      "type": "decision",
+      "title": "Web 界面架构设计方案",
+      "tags": [
+        "web-ui",
+        "architecture",
+        "design"
+      ],
+      "status": "draft",
+      "updated": "2026-07-28T11:59:53.137839+00:00"
+    },
     "ADR-002-pipeline-command-design": {
       "path": "decisions/ADR-002-pipeline-command-design.md",
       "type": "decision",
@@ -16,18 +67,6 @@
       "author": "dev-assistant",
       "created": "2026-07-26",
       "updated": "2026-07-26T07:11:41.868542+00:00"
-    },
-    "architecture-analysis": {
-      "path": "summaries/architecture-analysis.md",
-      "type": "summary",
-      "title": "项目代码架构分析报告",
-      "tags": [
-        "architecture",
-        "analysis",
-        "dev-assistant-rs"
-      ],
-      "status": "completed",
-      "updated": "2026-07-26T08:28:00.143228+00:00"
     }
   }
 }

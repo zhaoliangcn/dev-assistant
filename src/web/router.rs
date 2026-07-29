@@ -11,6 +11,7 @@ use axum::{
 };
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
 
 use crate::web::handlers;
@@ -68,7 +69,12 @@ pub fn build_router(state: AppState) -> Router {
         .merge(api_routes)
         .merge(ws_routes)
         .nest_service("/static", static_service)
+        // 开发模式禁用静态资源缓存
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+        ))
         // 中间件
-        .layer(CorsLayer::permissive()) // 开发模式允许跨域
+        .layer(CorsLayer::permissive())
         .with_state(state)
 }

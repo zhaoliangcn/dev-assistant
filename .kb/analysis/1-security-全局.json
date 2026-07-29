@@ -1,0 +1,37 @@
+{
+  "file_path": "全局",
+  "analysis_type": "Security",
+  "summary": "安全审查：发现硬编码测试凭据、敏感文件暴露、路径遍历防护等问题",
+  "details": null,
+  "issues": [
+    {
+      "severity": "High",
+      "description": "src/app.rs run_background_mode 中使用硬编码的测试 API Key (api_key: Some(\"test\"))，属于生产代码路径中的安全风险",
+      "location": "src/app.rs:300",
+      "suggestion": null
+    },
+    {
+      "severity": "Medium",
+      "description": "SessionLogger 创建的 .log 文件未被列入危险文件列表，日志文件可能包含敏感信息（API Key 等）",
+      "location": "src/security/mod.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "Medium",
+      "description": "resolve_env_var 在每次调用时重新编译正则表达式，存在性能问题且未使用 Lazy 缓存",
+      "location": "src/llm/models.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "Low",
+      "description": "GitignoreFilter::is_ignored 始终传递 false 给 is_dir 参数，可能导致目录/文件判断不准确",
+      "location": "src/tools/resources.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785287679,
+    "nanos_since_epoch": 840672000
+  },
+  "batch_number": 1
+}

@@ -62,6 +62,8 @@ pub struct AppState {
     pub max_tokens: usize,
     /// 是否启用详细日志
     pub verbose: bool,
+    /// minijinja 模板引擎环境
+    pub templates: minijinja::Environment<'static>,
 }
 
 /// Web 服务配置。
@@ -185,6 +187,16 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
     };
     let agent_config = AgentConfig { max_iterations };
 
+    // ── 模板引擎 ──
+    let mut templates = minijinja::Environment::new();
+    // 注册模板：从编译时嵌入的字符串加载
+    templates
+        .add_template("base.html", include_str!("templates/base.html"))
+        .map_err(|e| AppError::Config(format!("模板 base.html 加载失败: {}", e)))?;
+    templates
+        .add_template("index.html", include_str!("templates/index.html"))
+        .map_err(|e| AppError::Config(format!("模板 index.html 加载失败: {}", e)))?;
+
     // ── 共享状态 ──
     let state = AppState {
         llm,
@@ -195,6 +207,7 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
         system_prompt,
         max_tokens: config.max_tokens,
         verbose: config.verbose,
+        templates,
     };
 
     // ── 构建 Router ──

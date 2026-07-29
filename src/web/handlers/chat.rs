@@ -152,10 +152,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                         let mut session_guard = session.lock().await;
                         let agent = &mut session_guard.agent;
 
-                        // 将用户消息添加到 Agent 上下文
-                        agent.start_turn(msg_content.clone(), &mut output);
-
-                        // 运行 Agent 直到完成
+                        // 运行 Agent 直到完成（run 内部会调用 start_turn）
                         let result = agent.run(msg_content.clone(), &mut output).await;
 
                         // 释放锁，避免在发送事件时持有
@@ -230,12 +227,32 @@ impl WebMessageOutput {
 
 impl MessageOutput for WebMessageOutput {
     fn emit(&mut self, level: crate::utils::message_level::MessageLevel, msg: &str) {
+        use tracing::debug;
         let event = match level {
             crate::utils::message_level::MessageLevel::Info => {
-                Some(ServerEvent::status(msg))
+                if msg.starts_with("💭") || msg.contains("思考") || msg.contains("分析") {
+                    Some(ServerEvent::thinking(msg))
+                } else if msg.starts_with("🔧") || msg.starts_with("LLM 请求调用") || msg.contains("工具") {
+                    let tool_name = msg
+                        .strip_prefix("🔧")
+                        .or_else(|| msg.strip_prefix("执行工具: "))
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("工具");
+                    Some(ServerEvent::tool_call(tool_name, serde_json::Value::Null))
+                } else if msg.starts_with("✅") {
+                    Some(ServerEvent::tool_result("操作", true, msg))
+                } else if msg.starts_with("❌") || msg.starts_with("⚠️") {
+                    Some(ServerEvent::status(msg))
+                } else if msg.starts_with("↻") {
+                    Some(ServerEvent::thinking(msg))
+                } else {
+                    Some(ServerEvent::status(msg))
+                }
             }
             crate::utils::message_level::MessageLevel::Success => {
-                Some(ServerEvent::status(format!("✅ {}", msg)))
+                let content = msg.strip_prefix("✅ ").unwrap_or(msg);
+                Some(ServerEvent::tool_result("操作", true, content))
             }
             crate::utils::message_level::MessageLevel::Error => {
                 Some(ServerEvent::error(msg))
@@ -244,13 +261,14 @@ impl MessageOutput for WebMessageOutput {
                 Some(ServerEvent::status(format!("⚠️ {}", msg)))
             }
             crate::utils::message_level::MessageLevel::Debug => {
-                // 调试消息仅在 verbose 模式下发送
                 None
             }
         };
 
-        if let Some(event) = event {
-            let _ = self.conn_manager.send_to(self.conn_id, event);
+        if let Some(ref event) = event {
+            if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event.clone()) {
+                tracing::warn!("WebSocket 同步发送事件失败: {}", e);
+            }
         }
     }
 }

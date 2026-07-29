@@ -70,7 +70,16 @@ pub async fn switch_model(
 }
 
 /// 渲染主页面。
-pub async fn index_page() -> Html<String> {
-    let html = std::include_str!("../templates/index.html");
-    Html(html.to_string())
+pub async fn index_page(
+    State(state): State<Arc<AppState>>,
+) -> Html<String> {
+    let html = match state.templates.get_template("index.html") {
+        Ok(tmpl) => tmpl.render(&minijinja::Value::UNDEFINED).unwrap_or_else(|e| {
+            format!("<!DOCTYPE html><html><body><h1>模板渲染失败</h1><p>{}</p></body></html>", e)
+        }),
+        Err(e) => {
+            format!("<!DOCTYPE html><html><body><h1>模板加载失败</h1><p>{}</p></body></html>", e)
+        }
+    };
+    Html(html)
 }

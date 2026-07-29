@@ -2,6 +2,21 @@
    Dev-Assistant Web UI 自定义样式
    ============================================================ */
 
+/* ── CSS 变量（主题色） ── */
+
+:root {
+    --message-user-bg: #e3f2fd;
+    --message-user-color: #1a1a2e;
+    --message-user-border: #bbdefb;
+}
+
+/* 暗色模式适配：使用 Pico CSS 的 data-theme 属性 */
+[data-theme="dark"] {
+    --message-user-bg: #1a3a5c;
+    --message-user-color: #e0e0e0;
+    --message-user-border: #2a4a6c;
+}
+
 /* ── 布局 ── */
 
 html, body {
@@ -67,9 +82,13 @@ footer {
 
 .message.user {
     align-self: flex-end;
-    background: var(--pico-primary-background-color);
-    color: var(--pico-primary-inverse);
-    border-color: var(--pico-primary-border-color);
+    background: var(--message-user-bg, #e3f2fd);
+    color: var(--message-user-color, #1a1a2e);
+    border-color: var(--message-user-border, #bbdefb);
+}
+
+.message.user .message-content {
+    color: var(--message-user-color, #1a1a2e);
 }
 
 .message.assistant {

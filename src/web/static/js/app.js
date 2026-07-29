@@ -1,121 +1,130 @@
 // ============================================================
-// Dev-Assistant Web UI — Alpine.js 组件 + HTMX 扩展
+// Dev-Assistant Web UI — Alpine.js 聊天组件
 // ============================================================
 
-document.addEventListener('DOMContentLoaded', function() {
-    // ── 代码高亮 ──
-    // 在 HTMX 内容交换后重新应用 highlight.js
-    document.body.addEventListener('htmx:afterSwap', function(evt) {
-        evt.target.querySelectorAll('pre code').forEach(function(block) {
-            hljs.highlightElement(block);
-        });
-    });
-
-    // 初始加载时高亮
-    document.querySelectorAll('pre code').forEach(function(block) {
-        hljs.highlightElement(block);
-    });
-});
-
-// ── Alpine.js 组件 ──
-
 function chatApp() {
+    let wsInstance = null;
+    let reconnectTimer = null;
+    let reconnectAttempts = 0;
+
     return {
         connected: false,
         sessionId: null,
+        messageId: 0,
+        input: '',
+        messages: [],
 
         init() {
-            // 监听 WebSocket 连接状态
-            const wsExt = htmx.findExtension('ws');
-            if (wsExt) {
-                this.connected = true;
-            }
-
-            // 监听自定义事件
-            this.$el.addEventListener('ws:open', () => {
-                this.connected = true;
-            });
-            this.$el.addEventListener('ws:close', () => {
-                this.connected = false;
-            });
-
-            // 监视消息列表，自动滚动到底部
-            this.$watch('$store.messages.length', () => {
-                this.scrollToBottom();
-            });
+            this.connectWS();
         },
 
-        scrollToBottom() {
-            const list = document.getElementById('message-list');
-            if (list) {
-                setTimeout(() => {
-                    list.scrollTop = list.scrollHeight;
-                }, 50);
-            }
-        },
+        connectWS() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = protocol + '//' + window.location.host + '/ws/chat';
 
-        clearChat() {
-            const list = document.getElementById('message-list');
-            if (list) {
-                // 保留欢迎消息
-                const welcome = list.querySelector('.message.system');
-                list.innerHTML = '';
-                if (welcome) {
-                    list.appendChild(welcome);
+            if (wsInstance) {
+                wsInstance.onclose = null;
+                wsInstance.onerror = null;
+                if (wsInstance.readyState === WebSocket.OPEN ||
+                    wsInstance.readyState === WebSocket.CONNECTING) {
+                    wsInstance.close();
                 }
             }
+
+            const self = this;
+            wsInstance = new WebSocket(url);
+
+            wsInstance.onopen = () => {
+                self.connected = true;
+                reconnectAttempts = 0;
+            };
+
+            wsInstance.onclose = () => {
+                self.connected = false;
+                if (reconnectAttempts < 10) {
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    reconnectAttempts++;
+                    if (reconnectTimer) clearTimeout(reconnectTimer);
+                    reconnectTimer = setTimeout(() => self.connectWS(), delay + Math.random() * 1000);
+                }
+            };
+
+            wsInstance.onerror = () => {};
+
+            wsInstance.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    self.handleServerEvent(msg);
+                } catch (e) {
+                    console.error('WebSocket 消息解析失败:', e);
+                }
+            };
         },
 
-        toggleSidebar() {
-            // Phase 2: 切换文件浏览器侧栏
-        }
-    };
-}
-
-function toolbar() {
-    return {
-        connected: false,
-
-        init() {
-            // 检查 WebSocket 连接状态
-            const wsExt = htmx.findExtension('ws');
-            this.connected = wsExt ? true : false;
-
-            document.body.addEventListener('htmx:wsOpen', () => {
-                this.connected = true;
-            });
-            document.body.addEventListener('htmx:wsClose', () => {
-                this.connected = false;
-            });
-        },
-
-        clearChat() {
-            const event = new CustomEvent('clear-chat');
-            document.dispatchEvent(event);
-        },
-
-        toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            if (sidebar) {
-                sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+        handleServerEvent(msg) {
+            switch (msg.type) {
+                case 'session_ready':
+                    this.sessionId = msg.session_id;
+                    break;
+                case 'status':
+                case 'thinking':
+                    this.messages = [...this.messages, { role: msg.type, content: msg.content }];
+                    break;
+                case 'tool_call':
+                    this.messages = [...this.messages,
+                        { role: 'tool-call', content: '🔧 ' + (msg.tool_name || '操作') }
+                    ];
+                    break;
+                case 'tool_result':
+                    this.messages = [...this.messages,
+                        { role: 'tool-result', content: msg.content }
+                    ];
+                    break;
+                case 'assistant_message':
+                    this.messages = [...this.messages, { role: 'assistant', content: msg.content }];
+                    break;
+                case 'error':
+                    this.messages = [...this.messages, { role: 'error', content: '❌ ' + msg.content }];
+                    break;
+                case 'done':
+                    break;
             }
+        },
+
+        sendMessage() {
+            const text = this.input.trim();
+            if (!text) return;
+
+            this.messages = [...this.messages, { role: 'user', content: text }];
+            this.input = '';
+
+            if (wsInstance && wsInstance.readyState === WebSocket.OPEN) {
+                wsInstance.send(JSON.stringify({
+                    type: 'user_message',
+                    content: text,
+                    id: 'msg_' + Date.now() + '_' + (this.messageId++)
+                }));
+            }
+        },
+
+        formatContent(content) {
+            if (!content) return '';
+            let html = content
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+                    const langClass = lang ? ' class="language-' + lang + '"' : '';
+                    return '<pre><code' + langClass + '>' + this.escapeHtml(code.trim()) + '</code></pre>';
+                })
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+            return html;
+        },
+
+        escapeHtml(text) {
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
     };
 }
-
-// ── HTMX WebSocket 扩展配置 ──
-
-htmx.defineExtension('ws', {
-    init: function() {
-        // 默认配置已满足需求
-    },
-
-    onEvent: function(name, evt) {
-        if (name === 'htmx:wsOpen') {
-            document.dispatchEvent(new CustomEvent('ws:open'));
-        }
-        if (name === 'htmx:wsClose') {
-            document.dispatchEvent(new CustomEvent('ws:close'));
-        }
-    }
-});

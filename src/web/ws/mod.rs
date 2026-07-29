@@ -96,6 +96,20 @@ impl ConnectionManager {
         }
     }
 
+    /// 同步版 `send_to`：用于无法 `.await` 的同步上下文（如 `MessageOutput::emit`）。
+    ///
+    /// 通过 `try_read` 非阻塞地获取读锁；若锁被占用则返回错误，调用方应处理
+    /// （通常是丢弃该事件，因为下一条事件很快会跟上）。
+    pub fn try_send_to(&self, id: ConnectionId, event: ServerEvent) -> Result<(), String> {
+        match self.connections.try_read() {
+            Ok(connections) => match connections.get(&id) {
+                Some(handle) => handle.send(event),
+                None => Err(format!("连接不存在: id={}", id)),
+            },
+            Err(_) => Err("连接表锁被占用，事件已丢弃".to_string()),
+        }
+    }
+
     /// 广播事件到所有活跃连接。
     pub async fn broadcast(&self, event: ServerEvent) {
         let connections = self.connections.read().await;

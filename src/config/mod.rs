@@ -89,7 +89,7 @@ pub fn load_agent_config() -> AgentConfig {
     let max_iterations: usize = env::var("MAX_ITERATIONS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(8);
+        .unwrap_or(120);
 
     AgentConfig { max_iterations }
 }

@@ -32,20 +32,22 @@ pub trait LlmProvider: Send + Sync {
     {
         // fallback: 调用非流式接口，包装为流
         let response = self.chat(http_client, request).await?;
-        let stream = futures::stream::once(async move {
-            match response {
-                LlmResponse::Text(content) => Ok(LlmStreamEvent::Chunk(content)),
-                LlmResponse::ToolCalls(tcs) => {
-                    // ToolCalls 变体不存在，使用 Chunk 包装
-                    let content = serde_json::to_string(&tcs).unwrap_or_default();
-                    Ok(LlmStreamEvent::Chunk(content))
-                }
-                LlmResponse::Error(err) => Err(AppError::Llm(err)),
+        match response {
+            LlmResponse::Text(content) => {
+                let stream = futures::stream::once(async { Ok(LlmStreamEvent::Chunk(content)) })
+                    .chain(futures::stream::once(async { Ok(LlmStreamEvent::Done) }));
+                Ok(Box::pin(stream))
             }
-        });
-        // 追加 Done 事件
-        let stream = stream.chain(futures::stream::once(async { Ok(LlmStreamEvent::Done) }));
-        Ok(Box::pin(stream))
+            LlmResponse::ToolCalls(tcs) => {
+                let tool_events: Vec<Result<LlmStreamEvent, AppError>> = tcs.into_iter()
+                    .map(|tc| Ok(LlmStreamEvent::ToolCallDelta(tc)))
+                    .collect();
+                let stream = futures::stream::iter(tool_events)
+                    .chain(futures::stream::once(async { Ok(LlmStreamEvent::Done) }));
+                Ok(Box::pin(stream))
+            }
+            LlmResponse::Error(err) => Err(AppError::Llm(err)),
+        }
     }
 }
 

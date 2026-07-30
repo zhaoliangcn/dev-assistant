@@ -294,8 +294,18 @@ fn parse_anthropic_sse_stream(
     let reader = BufReader::new(reader);
     let mut reader = Box::pin(reader);
 
+    /// 按 index 跟踪工具调用块的状态
+    #[derive(Default)]
+    struct ToolUseState {
+        id: String,
+        name: String,
+        partial_json: String,
+    }
+
     Box::pin(async_stream::try_stream! {
         let mut lines = reader.as_mut().lines();
+        // 使用 Vec 按 index 顺序跟踪工具调用块
+        let mut tool_use_states: Vec<(usize, ToolUseState)> = Vec::new();
 
         while let Ok(Some(line_result)) = lines.next_line().await {
             let line = line_result.trim();
@@ -324,42 +334,72 @@ fn parse_anthropic_sse_stream(
                         // message_start 事件，开始累积内容
                     }
                     "content_block_start" => {
-                        // content_block_start 事件，开始一个新的内容块
-                        // 这里可以记录当前块的类型（text 或 tool_use）
+                        // content_block_start 事件：如果是 tool_use 块，捕获 id 和 name
+                        if data["content_block"]["type"].as_str() == Some("tool_use") {
+                            let index = data["index"].as_i64().unwrap_or(0) as usize;
+                            let id = data["content_block"]["id"].as_str().unwrap_or_default().to_string();
+                            let name = data["content_block"]["name"].as_str().unwrap_or_default().to_string();
+
+                            // 移除已存在的同名 index（不应发生，但防重复）
+                            tool_use_states.retain(|(i, _)| *i != index);
+                            tool_use_states.push((index, ToolUseState {
+                                id,
+                                name,
+                                partial_json: String::new(),
+                            }));
+                        }
                     }
                     "content_block_delta" => {
-                        // content_block_delta 事件，包含增量内容
-                        if let Some(delta) = data["delta"].as_object() {
+                        // content_block_delta 事件
+                        let delta_type = data["delta"]["type"].as_str().unwrap_or("");
+
+                        if delta_type == "input_json_delta" {
+                            // 工具调用参数增量：累积 partial_json 片段
+                            if let Some(partial) = data["delta"]["partial_json"].as_str() {
+                                let index = data["index"].as_i64().unwrap_or(0) as usize;
+                                if let Some(pos) = tool_use_states.iter().position(|(i, _)| *i == index) {
+                                    tool_use_states[pos].1.partial_json.push_str(partial);
+                                } else {
+                                    // 容错：如果之前未捕获到 content_block_start，创建占位条目
+                                    tool_use_states.push((index, ToolUseState {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        name: String::new(),
+                                        partial_json: partial.to_string(),
+                                    }));
+                                }
+                            }
+                        } else if delta_type == "text_delta" {
                             // 文本增量
-                            if let Some(text) = delta.get("text_delta").and_then(|v| v.as_str()) {
+                            if let Some(text) = data["delta"]["text"].as_str() {
                                 if !text.is_empty() {
                                     yield LlmStreamEvent::Chunk(text.to_string());
                                 }
                             }
-
-                            // 工具调用增量
-                            // Anthropic 格式: {"type":"tool_use","name":"ReadFile","input":"{...}"}
-                            if let Some(tool_use) = delta.get("tool_use") {
-                                let name = tool_use.get("name").and_then(|v| v.as_str())
-                                    .unwrap_or_default()
-                                    .to_string();
-                                let input = tool_use.get("input").and_then(|v| v.as_str())
-                                    .unwrap_or_default()
-                                    .to_string();
-
-                                let parsed_args = parse_arguments(serde_json::Value::String(input.to_string()))?;
+                        }
+                    }
+                    "content_block_stop" => {
+                        // content_block_stop：如果是 tool_use 块，解析累积参数并 yield
+                        let index = data["index"].as_i64().unwrap_or(0) as usize;
+                        if let Some(pos) = tool_use_states.iter().position(|(i, _)| *i == index) {
+                            let (_, state) = tool_use_states.remove(pos);
+                            if !state.name.is_empty() {
+                                let arguments = if state.partial_json.is_empty() {
+                                    serde_json::Value::Object(Default::default())
+                                } else {
+                                    match serde_json::from_str(&state.partial_json) {
+                                        Ok(v) => v,
+                                        Err(_) => serde_json::Value::String(state.partial_json)
+                                    }
+                                };
                                 yield LlmStreamEvent::ToolCallDelta(ToolCall {
-                                    id: uuid::Uuid::new_v4().to_string(), // Anthropic 不提供 ID，生成一个
+                                    id: state.id,
                                     function: ToolCallFunction {
-                                        name,
-                                        arguments: parsed_args,
+                                        name: state.name,
+                                        arguments,
                                     },
                                 });
                             }
                         }
-                    }
-                    "content_block_stop" => {
-                        // content_block_stop 事件，结束当前内容块
                     }
                     "message_delta" => {
                         // message_delta 事件，包含最后的 delta
@@ -385,6 +425,7 @@ fn parse_anthropic_sse_stream(
 }
 
 /// 解析工具调用参数（简单版本，用于 Anthropic 流式响应）。
+#[allow(dead_code)]
 fn parse_arguments(args: Value) -> Result<Value, AppError> {
     if let Some(s) = args.as_str() {
         if let Ok(v) = serde_json::from_str(s) {

@@ -62,18 +62,22 @@ impl MessageOutput for UIMessageOutput {
     /// 完成后（is_final=true），输出完整内容并移除闪烁光标。
     fn streaming_assistant(&mut self, content: &str, is_final: bool) {
         use std::io::Write;
+        use unicode_width::UnicodeWidthStr;
 
         let mut stdout = std::io::stdout();
         if is_final {
-            // 最终输出：先换行离开流式行，再渲染完整内容
-            let _ = writeln!(stdout);
-            let block = crate::ui::MessageBlock::Assistant {
-                content: content.to_string(),
-                is_streaming: false,
-            };
-            let renderer = crate::ui::MarkdownRenderer::new();
-            let _ = crate::ui::render_block(&block, &renderer);
-            // 重置流式跟踪状态
+            // 清除可能因终端自动换行产生的残留行，再输出最终内容
+            let term_width = crate::ui::get_terminal_width().unwrap_or(80);
+            let prefix = "🤖 助手: ";
+            // 计算总行数：自动换行行数 + 内容中的显式换行数
+            let visual_len = prefix.width() + content.width();
+            let wrap_lines = visual_len / term_width;
+            let explicit_lines = content.matches('\n').count();
+            let total_lines = wrap_lines + explicit_lines;
+            for _ in 0..total_lines {
+                let _ = write!(stdout, "\r\x1b[2K\x1b[A");
+            }
+            let _ = writeln!(stdout, "\r\x1b[2K{}{}", prefix, content);
             self.last_streamed_content.clear();
         } else {
             // 内容未变时跳过重复渲染，避免内容包含换行时产生多行残留

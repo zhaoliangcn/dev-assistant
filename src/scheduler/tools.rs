@@ -89,7 +89,7 @@ fn field_matches(field: &str, value: i32) -> bool {
         if value >= low && value <= high && (value - low) % step == 0 {
             return true;
         }
-        return value >= low && value <= high && (value - low) % step == 0;
+        return false;
     }
 
     // 处理范围: A-B

@@ -5,6 +5,7 @@ use reqwest::Client;
 use serde_json::Value;
 use std::pin::Pin;
 use tracing::debug;
+use tracing::warn;
 
 use super::super::models::*;
 use super::LlmProvider;
@@ -139,42 +140,79 @@ impl LlmProvider for OllamaProvider {
         }
 
         let stream = response.bytes_stream();
-        let mapped = stream.map(|chunk_result| {
-            match chunk_result {
-                Ok(bytes) => {
-                    // Ollama 流式响应是 NDJSON 格式，每行一个 JSON 对象
-                    let text = String::from_utf8_lossy(&bytes);
-                    let mut last_event: Option<Result<LlmStreamEvent, AppError>> = None;
 
-                    for line in text.lines() {
-                        let line = line.trim();
-                        if line.is_empty() {
-                            continue;
-                        }
-                        match serde_json::from_str::<Value>(line) {
-                            Ok(data) => {
-                                if data["done"].as_bool().unwrap_or(false) {
-                                    last_event = Some(Ok(LlmStreamEvent::Done));
-                                } else if let Some(content) = data["message"]["content"].as_str() {
-                                    if !content.is_empty() {
-                                        last_event = Some(Ok(LlmStreamEvent::Chunk(content.to_string())));
-                                    }
+        // 使用 tokio_util::io::StreamReader + BufReader 进行行缓冲读取，
+        // 避免 NDJSON 行跨 TCP 分片时解析失败。
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let stream = stream.map(|result| {
+            result.map(|bytes| tokio_util::bytes::Bytes::from(bytes))
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        });
+        let reader = tokio_util::io::StreamReader::new(stream);
+        let reader = BufReader::new(reader);
+        let mut reader = Box::pin(reader);
+
+        let mapped = async_stream::try_stream! {
+            let mut lines = reader.as_mut().lines();
+
+            while let Ok(Some(line)) = lines.next_line().await {
+                let line = line.trim().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+
+                let data: Value = match serde_json::from_str(&line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!(error = %e, line = %line, "Failed to parse Ollama NDJSON line, skipping");
+                        continue;
+                    }
+                };
+
+                if data["done"].as_bool().unwrap_or(false) {
+                    // 处理工具调用：Ollama 在 done=true 行也可能携带 tool_calls
+                    if let Some(tcs) = data["message"]["tool_calls"].as_array() {
+                        if !tcs.is_empty() {
+                            for tc in tcs {
+                                if let Some(func) = tc.get("function") {
+                                    let name = func.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                    let arguments = func.get("arguments").cloned().unwrap_or(Value::Object(Default::default()));
+                                    yield LlmStreamEvent::ToolCallDelta(ToolCall {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        function: ToolCallFunction { name, arguments },
+                                    });
                                 }
-                            }
-                            Err(e) => {
-                                last_event = Some(Err(AppError::Llm(
-                                    format!("Failed to parse Ollama streaming response: {}", e)
-                                )));
                             }
                         }
                     }
-
-                    // 如果没有产生任何事件（例如 JSON 被分片），返回空
-                    last_event.unwrap_or(Ok(LlmStreamEvent::Chunk(String::new())))
+                    yield LlmStreamEvent::Done;
+                    continue;
                 }
-                Err(e) => Err(AppError::Llm(format!("Ollama stream error: {}", e))),
+
+                // 处理文本内容
+                if let Some(content) = data["message"]["content"].as_str() {
+                    if !content.is_empty() {
+                        yield LlmStreamEvent::Chunk(content.to_string());
+                    }
+                }
+
+                // 处理工具调用增量
+                if let Some(tcs) = data["message"]["tool_calls"].as_array() {
+                    if !tcs.is_empty() {
+                        for tc in tcs {
+                            if let Some(func) = tc.get("function") {
+                                let name = func.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                let arguments = func.get("arguments").cloned().unwrap_or(Value::Object(Default::default()));
+                                yield LlmStreamEvent::ToolCallDelta(ToolCall {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    function: ToolCallFunction { name, arguments },
+                                });
+                            }
+                        }
+                    }
+                }
             }
-        });
+        };
 
         Ok(Box::pin(mapped))
     }

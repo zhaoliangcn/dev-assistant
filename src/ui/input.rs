@@ -192,6 +192,10 @@ impl SlashCommand {
         println!("  /status    - 查看当前状态");
         println!("  /pipeline  - 执行流水线任务");
         println!("  /background - 后台任务管理");
+        println!("  /schedule  - 创建定时任务（用法: /schedule cron <表达式> agent <指令>）");
+        println!("  /unschedule - 取消定时任务（用法: /unschedule <任务ID>）");
+        println!("  /scheduled - 查看所有定时任务（同 /tasks）");
+        println!("  /tasks     - 查看所有定时任务（同 /scheduled）");
     }
 }
 

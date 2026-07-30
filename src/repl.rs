@@ -126,6 +126,18 @@ pub fn handle_slash(
         return Some(handle_background_command(agent));
     }
 
+    if input.starts_with("/schedule ") || input == "/schedule" {
+        return Some(handle_schedule_command(input));
+    }
+
+    if input.starts_with("/unschedule ") {
+        return Some(handle_unschedule_command(input));
+    }
+
+    if input == "/scheduled" || input == "/tasks" {
+        return Some(handle_list_scheduled_command());
+    }
+
     None
 }
 
@@ -215,6 +227,290 @@ fn handle_background_command(_agent: &mut Agent) -> SlashOutcome {
          - /pause: 暂停任务\n\
          - /resume: 恢复任务\n\
          - /cancel: 取消任务".to_string();
+    let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
+    SlashOutcome::Continue
+}
+
+// ── 定时任务命令 ─────────────────────────────────────────────────
+
+/// 处理 `/schedule` 命令：创建定时任务。
+///
+/// 用法:
+///   /schedule cron "<表达式>" agent <指令>
+///   /schedule interval <秒> command <命令>
+///   /schedule once <秒> agent <指令>
+fn handle_schedule_command(input: &str) -> SlashOutcome {
+    use crate::scheduler::tools_handlers::get_global_scheduler;
+    use crate::scheduler::task::{ScheduledTask, ScheduleType, TaskExecutionMode};
+
+    let md = MarkdownRenderer::new();
+    let scheduler = match get_global_scheduler() {
+        Some(s) => s,
+        None => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error { content: "❌ 调度器未初始化".to_string() },
+                &md,
+            );
+            return SlashOutcome::Continue;
+        }
+    };
+
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.len() < 4 {
+        let _ = ui::render_block(
+            &ui::MessageBlock::Error {
+                content: "❌ 用法:\n  /schedule cron \"<表达式>\" agent <指令>\n  /schedule interval <秒> command <命令>\n  /schedule once <秒> agent <指令>".to_string(),
+            },
+            &md,
+        );
+        return SlashOutcome::Continue;
+    }
+
+    let schedule_type = parts[1];
+    let schedule = match schedule_type {
+        "cron" => {
+            // 合并剩余参数直到 agent/command
+            let expr = parts[2..]
+                .iter()
+                .take_while(|p| **p != "agent" && **p != "command")
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if expr.is_empty() {
+                let _ = ui::render_block(
+                    &ui::MessageBlock::Error { content: "❌ cron 表达式不能为空".to_string() },
+                    &md,
+                );
+                return SlashOutcome::Continue;
+            }
+            ScheduleType::Cron(expr)
+        }
+        "interval" => {
+            let secs: u64 = match parts[2].parse() {
+                Ok(s) => s,
+                Err(_) => {
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::Error { content: "❌ 间隔秒数必须为数字".to_string() },
+                        &md,
+                    );
+                    return SlashOutcome::Continue;
+                }
+            };
+            ScheduleType::Interval(secs)
+        }
+        "once" => {
+            let secs: u64 = match parts[2].parse() {
+                Ok(s) => s,
+                Err(_) => {
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::Error { content: "❌ 延迟秒数必须为数字".to_string() },
+                        &md,
+                    );
+                    return SlashOutcome::Continue;
+                }
+            };
+            ScheduleType::Once(secs)
+        }
+        _ => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error {
+                    content: format!("❌ 未知调度类型: {}，支持: cron/interval/once", schedule_type),
+                },
+                &md,
+            );
+            return SlashOutcome::Continue;
+        }
+    };
+
+    // 找到 agent/command 关键字的位置
+    let mode_keyword_idx = parts.iter().position(|p| *p == "agent" || *p == "command");
+    let mode_idx = match mode_keyword_idx {
+        Some(i) => i,
+        None => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error { content: "❌ 缺少执行模式 (agent/command)".to_string() },
+                &md,
+            );
+            return SlashOutcome::Continue;
+        }
+    };
+    let mode_type = parts[mode_idx]; // "agent" or "command"
+
+    // 合并剩余参数作为指令/命令内容
+    let remaining: String = parts[mode_idx + 1..].join(" ");
+    if remaining.is_empty() {
+        let _ = ui::render_block(
+            &ui::MessageBlock::Error {
+                content: format!("❌ {} 指令内容不能为空", if mode_type == "agent" { "Agent" } else { "命令" }),
+            },
+            &md,
+        );
+        return SlashOutcome::Continue;
+    }
+
+    let mode = match mode_type {
+        "agent" => TaskExecutionMode::Agent { instruction: remaining.clone() },
+        "command" => TaskExecutionMode::Command { command: remaining.clone(), working_dir: None },
+        _ => unreachable!(),
+    };
+
+    let task_id = format!(
+        "sched_{}_{}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S"),
+        crate::scheduler::tools::generate_short_id(6)
+    );
+
+    let task_name = format!("{}: {}", mode_type, remaining.chars().take(30).collect::<String>());
+    let task = ScheduledTask::new(
+        task_id,
+        task_name,
+        schedule,
+        mode,
+        3,
+        vec![],
+        600,
+    );
+
+    match scheduler.schedule_task(&task) {
+        Ok(()) => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::ToolResult {
+                    tool_name: "定时任务".to_string(),
+                    success: true,
+                    content: format!("✅ 已创建定时任务: {} (ID: {})", task.name, task.id),
+                },
+                &md,
+            );
+        }
+        Err(e) => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error {
+                    content: format!("❌ 创建失败: {}", e),
+                },
+                &md,
+            );
+        }
+    }
+    SlashOutcome::Continue
+}
+
+/// 处理 `/unschedule` 命令：取消定时任务。
+///
+/// 用法: /unschedule <task-id>
+fn handle_unschedule_command(input: &str) -> SlashOutcome {
+    use crate::scheduler::tools_handlers::get_global_scheduler;
+
+    let md = MarkdownRenderer::new();
+    let scheduler = match get_global_scheduler() {
+        Some(s) => s,
+        None => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error { content: "❌ 调度器未初始化".to_string() },
+                &md,
+            );
+            return SlashOutcome::Continue;
+        }
+    };
+
+    let task_id = input.strip_prefix("/unschedule ").unwrap_or("").trim().to_string();
+    if task_id.is_empty() {
+        let _ = ui::render_block(
+            &ui::MessageBlock::Error { content: "❌ 用法: /unschedule <task-id>\n使用 /scheduled 查看任务 ID".to_string() },
+            &md,
+        );
+        return SlashOutcome::Continue;
+    }
+
+    match scheduler.unschedule_task(&task_id) {
+        Ok(true) => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::ToolResult {
+                    tool_name: "定时任务".to_string(),
+                    success: true,
+                    content: format!("✅ 已取消任务: {}", task_id),
+                },
+                &md,
+            );
+        }
+        Ok(false) => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error {
+                    content: format!("❌ 未找到任务: {}", task_id),
+                },
+                &md,
+            );
+        }
+        Err(e) => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error {
+                    content: format!("❌ 取消失败: {}", e),
+                },
+                &md,
+            );
+        }
+    }
+    SlashOutcome::Continue
+}
+
+/// 处理 `/scheduled` / `/tasks` 命令：列出所有定时任务。
+fn handle_list_scheduled_command() -> SlashOutcome {
+    use crate::scheduler::tools_handlers::get_global_scheduler;
+
+    let md = MarkdownRenderer::new();
+    let scheduler = match get_global_scheduler() {
+        Some(s) => s,
+        None => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error { content: "❌ 调度器未初始化".to_string() },
+                &md,
+            );
+            return SlashOutcome::Continue;
+        }
+    };
+
+    let tasks = match tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(scheduler.get_all_tasks())
+    }) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error {
+                    content: format!("❌ 查询失败: {}", e),
+                },
+                &md,
+            );
+            return SlashOutcome::Continue;
+        }
+    };
+
+    if tasks.is_empty() {
+        let _ = ui::render_block(
+            &ui::MessageBlock::System { content: "📭 暂无定时任务\n使用 /schedule 创建定时任务".to_string() },
+            &md,
+        );
+        return SlashOutcome::Continue;
+    }
+
+    let mut content = format!("📋 定时任务列表 (共 {} 个):\n\n", tasks.len());
+    for task in &tasks {
+        let schedule_desc = match &task.schedule {
+            crate::scheduler::task::ScheduleType::Cron(expr) => format!("cron `{}`", expr),
+            crate::scheduler::task::ScheduleType::Interval(secs) => format!("每隔 {} 秒", secs),
+            crate::scheduler::task::ScheduleType::Once(secs) => format!("{} 秒后执行一次", secs),
+        };
+        let mode_desc = match &task.mode {
+            crate::scheduler::task::TaskExecutionMode::Agent { instruction } => {
+                format!("Agent: {}", instruction.chars().take(40).collect::<String>())
+            }
+            crate::scheduler::task::TaskExecutionMode::Command { command, .. } => {
+                format!("Command: {}", command.chars().take(40).collect::<String>())
+            }
+        };
+        content.push_str(&format!(
+            "  ID: `{}`\n  名称: {}\n  调度: {} | 模式: {}\n  状态: {:?} | 执行: {} 次\n\n",
+            task.id, task.name, schedule_desc, mode_desc, task.status, task.run_count,
+        ));
+    }
     let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
     SlashOutcome::Continue
 }

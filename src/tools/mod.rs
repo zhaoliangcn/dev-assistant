@@ -271,6 +271,10 @@ impl ToolRegistry {
             "record_analysis" => Some(analysis::record_analysis_tool()),
             "get_analysis_summary" => Some(analysis::get_analysis_summary_tool()),
             "finish_analysis" => Some(analysis::finish_analysis_tool()),
+            "schedule_task" => Some(crate::scheduler::tools_handlers::schedule_task_tool()),
+            "unschedule_task" => Some(crate::scheduler::tools_handlers::unschedule_task_tool()),
+            "list_scheduled_tasks" => Some(crate::scheduler::tools_handlers::list_scheduled_tasks_tool()),
+            "get_scheduled_task_logs" => Some(crate::scheduler::tools_handlers::get_scheduled_task_logs_tool()),
             _ => None,
         }
     }

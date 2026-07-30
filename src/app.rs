@@ -9,6 +9,7 @@ use crate::llm::LlmClient;
 use crate::orchestrator::{TaskOrchestrator, BackgroundConfig};
 use crate::persist::SessionStore;
 use crate::prompt::build_system_prompt;
+use crate::scheduler::engine::{Scheduler, SchedulerConfig};
 use crate::security::SecurityPolicy;
 use crate::session::SessionLogger;
 use crate::skills::{default_skills_dir, discover_skills, Skill};
@@ -44,6 +45,8 @@ pub struct App {
     /// 构建好的系统提示词。保留为未来运行时刷新 prompt 的扩展点。
     #[allow(dead_code)]
     system_prompt: String,
+    /// 定时任务调度器。
+    scheduler: Arc<Scheduler>,
 }
 
 impl App {
@@ -159,11 +162,22 @@ impl App {
             }
         }
 
+        // 创建定时任务调度器
+        let scheduler_config = SchedulerConfig {
+            store_dir: config.working_dir.join(".dev-assistant").join("scheduler"),
+            working_dir: config.working_dir.clone(),
+            ..Default::default()
+        };
+        let scheduler = Arc::new(Scheduler::new(scheduler_config)?);
+        // 注册到全局，供 slash 命令和工具处理器访问
+        crate::scheduler::tools_handlers::set_global_scheduler(scheduler.clone());
+
         Ok(Self {
             agent,
             config,
             skills: discovered_skills,
             system_prompt,
+            scheduler,
         })
     }
 

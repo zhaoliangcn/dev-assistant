@@ -15,9 +15,6 @@
 //! - `executor.rs` — 执行器 (派发到 Handler)
 //! - `tools_handlers.rs` — 工具 handler（CRUD + 日志查询）
 
-// 模块尚未在 App 中初始化，允许 dead_code 避免未使用类型/方法的警告
-#![allow(dead_code)]
-
 pub mod task;
 pub mod tools;
 pub mod wheel;

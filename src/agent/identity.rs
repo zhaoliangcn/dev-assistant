@@ -50,7 +50,7 @@ impl AgentIdentity {
 工作方式：
 1. 分析需求和约束
 2. 设计模块结构和接口定义
-3. 记录架构决策（使用 kb_store 工具）
+3. 记录架构决策（使用 kb_store 工具，保存到 pipeline/stage-{index}/ 目录下）
 4. 为实现者提供清晰的规范和指导
 5. 使用 finish 工具提交设计方案
 
@@ -61,7 +61,8 @@ impl AgentIdentity {
 - 数据流向图
 - 关键决策和理由
 
-注意：你不负责实现代码，只负责设计和规划。"#
+注意：你不负责实现代码，只负责设计和规划。
+产物请保存到 .kb/pipeline/ 目录下，以便后续阶段查阅。"#
                     .to_string()
             }
             Self::Implementer => {
@@ -74,11 +75,12 @@ impl AgentIdentity {
 - 完成后进行基础测试验证
 
 工作方式：
-1. 阅读接口定义和设计文档（使用 kb_query 工具）
+1. 阅读接口定义和设计文档（使用 kb_query 工具查询 pipeline/stage-* 目录）
 2. 实现功能代码
 3. 编写单元测试
-4. 记录实现进展（使用 kb_store 工具）
-5. 使用 finish 工具提交实现成果
+4. 记录实现进展（使用 kb_store 工具，保存到 pipeline/stage-{index}/ 目录下）
+5. 记录修改的文件列表
+6. 使用 finish 工具提交实现成果
 
 输出格式：
 - 修改的文件列表
@@ -86,7 +88,8 @@ impl AgentIdentity {
 - 测试结果
 - 实现中遇到的问题和解决方案
 
-注意：严格遵循设计规范，不擅自修改接口定义。"#
+注意：严格遵循设计规范，不擅自修改接口定义。
+产物请保存到 .kb/pipeline/ 目录下，以便后续阶段查阅。"#
                     .to_string()
             }
             Self::Reviewer => {
@@ -99,9 +102,9 @@ impl AgentIdentity {
 - 提供改进建议
 
 工作方式：
-1. 阅读相关设计文档和代码（使用 kb_query 工具）
+1. 阅读相关设计文档和代码（使用 kb_query 工具查询 pipeline/stage-* 目录）
 2. 审查代码逻辑、安全性、性能
-3. 列出问题清单和改进建议
+3. 列出问题清单（按严重程度分级）并保存到 pipeline/stage-{index}/ 目录下
 4. 使用 kb_store 工具记录审查结果
 5. 使用 finish 工具提交审查报告
 
@@ -111,7 +114,8 @@ impl AgentIdentity {
 - 代码优化示例
 - 审查总结
 
-注意：保持客观中立，提供可操作的建议。"#
+注意：保持客观中立，提供可操作的建议。
+产物请保存到 .kb/pipeline/ 目录下，以便后续阶段查阅。"#
                     .to_string()
             }
             Self::Tester => {
@@ -124,10 +128,10 @@ impl AgentIdentity {
 - 确保代码质量符合标准
 
 工作方式：
-1. 阅读接口定义和实现代码（使用 kb_query 工具）
+1. 阅读接口定义和实现代码（使用 kb_query 工具查询 pipeline/stage-* 目录）
 2. 编写单元测试和集成测试
 3. 运行测试并收集结果
-4. 使用 kb_store 工具记录测试结果和问题
+4. 使用 kb_store 工具记录测试结果（保存到 pipeline/stage-{index}/ 目录下）
 5. 使用 finish 工具提交测试报告
 
 输出格式：
@@ -136,7 +140,8 @@ impl AgentIdentity {
 - 问题清单（bug 报告）
 - 测试覆盖率统计
 
-注意：覆盖边界情况和异常场景。"#
+注意：覆盖边界情况和异常场景。
+产物请保存到 .kb/pipeline/ 目录下，以便后续阶段查阅。"#
                     .to_string()
             }
             Self::Debugger => {
@@ -153,8 +158,9 @@ impl AgentIdentity {
 2. 定位问题代码位置
 3. 设计修复方案
 4. 实施修复并验证
-5. 使用 kb_store 工具记录问题和解决方案
-6. 使用 finish 工具提交修复结果
+5. 使用 kb_store 工具记录问题和解决方案（保存到 pipeline/stage-{index}/ 目录下）
+6. 记录修改的文件列表
+7. 使用 finish 工具提交修复结果
 
 输出格式：
 - 问题分析（根因）
@@ -162,7 +168,8 @@ impl AgentIdentity {
 - 修改的文件和代码
 - 验证结果
 
-注意：先定位根因再修复，避免盲目修改。"#
+注意：先定位根因再修复，避免盲目修改。
+产物请保存到 .kb/pipeline/ 目录下，以便后续阶段查阅。"#
                     .to_string()
             }
             Self::General => {
@@ -174,7 +181,8 @@ impl AgentIdentity {
 3. 重要信息写入输出中返回给父代理
 4. 遵守安全策略
 5. 不要调用 spawn_subagent 工具（它不可用）
-6. 不要调用 restart 工具（它不可用）"#
+6. 不要调用 restart 工具（它不可用）
+7. 产物请保存到 .kb/pipeline/ 目录下，以便后续阶段查阅"#
                     .to_string()
             }
         }
@@ -186,6 +194,7 @@ impl AgentIdentity {
                 "read_file".to_string(),
                 "write_file".to_string(),
                 "glob".to_string(),
+                "exec_command".to_string(),
                 "kb_store".to_string(),
                 "kb_query".to_string(),
                 "finish".to_string(),
@@ -196,6 +205,7 @@ impl AgentIdentity {
                 "edit_file".to_string(),
                 "exec_command".to_string(),
                 "glob".to_string(),
+                "kb_store".to_string(),
                 "kb_query".to_string(),
                 "finish".to_string(),
             ]),
@@ -219,6 +229,7 @@ impl AgentIdentity {
             ]),
             Self::Debugger => HashSet::from([
                 "read_file".to_string(),
+                "batch_read_files".to_string(),
                 "write_file".to_string(),
                 "edit_file".to_string(),
                 "exec_command".to_string(),
@@ -306,15 +317,35 @@ mod tests {
     }
 
     #[test]
-    fn architect_has_kb_tools() {
+    fn architect_has_kb_and_exec_tools() {
         let tools = AgentIdentity::Architect.default_tools();
         assert!(tools.contains("kb_store"));
         assert!(tools.contains("kb_query"));
+        assert!(tools.contains("exec_command"));
     }
 
     #[test]
     fn reviewer_has_batch_read_files() {
         let tools = AgentIdentity::Reviewer.default_tools();
         assert!(tools.contains("batch_read_files"));
+    }
+
+    #[test]
+    fn implementer_has_kb_store() {
+        let tools = AgentIdentity::Implementer.default_tools();
+        assert!(tools.contains("kb_store"));
+    }
+
+    #[test]
+    fn debugger_has_batch_read_files() {
+        let tools = AgentIdentity::Debugger.default_tools();
+        assert!(tools.contains("batch_read_files"));
+    }
+
+    #[test]
+    fn tester_has_exec_command() {
+        let tools = AgentIdentity::Tester.default_tools();
+        assert!(tools.contains("exec_command"));
+        assert!(tools.contains("kb_store"));
     }
 }

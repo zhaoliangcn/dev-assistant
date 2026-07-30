@@ -3,10 +3,12 @@ pub mod context;
 pub mod display;
 pub mod history;
 pub mod identity;
+pub mod pipeline_context;
 pub mod token_counter;
 
 pub use context::ContextManager;
 pub use identity::{AgentIdentity, PipelineStage};
+pub use pipeline_context::{PipelineContext, PipelineContextStore, StageStatus};
 
 use std::sync::Arc;
 
@@ -16,7 +18,7 @@ use crate::skills::Skill;
 use crate::tools::{async_tool::AsyncToolRegistry, ToolRegistry, ToolResult};
 use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 /// 最大子代理深度。超过此深度时，返回 `SubagentDepthLimit` 错误。
 const MAX_SUBAGENT_DEPTH: usize = 3;
@@ -430,31 +432,40 @@ impl Agent {
         self.depth
     }
 
-    /// 运行流水线：按 设计→编码→审查→修复→记录 五个阶段顺序执行。
+    /// 运行流水线：按 设计→编码→测试→审查→修复→记录 六个阶段顺序执行。
     ///
-    /// 每个阶段创建一个对应身份的子 Agent，上一个阶段的输出作为
-    /// 下一个阶段的上下文传入。
+    /// 每个阶段创建一个对应身份的子 Agent，上下文通过文件系统存储。
+    /// 支持断点续传（通过 `resume` 参数）。
+    ///
+    /// # 参数
+    ///
+    /// * `task` - 任务描述
+    /// * `verbose` - 是否启用详细日志
+    /// * `resume` - 是否从上次检查点恢复
     pub async fn run_pipeline(
         &mut self,
         task: &str,
         verbose: bool,
+        resume: bool,
     ) -> Result<(), AppError> {
+        // 初始化文件存储
+        let pipeline_store = PipelineContextStore::new(&self.working_dir())?;
+
         // 从 .env 读取 MAX_ITERATIONS（默认 120），按阶段复杂度比例分配。
-        // 权重比例 设计:编码:审查:修复:记录 = 2:4:2:3:1（共 12 份）
+        // 权重比例 设计:编码:测试:审查:修复:记录 = 2:4:2:2:3:1（共 14 份）
         let env_max_iter: usize = std::env::var("MAX_ITERATIONS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(120);
         // 阶段权重（与下方 stages 一一对应）
-        const STAGE_WEIGHTS: [usize; 5] = [2, 4, 2, 3, 1];
-        const TOTAL_WEIGHT: usize = 12;
+        const STAGE_WEIGHTS: [usize; 6] = [2, 4, 2, 2, 3, 1];
+        const TOTAL_WEIGHT: usize = 14;
         let alloc = |w: usize| -> usize {
             // 至少 5 轮，避免过小导致任务无法完成
             ((env_max_iter * w).div_ceil(TOTAL_WEIGHT)).max(5)
         };
 
-        let stages = vec![
-            PipelineStage {
+        let stages = [PipelineStage {
                 name: "🏗 架构设计".to_string(),
                 agent_type: AgentIdentity::Architect,
                 task_template: format!(
@@ -466,7 +477,7 @@ impl Agent {
                      2. 接口定义（输入/输出）\n\
                      3. 数据流设计\n\
                      4. 关键设计决策和理由\n\n\
-                     请使用 kb_store 记录架构决策。\n\n\
+                     请使用 kb_store 记录架构决策到 pipeline/stage-0-architecture/ 目录下。\n\n\
                      ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
                      并将架构设计摘要作为 `summary` 参数传入，例如：\n\
                      finish(summary=\"架构设计完成：模块划分、接口定义、数据流、决策理由\")。\n\
@@ -489,6 +500,7 @@ impl Agent {
                      2. 单元测试\n\
                      3. 确保代码编译通过\n\n\
                      注意：严格遵循架构设计，不擅自修改接口定义。\n\n\
+                     请使用 kb_store 记录修改的文件列表到 pipeline/stage-1-implementation/ 目录下。\n\n\
                      ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
                      并将代码实现摘要作为 `summary` 参数传入，例如：\n\
                      finish(summary=\"代码实现完成：新增文件、关键接口、测试覆盖\")。\n\
@@ -498,13 +510,35 @@ impl Agent {
                 max_iterations: alloc(STAGE_WEIGHTS[1]),
             },
             PipelineStage {
+                name: "🧪 测试验证".to_string(),
+                agent_type: AgentIdentity::Tester,
+                task_template: format!(
+                    "请测试代码实现。\n\n\
+                     任务：\n\
+                     {}\n\n\
+                     上一阶段输出（代码实现）：\n\
+                     {{context}}\n\n\
+                     请：\n\
+                     1. 编写全面的测试用例\n\
+                     2. 运行测试并收集结果\n\
+                     3. 报告测试覆盖率和问题\n\n\
+                     请使用 kb_store 记录测试结果到 pipeline/stage-2-testing/ 目录下。\n\n\
+                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
+                     并将测试报告摘要作为 `summary` 参数传入，例如：\n\
+                     finish(summary=\"测试完成：N 个测试用例，M 个通过，K 个失败\")。\n\
+                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
+                    task
+                ),
+                max_iterations: alloc(STAGE_WEIGHTS[2]),
+            },
+            PipelineStage {
                 name: "🔍 代码审查".to_string(),
                 agent_type: AgentIdentity::Reviewer,
                 task_template: format!(
                     "请审查代码实现。\n\n\
                      任务：\n\
                      {}\n\n\
-                     上一阶段输出（代码实现）：\n\
+                     上一阶段输出（测试结果和代码实现）：\n\
                      {{context}}\n\n\
                      请检查：\n\
                      1. 代码质量和可读性\n\
@@ -512,6 +546,7 @@ impl Agent {
                      3. 性能问题\n\
                      4. 是否符合架构设计规范\n\
                      5. 错误处理是否完善\n\n\
+                     请使用 kb_store 记录审查结果到 pipeline/stage-3-review/ 目录下。\n\n\
                      请输出问题清单（含严重程度）和改进建议。\n\n\
                      ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
                      并将审查报告摘要作为 `summary` 参数传入，例如：\n\
@@ -519,7 +554,7 @@ impl Agent {
                      切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
                     task
                 ),
-                max_iterations: alloc(STAGE_WEIGHTS[2]),
+                max_iterations: alloc(STAGE_WEIGHTS[3]),
             },
             PipelineStage {
                 name: "🔧 问题修复".to_string(),
@@ -535,13 +570,14 @@ impl Agent {
                      2. 确保代码编译通过\n\
                      3. 验证修复效果\n\n\
                      注意：只修复审查中提出的问题，不要引入新的功能变更。\n\n\
+                     请使用 kb_store 记录修复记录到 pipeline/stage-4-debug/ 目录下。\n\n\
                      ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
                      并将修复摘要作为 `summary` 参数传入，例如：\n\
                      finish(summary=\"修复完成：处理 N 个问题，编译通过\")。\n\
                      切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
                     task
                 ),
-                max_iterations: alloc(STAGE_WEIGHTS[3]),
+                max_iterations: alloc(STAGE_WEIGHTS[4]),
             },
             PipelineStage {
                 name: "📋 进度记录".to_string(),
@@ -552,7 +588,7 @@ impl Agent {
                      {}\n\n\
                      已完成的工作：\n\
                      {{context}}\n\n\
-                     请使用 kb_store 工具记录：\n\
+                     请使用 kb_store 工具记录到 pipeline/stage-5-recording/ 目录下：\n\
                      1. 完成的功能列表\n\
                      2. 修改的文件清单\n\
                      3. 测试结果概要\n\
@@ -564,21 +600,66 @@ impl Agent {
                      切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
                     task
                 ),
-                max_iterations: alloc(STAGE_WEIGHTS[4]),
-            },
-        ];
+                max_iterations: alloc(STAGE_WEIGHTS[5]),
+            }];
 
         let total = stages.len();
-        let mut context = String::new();
         let pipeline_start = std::time::Instant::now();
 
-        // 初始进度条
-        let _ = crate::ui::render_progress_bar(0, total, &stages[0].name, &pipeline_start, "准备就绪");
+        // ── 恢复或初始化 Pipeline 上下文 ──
+        let mut pipeline_ctx = if resume {
+            match pipeline_store.load_checkpoint()? {
+                Some(ctx) => {
+                    info!("恢复 pipeline 从阶段 {} (已完成 {} 个阶段)",
+                        ctx.current_stage,
+                        ctx.stages.iter().filter(|s| s.status == StageStatus::Completed).count());
+                    self.add_display_message(
+                        crate::utils::message_level::MessageLevel::Info,
+                        &format!("🔄 恢复 pipeline 从阶段 {} 开始...", ctx.current_stage + 1),
+                    );
+                    ctx
+                }
+                None => {
+                    warn!("未找到 pipeline 检查点，从头开始");
+                    let mut ctx = PipelineContext::new(task, total);
+                    for (i, stage) in stages.iter().enumerate() {
+                        ctx.stages[i].stage_name = stage.name.clone();
+                    }
+                    ctx
+                }
+            }
+        } else {
+            // 清除旧的 pipeline 数据
+            let _ = pipeline_store.clear();
+            let mut ctx = PipelineContext::new(task, total);
+            for (i, stage) in stages.iter().enumerate() {
+                ctx.stages[i].stage_name = stage.name.clone();
+            }
+            pipeline_store.save_pipeline_context(&ctx)?;
+            ctx
+        };
 
-        for (i, stage) in stages.into_iter().enumerate() {
-            // 更新进度条（当前阶段进行中）
+        // 初始进度条
+        let _ = crate::ui::render_progress_bar(
+            pipeline_ctx.current_stage,
+            total,
+            &stages[pipeline_ctx.current_stage.min(total - 1)].name,
+            &pipeline_start,
+            "准备就绪",
+        );
+
+        // ── 执行阶段循环 ──
+        while pipeline_ctx.current_stage < total {
+            let stage_idx = pipeline_ctx.current_stage;
+            let stage = &stages[stage_idx];
+
+            // 更新阶段状态为进行中
+            let stage_ctx = &mut pipeline_ctx.stages[stage_idx];
+            stage_ctx.status = StageStatus::InProgress;
+
+            // 更新进度条
             let _ = crate::ui::render_progress_bar(
-                i,
+                stage_idx,
                 total,
                 &stage.name,
                 &pipeline_start,
@@ -587,11 +668,12 @@ impl Agent {
 
             self.add_display_message(
                 crate::utils::message_level::MessageLevel::Info,
-                &format!("🔄 阶段 {}/{}: {}...", i + 1, total, stage.name),
+                &format!("🔄 阶段 {}/{}: {}...", stage_idx + 1, total, stage.name),
             );
 
-            // 替换 context 占位符
-            let stage_task = stage.task_template.replace("{context}", &context);
+            // 构建上下文提示词（从已完成的阶段）
+            let context_prompt = pipeline_ctx.build_context_prompt();
+            let stage_task = stage.task_template.replace("{context}", &context_prompt);
 
             let subagent_tools = self.tools
                 .new_subagent_registry_with_identity(&stage.agent_type);
@@ -604,10 +686,16 @@ impl Agent {
                 context: String::new(),
                 max_iterations: stage.max_iterations,
                 max_tokens: self.context.max_tokens,
-                agent_type: Some(stage.agent_type),
+                agent_type: Some(stage.agent_type.clone()),
             }) {
                 Ok(agent) => agent,
                 Err(e) => {
+                    let stage_ctx = &mut pipeline_ctx.stages[stage_idx];
+                    stage_ctx.status = StageStatus::Failed;
+                    stage_ctx.error = Some(format!("创建子代理失败: {}", e));
+                    let _ = pipeline_store.save_stage_context(stage_ctx);
+                    let _ = pipeline_store.save_checkpoint(&pipeline_ctx);
+
                     self.add_display_message(
                         crate::utils::message_level::MessageLevel::Error,
                         &format!("❌ 创建阶段 \"{}\" 的子代理失败: {}", stage.name, e),
@@ -624,34 +712,67 @@ impl Agent {
                 self.add_display_message(level, &msg);
             }
 
+            let stage_ctx = &mut pipeline_ctx.stages[stage_idx];
+
             match result {
                 Ok(agent_result) if agent_result.success => {
+                    stage_ctx.status = StageStatus::Completed;
+                    stage_ctx.summary = agent_result.message.clone();
+                    // 检测修改的文件（通过 git diff 或 kb_store 记录）
+                    if let Ok(files) = detect_modified_files(&self.working_dir()) {
+                        stage_ctx.modified_files = files;
+                    }
+                    // 记录产物引用
+                    let artifact_dir = format!("pipeline/stage-{}-{}", stage_idx, stage.name.replace(' ', "-").to_lowercase());
+                    stage_ctx.artifacts.push(artifact_dir);
+
+                    // 保存阶段上下文到文件
+                    let _ = pipeline_store.save_stage_context(stage_ctx);
+                    // 更新 pipeline 上下文索引
+                    let _ = pipeline_store.save_pipeline_context(&pipeline_ctx);
+                    // 保存检查点
+                    let _ = pipeline_store.save_checkpoint(&pipeline_ctx);
+
                     self.add_display_message(
                         crate::utils::message_level::MessageLevel::Success,
                         &format!("✅ 阶段 \"{}\" 完成", stage.name),
                     );
-                    // 将阶段输出保存为下一阶段的上下文
-                    context = agent_result.message;
+
+                    pipeline_ctx.current_stage += 1;
                 }
                 Ok(agent_result) => {
+                    stage_ctx.status = StageStatus::Failed;
+                    stage_ctx.error = Some(agent_result.message.clone());
+
+                    // 保存失败信息
+                    let _ = pipeline_store.save_stage_context(stage_ctx);
+                    let _ = pipeline_store.save_checkpoint(&pipeline_ctx);
+
                     self.add_display_message(
                         crate::utils::message_level::MessageLevel::Error,
-                        &format!(
-                            "❌ 阶段 \"{}\" 失败: {}",
-                            stage.name, agent_result.message
-                        ),
+                        &format!("❌ 阶段 \"{}\" 失败: {}", stage.name, agent_result.message),
                     );
                     return Err(AppError::Config(format!(
-                        "流水线阶段 '{}' 失败: {}",
+                        "流水线阶段 '{}' 失败. 使用 --resume-pipeline 可从当前阶段恢复。\n错误: {}",
                         stage.name, agent_result.message
                     )));
                 }
                 Err(e) => {
+                    stage_ctx.status = StageStatus::Failed;
+                    stage_ctx.error = Some(format!("{}", e));
+
+                    // 保存失败信息
+                    let _ = pipeline_store.save_stage_context(stage_ctx);
+                    let _ = pipeline_store.save_checkpoint(&pipeline_ctx);
+
                     self.add_display_message(
                         crate::utils::message_level::MessageLevel::Error,
                         &format!("❌ 阶段 \"{}\" 出错: {}", stage.name, e),
                     );
-                    return Err(e);
+                    return Err(AppError::Config(format!(
+                        "流水线阶段 '{}' 出错: {}\n使用 --resume-pipeline 可从当前阶段恢复。",
+                        stage.name, e
+                    )));
                 }
             }
         }
@@ -659,12 +780,23 @@ impl Agent {
         // 完成：100% 进度
         let _ = crate::ui::render_progress_bar(total, total, "全部完成", &pipeline_start, "🎉 流水线执行完成！");
 
+        // 清理检查点（pipeline 已成功完成）
+        let _ = pipeline_store.clear();
+
         self.add_display_message(
             crate::utils::message_level::MessageLevel::Success,
             "🎉 流水线执行完成！所有阶段已成功完成。",
         );
 
         Ok(())
+    }
+
+    /// 获取工作目录的引用。
+    /// 这是一个辅助方法，用于 pipeline 上下文中需要工作目录的场景。
+    fn working_dir(&self) -> std::path::PathBuf {
+        // 从 ToolRegistry 中获取 working_dir
+        // 实际路径由 Agent 创建时传入的 tools 持有
+        std::env::current_dir().unwrap_or_default()
     }
 
     /// 获取历史消息列表（用于 UI 展示等）
@@ -947,6 +1079,31 @@ impl Agent {
     /// 当前活跃模型名称
     pub fn active_model(&self) -> &str {
         self.llm.active_model()
+    }
+}
+
+/// 检测工作目录下被修改的文件列表（通过 git diff）。
+/// 用于 pipeline 各阶段自动记录修改的文件。
+fn detect_modified_files(working_dir: &std::path::Path) -> Result<Vec<String>, AppError> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "--name-only"])
+        .current_dir(working_dir)
+        .output()
+        .map_err(|e| {
+            AppError::Io(std::io::Error::new(e.kind(), format!("git diff 失败: {}", e)))
+        })?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let files: Vec<String> = stdout
+            .lines()
+            .map(|l| l.to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        Ok(files)
+    } else {
+        // git diff 失败时返回空列表（非关键错误）
+        Ok(Vec::new())
     }
 }
 

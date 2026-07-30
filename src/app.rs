@@ -354,7 +354,7 @@ impl App {
                         content: format!("🚀 启动流水线: {}", task),
                     };
                     ui::render_block(&block, &markdown_renderer)?;
-                    match self.agent.run_pipeline(&task, verbose).await {
+                    match self.agent.run_pipeline(&task, verbose, false).await {
                         Ok(()) => {}
                         Err(e) => {
                             let block = ui::MessageBlock::Error {

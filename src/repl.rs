@@ -430,7 +430,7 @@ pub async fn handle_pipeline_command(
         &format!("🚀 启动流水线: {}", task),
     );
 
-    agent.run_pipeline(task, verbose).await?;
+    agent.run_pipeline(task, verbose, false).await?;
 
     Ok(ReplAction::Continue)
 }

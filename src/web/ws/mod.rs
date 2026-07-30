@@ -7,14 +7,12 @@ pub mod events;
 pub mod session;
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 
 use self::events::ServerEvent;
-use self::session::WebSession;
 
 /// 连接 ID 生成器
 static NEXT_CONN_ID: AtomicUsize = AtomicUsize::new(1);
@@ -25,7 +23,9 @@ pub type ConnectionId = usize;
 /// 单个 WebSocket 连接的句柄。
 /// 持有发送端，用于向该连接推送事件。
 pub struct ConnectionHandle {
+    #[allow(dead_code)]
     pub id: ConnectionId,
+    #[allow(dead_code)]
     pub session_id: String,
     sender: mpsc::UnboundedSender<ServerEvent>,
 }
@@ -37,6 +37,7 @@ impl ConnectionHandle {
     }
 
     /// 获取连接的唯一标识
+    #[allow(dead_code)]
     pub fn id(&self) -> ConnectionId {
         self.id
     }
@@ -111,6 +112,7 @@ impl ConnectionManager {
     }
 
     /// 广播事件到所有活跃连接。
+    #[allow(dead_code)]
     pub async fn broadcast(&self, event: ServerEvent) {
         let connections = self.connections.read().await;
         for handle in connections.values() {
@@ -121,11 +123,13 @@ impl ConnectionManager {
     }
 
     /// 获取当前活跃连接数。
+    #[allow(dead_code)]
     pub async fn active_count(&self) -> usize {
         self.connections.read().await.len()
     }
 
     /// 获取所有活跃连接的会话 ID 列表。
+    #[allow(dead_code)]
     pub async fn active_sessions(&self) -> Vec<String> {
         self.connections
             .read()

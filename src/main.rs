@@ -20,6 +20,7 @@ mod persist;
 mod prompt;
 mod repl;
 mod restart;
+mod scheduler;
 mod security;
 mod session;
 mod skills;

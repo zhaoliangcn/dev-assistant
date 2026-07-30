@@ -51,15 +51,15 @@ fn classify_info_message(msg: &str) -> ui::MessageBlock {
         }
     } else if msg.starts_with("❌") || msg.starts_with("🔥") {
         ui::MessageBlock::Error { content: msg.to_string() }
-    } else if msg.starts_with("⚠️") {
-        ui::MessageBlock::System { content: msg.to_string() }
-    } else if msg.starts_with("ℹ️") || msg.starts_with("📝") {
+    } else if msg.starts_with("⚠️") || msg.starts_with("ℹ️") || msg.starts_with("📝") {
         ui::MessageBlock::System { content: msg.to_string() }
     } else {
         // 兜底：无 emoji 时再尝试文本匹配
-        if msg.contains("思考") || msg.contains("thinking") || msg.contains("分析") {
+        let is_thinking = msg.contains("思考") || msg.contains("thinking") || msg.contains("分析");
+        let is_tool = msg.contains("工具") || msg.contains("执行");
+        if is_thinking {
             ui::MessageBlock::Thinking { content: msg.to_string() }
-        } else if msg.contains("工具") || msg.contains("执行") {
+        } else if is_tool {
             ui::MessageBlock::System { content: msg.to_string() }
         } else {
             ui::MessageBlock::System { content: format!("ℹ️ {}", msg) }
@@ -303,7 +303,7 @@ pub async fn process_user_message(
         // 检测上一轮操作，生成上下文状态提示
         let status = derive_thinking_status(output.last_message());
         step_round += 1;
-        let spinner = if step_round % 2 == 0 { "⏳" } else { "⌛" };
+        let spinner = if step_round.is_multiple_of(2) { "⏳" } else { "⌛" };
         session_log.log_thinking();
         ui::render_input_panel(Some(&format!("{} {}", spinner, status)))?;
 

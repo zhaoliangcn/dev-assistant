@@ -227,3 +227,114 @@ impl LlmClient {
         .expect("Failed to create LlmClient from legacy config")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_client() -> LlmClient {
+        LlmClient::from_configs(vec![
+            ProviderConfig {
+                name: "model-a".to_string(),
+                provider: "openai".to_string(),
+                api_url: "http://localhost:9999/v1".to_string(),
+                api_key: Some("test-key".to_string()),
+                model: "gpt-4o".to_string(),
+                temperature: Some(0.0),
+                max_tokens: Some(100),
+            },
+            ProviderConfig {
+                name: "model-b".to_string(),
+                provider: "anthropic".to_string(),
+                api_url: "http://localhost:9998/v1".to_string(),
+                api_key: Some("test-key-2".to_string()),
+                model: "claude-3".to_string(),
+                temperature: Some(0.5),
+                max_tokens: Some(200),
+            },
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn test_from_configs_empty_returns_error() {
+        let result = LlmClient::from_configs(vec![]);
+        assert!(result.is_err());
+        match result {
+            Err(AppError::Config(msg)) => assert!(msg.contains("No model providers")),
+            _ => panic!("Expected Config error"),
+        }
+    }
+
+    #[test]
+    fn test_list_models_returns_all_names() {
+        let client = test_client();
+        let models = client.list_models();
+        assert_eq!(models.len(), 2);
+        assert!(models.contains(&"model-a"));
+        assert!(models.contains(&"model-b"));
+    }
+
+    #[test]
+    fn test_active_model_defaults_to_first() {
+        let client = test_client();
+        assert_eq!(client.active_model(), "model-a");
+    }
+
+    #[test]
+    fn test_switch_model_changes_active() {
+        let client = test_client();
+        assert!(client.switch_model("model-b").is_ok());
+        assert_eq!(client.active_model(), "model-b");
+    }
+
+    #[test]
+    fn test_switch_model_unknown_returns_error() {
+        let client = test_client();
+        let result = client.switch_model("nonexistent");
+        assert!(result.is_err());
+        match result {
+            Err(AppError::Config(msg)) => assert!(msg.contains("Unknown model")),
+            _ => panic!("Expected Config error"),
+        }
+    }
+
+    #[test]
+    fn test_switch_model_round_trip() {
+        let client = test_client();
+        client.switch_model("model-b").unwrap();
+        assert_eq!(client.active_model(), "model-b");
+        client.switch_model("model-a").unwrap();
+        assert_eq!(client.active_model(), "model-a");
+    }
+
+    #[test]
+    fn test_call_returns_error_when_no_providers() {
+        let client = LlmClient::from_configs(vec![ProviderConfig {
+            name: "test".to_string(),
+            provider: "openai".to_string(),
+            api_url: "http://localhost:1/v1".to_string(),
+            api_key: Some("test-key".to_string()),
+            model: "test-model".to_string(),
+            temperature: Some(0.0),
+            max_tokens: Some(100),
+        }])
+        .unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = runtime.block_on(client.call(
+            vec![LlmMessage {
+                role: "user".to_string(),
+                content: Some("hello".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            vec![],
+        ));
+        // 连接被拒绝，应该是某种错误
+        assert!(result.is_err());
+    }
+}

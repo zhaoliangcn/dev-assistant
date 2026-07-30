@@ -63,7 +63,7 @@ impl AppError {
                     || msg.contains("status 5")
             }
             AppError::Http(e) => {
-                e.status().map_or(false, |s| s.as_u16() >= 500)
+                e.status().is_some_and(|s| s.as_u16() >= 500)
             }
             _ => false,
         }

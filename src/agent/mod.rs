@@ -253,10 +253,10 @@ impl Agent {
                     store.record_assistant_message(&content);
                 }
 
-                // Only return early if LLM has given a substantive response (not for sub-agents).
-                // Sub-agents use `finish` tool to signal completion, and `max_iterations` already
-                // provides a global upper bound, so the no-tool-rounds optimization is unnecessary
-                // and can cause premature termination of sub-agent tasks.
+                // 主 Agent 连续 2 轮纯文本回应即视为任务完成（交互式 REPL 场景）。
+                // 子 Agent（depth > 0）不受此影响：必须显式调用 `finish` 工具终止，
+                // 否则会撞上 max_iterations 上限——这是设计意图，确保子 Agent 产出
+                // 明确的阶段交付物（finish 的 summary 参数），而非中途的纯文本解释。
                 if self.depth == 0 && self.context.get_consecutive_no_tool_rounds() >= 2 {
                     return Ok(AgentStep::Done(AgentResult {
                         success: true,
@@ -359,10 +359,19 @@ impl Agent {
             }
         }
 
-        output.warning("达到最大迭代次数，任务可能未完成");
+        let hint = if self.depth > 0 {
+            "（子代理未调用 `finish` 工具，必须显式调用 `finish` 才能正常终止阶段）"
+        } else {
+            ""
+        };
+        let message = format!(
+            "已达到最大迭代次数 ({})，任务可能未完成{}",
+            self.max_iterations, hint
+        );
+        output.warning(&message);
         Ok(AgentResult {
             success: false,
-            message: "Maximum iterations reached. Task may not be complete.".to_string(),
+            message,
             restart_requested: false,
         })
     }
@@ -430,6 +439,20 @@ impl Agent {
         task: &str,
         verbose: bool,
     ) -> Result<(), AppError> {
+        // 从 .env 读取 MAX_ITERATIONS（默认 120），按阶段复杂度比例分配。
+        // 权重比例 设计:编码:审查:修复:记录 = 2:4:2:3:1（共 12 份）
+        let env_max_iter: usize = std::env::var("MAX_ITERATIONS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(120);
+        // 阶段权重（与下方 stages 一一对应）
+        const STAGE_WEIGHTS: [usize; 5] = [2, 4, 2, 3, 1];
+        const TOTAL_WEIGHT: usize = 12;
+        let alloc = |w: usize| -> usize {
+            // 至少 5 轮，避免过小导致任务无法完成
+            ((env_max_iter * w).div_ceil(TOTAL_WEIGHT)).max(5)
+        };
+
         let stages = vec![
             PipelineStage {
                 name: "🏗 架构设计".to_string(),
@@ -443,10 +466,14 @@ impl Agent {
                      2. 接口定义（输入/输出）\n\
                      3. 数据流设计\n\
                      4. 关键设计决策和理由\n\n\
-                     请使用 kb_store 记录架构决策。",
+                     请使用 kb_store 记录架构决策。\n\n\
+                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
+                     并将架构设计摘要作为 `summary` 参数传入，例如：\n\
+                     finish(summary=\"架构设计完成：模块划分、接口定义、数据流、决策理由\")。\n\
+                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
                     task
                 ),
-                max_iterations: 10,
+                max_iterations: alloc(STAGE_WEIGHTS[0]),
             },
             PipelineStage {
                 name: "💻 代码实现".to_string(),
@@ -461,10 +488,14 @@ impl Agent {
                      1. 完整的代码实现\n\
                      2. 单元测试\n\
                      3. 确保代码编译通过\n\n\
-                     注意：严格遵循架构设计，不擅自修改接口定义。",
+                     注意：严格遵循架构设计，不擅自修改接口定义。\n\n\
+                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
+                     并将代码实现摘要作为 `summary` 参数传入，例如：\n\
+                     finish(summary=\"代码实现完成：新增文件、关键接口、测试覆盖\")。\n\
+                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
                     task
                 ),
-                max_iterations: 20,
+                max_iterations: alloc(STAGE_WEIGHTS[1]),
             },
             PipelineStage {
                 name: "🔍 代码审查".to_string(),
@@ -481,10 +512,14 @@ impl Agent {
                      3. 性能问题\n\
                      4. 是否符合架构设计规范\n\
                      5. 错误处理是否完善\n\n\
-                     请输出问题清单（含严重程度）和改进建议。",
+                     请输出问题清单（含严重程度）和改进建议。\n\n\
+                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
+                     并将审查报告摘要作为 `summary` 参数传入，例如：\n\
+                     finish(summary=\"审查完成：发现 N 个问题，其中严重 X 个，建议 Y 项\")。\n\
+                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
                     task
                 ),
-                max_iterations: 10,
+                max_iterations: alloc(STAGE_WEIGHTS[2]),
             },
             PipelineStage {
                 name: "🔧 问题修复".to_string(),
@@ -499,10 +534,14 @@ impl Agent {
                      1. 修复所有发现的问题\n\
                      2. 确保代码编译通过\n\
                      3. 验证修复效果\n\n\
-                     注意：只修复审查中提出的问题，不要引入新的功能变更。",
+                     注意：只修复审查中提出的问题，不要引入新的功能变更。\n\n\
+                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
+                     并将修复摘要作为 `summary` 参数传入，例如：\n\
+                     finish(summary=\"修复完成：处理 N 个问题，编译通过\")。\n\
+                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
                     task
                 ),
-                max_iterations: 15,
+                max_iterations: alloc(STAGE_WEIGHTS[3]),
             },
             PipelineStage {
                 name: "📋 进度记录".to_string(),
@@ -518,10 +557,14 @@ impl Agent {
                      2. 修改的文件清单\n\
                      3. 测试结果概要\n\
                      4. 未解决的问题（如果有）\n\n\
-                     然后使用 git add 和 git commit 提交代码变更。",
+                     然后使用 git add 和 git commit 提交代码变更。\n\n\
+                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
+                     并将记录摘要作为 `summary` 参数传入，例如：\n\
+                     finish(summary=\"进度已记录：功能列表、文件清单、测试结果\")。\n\
+                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
                     task
                 ),
-                max_iterations: 5,
+                max_iterations: alloc(STAGE_WEIGHTS[4]),
             },
         ];
 

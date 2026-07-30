@@ -19,6 +19,7 @@ pub struct WebSession {
     /// 独立的 Agent 实例
     pub agent: Agent,
     /// 创建时间
+    #[allow(dead_code)]
     pub created_at: chrono::DateTime<Utc>,
     /// 已处理的消息数
     pub message_count: usize,
@@ -57,6 +58,7 @@ impl WebSession {
     }
 
     /// 获取会话的简短摘要信息（用于界面显示）。
+    #[allow(dead_code)]
     pub fn summary(&self) -> String {
         format!(
             "会话 {} | 创建于 {} | {} 条消息",

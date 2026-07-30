@@ -114,10 +114,8 @@ impl MarkdownRenderer {
                                 if in_table_head {
                                     table_header = current_row.clone();
                                     in_table_head = false;
-                                } else {
-                                    if !current_row.is_empty() {
-                                        table_rows.push(current_row.clone());
-                                    }
+                                } else if !current_row.is_empty() {
+                                    table_rows.push(current_row.clone());
                                 }
                                 current_row.clear();
                             }
@@ -203,18 +201,18 @@ impl MarkdownRenderer {
         }
 
         // ── 顶边框 ──
-        output.push_str("┌");
+        output.push('┌');
         for (i, w) in col_widths.iter().enumerate() {
             output.push_str(&"─".repeat(*w + 2));
             if i < col_widths.len() - 1 {
-                output.push_str("┬");
+                output.push('┬');
             }
         }
         output.push_str("┐\n");
 
         // ── 表头 ──
         if !header.is_empty() {
-            output.push_str("│");
+            output.push('│');
             for (i, cell) in header.iter().enumerate() {
                 let w = col_widths.get(i).copied().unwrap_or(3);
                 let padding = w.saturating_sub(strip_ansi_escapes(cell).len());
@@ -230,11 +228,11 @@ impl MarkdownRenderer {
             output.push('\n');
 
             // ── 表头/数据分隔线 ──
-            output.push_str("├");
+            output.push('├');
             for (i, w) in col_widths.iter().enumerate() {
                 output.push_str(&"─".repeat(*w + 2));
                 if i < col_widths.len() - 1 {
-                    output.push_str("┼");
+                    output.push('┼');
                 }
             }
             output.push_str("┤\n");
@@ -242,7 +240,7 @@ impl MarkdownRenderer {
 
         // ── 数据行 ──
         for row in rows {
-            output.push_str("│");
+            output.push('│');
             for i in 0..num_cols {
                 let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
                 let w = col_widths.get(i).copied().unwrap_or(3);
@@ -254,11 +252,11 @@ impl MarkdownRenderer {
         }
 
         // ── 底边框 ──
-        output.push_str("└");
+        output.push('└');
         for (i, w) in col_widths.iter().enumerate() {
             output.push_str(&"─".repeat(*w + 2));
             if i < col_widths.len() - 1 {
-                output.push_str("┴");
+                output.push('┴');
             }
         }
         output.push_str("┘\n");

@@ -111,7 +111,7 @@ pub fn render_block(
     markdown_renderer: &MarkdownRenderer,
 ) -> io::Result<()> {
     let term_width = get_terminal_width().unwrap_or(80);
-    let output = render_blocks_to_string(&[block.clone()], markdown_renderer, term_width);
+    let output = render_blocks_to_string(std::slice::from_ref(block), markdown_renderer, term_width);
     let mut stdout = io::stdout();
     write!(stdout, "{}", output)?;
     stdout.flush()?;
@@ -147,7 +147,7 @@ pub fn render_progress_bar(
 ) -> io::Result<()> {
     let term_width = get_terminal_width().unwrap_or(80);
     // 进度条宽度
-    let bar_width = (term_width.saturating_sub(20)).min(60).max(10);
+    let bar_width = (term_width.saturating_sub(20)).clamp(10, 60);
     let elapsed = start_time.elapsed();
     let progress = if total > 0 { current as f64 / total as f64 } else { 0.0 };
     let percent = (progress * 100.0) as usize;

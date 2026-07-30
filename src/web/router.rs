@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use axum::{
     Router,
-    middleware,
     routing::{get, post, delete},
 };
 use tower_http::cors::CorsLayer;

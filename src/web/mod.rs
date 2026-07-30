@@ -26,14 +26,12 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::Router;
 use tokio::net::TcpListener;
 use tracing::info;
 
-use crate::agent::{Agent, AgentConfig};
+use crate::agent::AgentConfig;
 use crate::config::{load_agent_config, load_models};
 use crate::llm::LlmClient;
-use crate::persist::SessionStore;
 use crate::prompt::build_system_prompt;
 use crate::security::SecurityPolicy;
 use crate::skills::{default_skills_dir, discover_skills};
@@ -49,8 +47,10 @@ pub struct AppState {
     /// 共享的 LLM 客户端
     pub llm: Arc<LlmClient>,
     /// 共享的工具注册表
+    #[allow(dead_code)]
     pub tools: ToolRegistry,
     /// 共享的异步工具注册表
+    #[allow(dead_code)]
     pub async_tools: Option<AsyncToolRegistry>,
     /// Agent 配置
     pub agent_config: AgentConfig,
@@ -61,6 +61,7 @@ pub struct AppState {
     /// 最大 token 数
     pub max_tokens: usize,
     /// 是否启用详细日志
+    #[allow(dead_code)]
     pub verbose: bool,
     /// minijinja 模板引擎环境
     pub templates: minijinja::Environment<'static>,
@@ -223,11 +224,11 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
 
     let listener = TcpListener::bind(addr)
         .await
-        .map_err(|e| AppError::Io(e))?;
+        .map_err(AppError::Io)?;
 
     axum::serve(listener, app)
         .await
-        .map_err(|e| AppError::Io(e))?;
+        .map_err(AppError::Io)?;
 
     Ok(())
 }

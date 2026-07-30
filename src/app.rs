@@ -328,8 +328,7 @@ impl App {
                     break;
                 }
                 Err(e) => {
-                    return Err(AppError::Io(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(AppError::Io(std::io::Error::other(
                         format!("输入错误: {}", e),
                     )));
                 }
@@ -567,7 +566,7 @@ fn run_grep(working_dir: &std::path::Path, pattern: &str) -> Result<Vec<String>,
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.file_type().is_file()
-                && e.path().extension().map_or(false, |ext| {
+                && e.path().extension().is_some_and(|ext| {
                     matches!(ext.to_str(), Some("rs" | "md" | "toml" | "json" | "yaml" | "yml" | "sh" | "txt"))
                 })
         });

@@ -13,7 +13,7 @@ use axum::{
 };
 use futures::stream::StreamExt;
 use futures::SinkExt;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use crate::persist::SessionStore;
@@ -227,7 +227,6 @@ impl WebMessageOutput {
 
 impl MessageOutput for WebMessageOutput {
     fn emit(&mut self, level: crate::utils::message_level::MessageLevel, msg: &str) {
-        use tracing::debug;
         let event = match level {
             crate::utils::message_level::MessageLevel::Info => {
                 if msg.starts_with("💭") || msg.contains("思考") || msg.contains("分析") {

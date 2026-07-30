@@ -125,46 +125,52 @@ pub struct SecurityPolicy {
 
 impl SecurityPolicy {
     pub fn new(working_dir: &Path, approval_required: bool) -> Self {
+        fn compile_regex(pattern: &str, desc: &str) -> Regex {
+            Regex::new(pattern).unwrap_or_else(|e| {
+                panic!("Failed to compile security regex '{}': {}", desc, e)
+            })
+        }
+
         let dangerous_commands = vec![
             (
                 // Matches rm with recursive (-r) or force (-f) flag:
                 //   rm -rf, rm -fr, rm -r -f, rm -r, rm -f, rm --recursive --force
-                Regex::new(r"(?i)\brm\s+-[rf]\w*").expect("invalid regex for rm -rf"),
+                compile_regex(r"(?i)\brm\s+-[rf]\w*", "rm -rf regex"),
                 DangerLevel::Critical,
                 "rm with -r/-f flags is not allowed".to_string(),
             ),
             (
-                Regex::new(r"(?i)\bsudo\b").expect("invalid regex for sudo"),
+                compile_regex(r"(?i)\bsudo\b", "sudo regex"),
                 DangerLevel::High,
                 "sudo requires approval".to_string(),
             ),
             (
-                Regex::new(r"(?i)\bchmod\b").expect("invalid regex for chmod"),
+                compile_regex(r"(?i)\bchmod\b", "chmod regex"),
                 DangerLevel::High,
                 "chmod requires approval".to_string(),
             ),
             (
-                Regex::new(r"(?i)\bchown\b").expect("invalid regex for chown"),
+                compile_regex(r"(?i)\bchown\b", "chown regex"),
                 DangerLevel::High,
                 "chown requires approval".to_string(),
             ),
             (
-                Regex::new(r"(?i)\bshutdown\b").expect("invalid regex for shutdown"),
+                compile_regex(r"(?i)\bshutdown\b", "shutdown regex"),
                 DangerLevel::Critical,
                 "shutdown is not allowed".to_string(),
             ),
             (
-                Regex::new(r"(?i)\breboot\b").expect("invalid regex for reboot"),
+                compile_regex(r"(?i)\breboot\b", "reboot regex"),
                 DangerLevel::Critical,
                 "reboot is not allowed".to_string(),
             ),
             (
-                Regex::new(r"(?i)\bcurl\b").expect("invalid regex for curl"),
+                compile_regex(r"(?i)\bcurl\b", "curl regex"),
                 DangerLevel::Medium,
                 "curl requires approval".to_string(),
             ),
             (
-                Regex::new(r"(?i)\bwget\b").expect("invalid regex for wget"),
+                compile_regex(r"(?i)\bwget\b", "wget regex"),
                 DangerLevel::Medium,
                 "wget requires approval".to_string(),
             ),
@@ -204,7 +210,7 @@ impl SecurityPolicy {
                     // Fallback: normalized path prefix check
                     // This handles cases where canonicalize() fails (e.g., file doesn't
                     // exist yet, or parent directory can't be canonicalized).
-                    // IMPORTANT: Also check for symlinks to prevent path traversal attacks.
+                    // IMPORTANT: Must check for symlinks to prevent path traversal attacks.
                     if is_child_of(&normalized, allowed) && !contains_symlink(&normalized, allowed) {
                         return Ok(normalized);
                     }

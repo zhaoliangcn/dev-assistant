@@ -49,7 +49,7 @@ pub struct ToolDefinition {
     pub parameters: Value,
     /// true 表示跳过安全评估直接执行（用于 finish/restart 等元工具）。
     pub skip_security: bool,
-    handler: Box<ToolHandler>,
+    pub(crate) handler: Box<ToolHandler>,
 }
 
 /// 工具调用的参数容器。
@@ -233,6 +233,7 @@ impl ToolRegistry {
             "kb_store", "kb_query",
             "task_status", "pause_task", "resume_task", "cancel_task",
             "analyze_codebase", "record_analysis", "get_analysis_summary", "finish_analysis",
+            "schedule_task", "unschedule_task", "list_scheduled_tasks", "get_scheduled_task_logs",
         ]);
     }
 

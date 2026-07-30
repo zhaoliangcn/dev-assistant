@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::os::unix::fs::OpenOptionsExt;
 
 use chrono::Local;
-use libc;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tracing::{debug, warn};

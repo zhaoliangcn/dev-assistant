@@ -645,6 +645,19 @@ pub async fn process_user_message(
     let mut current_type_blocks: Vec<ui::MessageBlock> = Vec::new();
 
     let result = loop {
+        // 渲染上一轮流式完成后的助手内容（避免与 drain/render_block 重复）
+        if let Some(assistant_content) = output.take_pending_assistant() {
+            flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+            let block = ui::MessageBlock::Assistant {
+                content: assistant_content,
+                is_streaming: false,
+            };
+            let merged_blocks = merge_consecutive_blocks(&[block]);
+            for merged in merged_blocks {
+                ui::render_block(&merged, markdown_renderer)?;
+            }
+        }
+
         // Drain buffered messages and render blocks
         for (level, msg) in output.drain() {
             let label = level.label();
@@ -855,13 +868,24 @@ pub async fn process_user_message(
     );
     session_log.log_assistant(&result.message);
 
-    // 渲染最终结果到终端（AgentStep::Done 的消息未经过 streaming_assistant，
-    // 需要显式渲染为用户可见的助手消息块）
-    let result_block = ui::MessageBlock::Assistant {
-        content: result.message.clone(),
-        is_streaming: false,
-    };
-    ui::render_block(&result_block, markdown_renderer)?;
+    // 渲染上一轮流式完成后的助手内容（未在循环中消费时，如 Done 后直接跳出）
+    let last_assistant = output.take_pending_assistant();
+    if let Some(ref content) = last_assistant {
+        let block = ui::MessageBlock::Assistant {
+            content: content.clone(),
+            is_streaming: false,
+        };
+        ui::render_block(&block, markdown_renderer)?;
+    }
+
+    // 渲染最终结果：仅当与已渲染的助手内容不同时才渲染，避免重复
+    if result.message != last_assistant.unwrap_or_default() && !result.message.is_empty() {
+        let result_block = ui::MessageBlock::Assistant {
+            content: result.message.clone(),
+            is_streaming: false,
+        };
+        ui::render_block(&result_block, markdown_renderer)?;
+    }
 
     // 持久化：记录最终助手消息（如果 step 循环中尚未记录）
     agent.record_assistant_message_to_store(&result.message);

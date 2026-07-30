@@ -14,6 +14,8 @@ pub struct UIMessageOutput {
     buffer: Vec<(MessageLevel, String)>,
     /// 上一次流式渲染的助手内容，用于跳过重复渲染
     last_streamed_content: String,
+    /// 流式完成后的待渲染助手内容，由主循环统一渲染避免重复
+    pending_assistant_content: Option<String>,
 }
 
 impl UIMessageOutput {
@@ -22,12 +24,18 @@ impl UIMessageOutput {
             verbose,
             buffer: Vec::new(),
             last_streamed_content: String::new(),
+            pending_assistant_content: None,
         }
     }
 
     /// 取出所有暂存的消息并清空缓冲区。
     pub fn drain(&mut self) -> Vec<(MessageLevel, String)> {
         std::mem::take(&mut self.buffer)
+    }
+
+    /// 取出流式完成后累积的助手内容（消费式）。
+    pub fn take_pending_assistant(&mut self) -> Option<String> {
+        self.pending_assistant_content.take()
     }
 
     /// 获取最后一条消息的内容（不消费缓冲区）。
@@ -77,7 +85,11 @@ impl MessageOutput for UIMessageOutput {
             for _ in 0..total_lines {
                 let _ = write!(stdout, "\r\x1b[2K\x1b[A");
             }
-            let _ = writeln!(stdout, "\r\x1b[2K{}{}", prefix, content);
+            // 清除最后一行（流式内容所在行）
+            let _ = write!(stdout, "\r\x1b[2K");
+            // 存入待渲染缓冲区，由主循环统一以 Assistant 块渲染，
+            // 避免与后续的 drain/render_block 重复
+            self.pending_assistant_content = Some(content.to_string());
             self.last_streamed_content.clear();
         } else {
             // 内容未变时跳过重复渲染，避免内容包含换行时产生多行残留

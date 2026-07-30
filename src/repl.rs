@@ -855,6 +855,14 @@ pub async fn process_user_message(
     );
     session_log.log_assistant(&result.message);
 
+    // 渲染最终结果到终端（AgentStep::Done 的消息未经过 streaming_assistant，
+    // 需要显式渲染为用户可见的助手消息块）
+    let result_block = ui::MessageBlock::Assistant {
+        content: result.message.clone(),
+        is_streaming: false,
+    };
+    ui::render_block(&result_block, markdown_renderer)?;
+
     // 持久化：记录最终助手消息（如果 step 循环中尚未记录）
     agent.record_assistant_message_to_store(&result.message);
 

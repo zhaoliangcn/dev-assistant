@@ -71,7 +71,7 @@ impl MessageOutput for UIMessageOutput {
             let prefix = "🤖 助手: ";
             // 计算总行数：自动换行行数 + 内容中的显式换行数
             let visual_len = prefix.width() + content.width();
-            let wrap_lines = visual_len / term_width;
+            let wrap_lines = visual_len.saturating_sub(1) / term_width;
             let explicit_lines = content.matches('\n').count();
             let total_lines = wrap_lines + explicit_lines;
             for _ in 0..total_lines {

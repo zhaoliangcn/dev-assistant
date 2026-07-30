@@ -10,6 +10,7 @@ pub use context::ContextManager;
 pub use identity::{AgentIdentity, PipelineStage};
 pub use pipeline_context::{PipelineContext, PipelineContextStore, StageStatus};
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -82,6 +83,8 @@ pub struct Agent {
     skills: Vec<Skill>,
     /// 可选的会话持久化存储。存在时，所有对话事件和工具调用都会被记录。
     session_store: Option<SessionStore>,
+    /// 工作目录，从 ToolRegistry 获取并存储，避免依赖 std::env::current_dir()
+    working_dir: PathBuf,
 }
 
 impl Agent {
@@ -94,6 +97,7 @@ impl Agent {
         skills: Vec<Skill>,
         session_store: Option<SessionStore>,
     ) -> Self {
+        let wd = tools.working_dir().clone();
         Self {
             context,
             tools,
@@ -103,6 +107,7 @@ impl Agent {
             depth: 0,
             skills,
             session_store,
+            working_dir: wd,
         }
     }
 
@@ -443,6 +448,7 @@ impl Agent {
             None,
         );
 
+        let wd = config.tools.working_dir().clone();
         Ok(Self {
             context: ctx,
             tools: config.tools,
@@ -452,6 +458,7 @@ impl Agent {
             depth: config.depth,
             skills: Vec::new(),
             session_store: None,
+            working_dir: wd,
         })
     }
 
@@ -821,11 +828,9 @@ impl Agent {
     }
 
     /// 获取工作目录的引用。
-    /// 这是一个辅助方法，用于 pipeline 上下文中需要工作目录的场景。
+    /// 直接从 Agent 存储的字段中返回，避免依赖 `std::env::current_dir()`。
     fn working_dir(&self) -> std::path::PathBuf {
-        // 从 ToolRegistry 中获取 working_dir
-        // 实际路径由 Agent 创建时传入的 tools 持有
-        std::env::current_dir().unwrap_or_default()
+        self.working_dir.clone()
     }
 
     /// 获取历史消息列表（用于 UI 展示等）

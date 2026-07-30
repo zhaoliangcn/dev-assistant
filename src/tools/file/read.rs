@@ -2,7 +2,7 @@
 
 use super::io::read_file_content;
 use super::read_shared::{DEFAULT_READ_LIMIT, generate_code_summary, generate_read_info, resolve_glob_patterns};
-use crate::tools::{common, ToolArgs, ToolContext, ToolDefinition, ToolKind, ToolMetadata, ToolNamespace, ToolResult};
+use crate::tools::{common, ToolArgs, ToolContext, ToolDefinition, ToolResult};
 use crate::utils::error::AppError;
 
 pub fn read_file_tool() -> ToolDefinition {
@@ -258,40 +258,4 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
     })
 }
 
-// ToolMetadata 实现
 
-#[allow(dead_code)] // reserved for future tool metadata introspection
-pub struct ReadFileToolMetadata;
-
-#[allow(dead_code)]
-impl ToolMetadata for ReadFileToolMetadata {
-    fn kind(&self) -> ToolKind {
-        ToolKind::Read
-    }
-
-    fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::DevAssistant
-    }
-
-    fn description_template(&self) -> &str {
-        "Read a file from the filesystem. Supports offset/limit for reading large files in chunks."
-    }
-}
-
-#[allow(dead_code)] // reserved for future tool metadata introspection
-pub struct BatchReadFilesToolMetadata;
-
-#[allow(dead_code)]
-impl ToolMetadata for BatchReadFilesToolMetadata {
-    fn kind(&self) -> ToolKind {
-        ToolKind::Read
-    }
-
-    fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::DevAssistant
-    }
-
-    fn description_template(&self) -> &str {
-        "Read multiple files at once. Efficient for code review tasks."
-    }
-}

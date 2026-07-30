@@ -181,32 +181,28 @@ impl ReadCache {
 
         let path_buf = path.to_path_buf();
         
-        // 第一次获取锁：检查缓存是否存在且未过期
-        let cache_result = {
-            let mut cache = self.cache.write().unwrap();
-            if let Some(entry) = cache.get_mut(&path_buf) {
-                // 检查 TTL
+        // Step 1: 获取读锁检查缓存是否存在且未过期（不持有锁时做 IO）
+        let cache_check = {
+            let cache = self.cache.read().unwrap();
+            cache.get(&path_buf).map(|entry| {
                 let now = now_timestamp();
-                if (now - entry.accessed_at) > self.config.ttl_seconds {
-                    debug!(path = ?path, "Cache entry expired (TTL)");
-                    cache.remove(&path_buf);
-                    *self.misses.write().unwrap() += 1;
-                    return None;
-                }
-
-                // 获取当前缓存内容和 mtime，暂不做命中统计
-                let content = entry.content.clone();
-                let cached_mtime = entry.mtime;
-                
-                Some((content, cached_mtime))
-            } else {
-                *self.misses.write().unwrap() += 1;
-                None
-            }
+                let expired = (now - entry.accessed_at) > self.config.ttl_seconds;
+                (entry.content.clone(), entry.mtime, expired)
+            })
         };
 
-        // 如果缓存命中，检查文件是否被修改（异步）
-        if let Some((content, cached_mtime)) = cache_result {
+        // Step 2: 如果缓存存在，读锁已释放，进行 IO 检查 mtime
+        if let Some((content, cached_mtime, expired)) = cache_check {
+            if expired {
+                // TTL 过期，移除缓存
+                let mut cache = self.cache.write().unwrap();
+                cache.remove(&path_buf);
+                *self.misses.write().unwrap() += 1;
+                debug!(path = ?path, "Cache entry expired (TTL)");
+                return None;
+            }
+
+            // 检查文件是否被修改（IO 操作，不持有锁）
             match tokio::fs::metadata(path).await {
                 Ok(metadata) => {
                     let current_mtime = metadata
@@ -217,21 +213,25 @@ impl ReadCache {
                         .unwrap_or(0);
 
                     if current_mtime > cached_mtime {
+                        // 文件已修改，移除缓存
+                        let mut cache = self.cache.write().unwrap();
+                        cache.remove(&path_buf);
+                        *self.misses.write().unwrap() += 1;
                         debug!(path = ?path, "Cache entry invalidated (file modified)");
-                        self.invalidate(path);
                         return None;
                     }
                 }
                 Err(_) => {
                     // 文件不存在或无法访问，移除缓存
+                    let mut cache = self.cache.write().unwrap();
+                    cache.remove(&path_buf);
+                    *self.misses.write().unwrap() += 1;
                     debug!(path = ?path, "Cache entry invalidated (file unavailable)");
-                    self.invalidate(path);
                     return None;
                 }
             }
 
-            // 确认是真正命中后再更新访问时间和命中计数，
-            // 避免文件已修改时被错误计为命中。
+            // Step 3: IO 确认未修改，获取写锁更新访问时间
             if let Ok(mut cache) = self.cache.write() {
                 if let Some(entry) = cache.get_mut(&path_buf) {
                     entry.touch();
@@ -242,6 +242,7 @@ impl ReadCache {
             return Some(content);
         }
 
+        *self.misses.write().unwrap() += 1;
         None
     }
 

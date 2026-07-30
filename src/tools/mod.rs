@@ -39,7 +39,6 @@ pub struct ToolRegistry {
     pub approval_manager: Arc<ApprovalManager>,
     pub retry_manager: retry::RetryManager,
     pub resources: Option<crate::tools::resources::SharedResources>,
-    #[allow(dead_code)] // reserved for future schema token budget tracking
     schema_tokens: AtomicUsize,
 }
 
@@ -74,7 +73,6 @@ pub struct ToolContext {
 
 /// 错误类别，用于区分可重试和不可重试的错误
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[allow(dead_code)] // reserved for future retry logic
 pub enum ErrorCategory {
     /// 临时性错误（I/O 错误、网络超时等），可重试
     #[default]
@@ -92,13 +90,12 @@ pub struct ToolResult {
     pub restart_requested: bool,
     /// 错误类别，仅在 `success = false` 时有意义。
     /// `None` 表示未分类错误（向后兼容）。
-    #[allow(dead_code)] // reserved for future retry logic
+    #[allow(dead_code)] // used by retry logic in execute_tool
     pub error_category: Option<ErrorCategory>,
 }
 
 impl ToolResult {
     /// 创建成功结果
-    #[allow(dead_code)] // reserved for future use
     pub fn success(content: String) -> Self {
         Self {
             success: true,
@@ -118,76 +115,6 @@ impl ToolResult {
             restart_requested: false,
             error_category: Some(category),
         }
-    }
-
-    /// 创建失败结果（不带错误类别，向后兼容）
-    #[allow(dead_code)] // reserved for future use
-    pub fn failure_unclassified(content: String) -> Self {
-        Self {
-            success: false,
-            content,
-            security_evaluation: None,
-            restart_requested: false,
-            error_category: None,
-        }
-    }
-}
-
-/// 工具命名空间
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[allow(dead_code)] // reserved for future MCP/tool namespace differentiation
-pub enum ToolNamespace {
-    DevAssistant,
-    Mcp,
-}
-
-/// 工具类型分类
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[allow(dead_code)] // reserved for future tool permission system
-pub enum ToolKind {
-    Read,
-    Edit,
-    Delete,
-    ListDir,
-    Write,
-    Move,
-    Search,
-    Lsp,
-    Execute,
-    Plan,
-    WebSearch,
-    WebFetch,
-    KnowledgeBase,
-    #[serde(other)]
-    Other,
-}
-
-#[allow(dead_code)] // reserved for future tool permission system
-impl ToolKind {
-    pub fn is_read_only(&self) -> bool {
-        matches!(self, ToolKind::Read | ToolKind::Search | ToolKind::ListDir | ToolKind::WebSearch | ToolKind::WebFetch | ToolKind::KnowledgeBase)
-    }
-
-    pub fn requires_approval(&self) -> bool {
-        !self.is_read_only()
-    }
-}
-
-/// 工具元数据 trait
-#[allow(dead_code)] // reserved for future tool metadata introspection
-pub trait ToolMetadata: Send + Sync {
-    fn kind(&self) -> ToolKind;
-    fn tool_namespace(&self) -> ToolNamespace;
-    fn description_template(&self) -> &str;
-
-    fn is_read_only(&self) -> bool {
-        self.kind().is_read_only()
-    }
-
-    fn requires_approval(&self) -> bool {
-        self.kind().requires_approval()
     }
 }
 
@@ -332,7 +259,7 @@ impl ToolRegistry {
                     content: format!("🚫 Command blocked (CRITICAL): {}", evaluation.reason),
                     security_evaluation: Some(evaluation),
                     restart_requested: false,
-                error_category: None,
+                    error_category: None,
                 })
             }
             ref level @ (crate::security::DangerLevel::High | crate::security::DangerLevel::Medium) => {
@@ -350,7 +277,7 @@ impl ToolRegistry {
                         ),
                         security_evaluation: Some(evaluation),
                         restart_requested: false,
-                error_category: None,
+                        error_category: None,
                     })
                 } else {
                     debug!(tool = name, level = ?level, "Tool execution approved by permission store");
@@ -369,6 +296,11 @@ impl ToolRegistry {
     pub fn execute_approved(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
         debug!(tool = name, "Executing approved tool (security check bypassed)");
         self.execute_tool(name, arguments)
+    }
+
+    /// 获取工作目录的引用。
+    pub fn working_dir(&self) -> &PathBuf {
+        &self.working_dir
     }
 
     /// 创建子 Agent 的受限工具注册中心。

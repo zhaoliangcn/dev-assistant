@@ -3,7 +3,7 @@
 use tracing::debug;
 
 use super::io::{read_file_content, write_file_content};
-use crate::tools::{ToolArgs, ToolContext, ToolDefinition, ToolKind, ToolMetadata, ToolNamespace, ToolResult};
+use crate::tools::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
 use crate::utils::error::AppError;
 
 pub fn write_file_tool() -> ToolDefinition {
@@ -250,40 +250,4 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
     })
 }
 
-// ToolMetadata 实现
 
-#[allow(dead_code)] // reserved for future tool metadata introspection
-pub struct WriteFileToolMetadata;
-
-#[allow(dead_code)]
-impl ToolMetadata for WriteFileToolMetadata {
-    fn kind(&self) -> ToolKind {
-        ToolKind::Write
-    }
-
-    fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::DevAssistant
-    }
-
-    fn description_template(&self) -> &str {
-        "Write content to a file."
-    }
-}
-
-#[allow(dead_code)] // reserved for future tool metadata introspection
-pub struct EditFileToolMetadata;
-
-#[allow(dead_code)]
-impl ToolMetadata for EditFileToolMetadata {
-    fn kind(&self) -> ToolKind {
-        ToolKind::Write
-    }
-
-    fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::DevAssistant
-    }
-
-    fn description_template(&self) -> &str {
-        "Edit a file by replacing old content with new content."
-    }
-}

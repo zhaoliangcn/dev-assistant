@@ -156,7 +156,7 @@ fn main() -> Result<(), AppError> {
     let config = AppConfig {
         working_dir,
         verbose: cli.verbose,
-        max_iterations: cli.max_iterations.unwrap_or(8),
+        max_iterations: cli.max_iterations.unwrap_or(15),
         max_tokens: cli.max_tokens,
         no_approval: cli.no_approval,
         provider: cli.provider.clone(),

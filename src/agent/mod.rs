@@ -996,7 +996,9 @@ impl Agent {
         let sub_max_iterations = tool_call.function.arguments["max_iterations"]
             .as_u64()
             .map(|n| n as usize)
-            .unwrap_or(15);
+            // 继承父 agent 的 max_iterations，但至少保证 30 轮，
+            // 避免子 agent 在复杂任务中因轮次不足而失败。
+            .unwrap_or_else(|| self.max_iterations.max(30));
         let sub_max_tokens = tool_call.function.arguments["max_tokens"]
             .as_u64()
             .map(|n| n as usize)

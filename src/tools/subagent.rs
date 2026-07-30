@@ -38,8 +38,8 @@ pub fn spawn_subagent_tool() -> ToolDefinition {
                 },
                 "max_iterations": {
                     "type": "integer",
-                    "description": "Maximum iterations for the sub-agent (default: 15). Set lower for simple tasks, higher for complex ones.",
-                    "default": 15
+                    "description": "Maximum iterations for the sub-agent (default: 30). Set lower for simple tasks, higher for complex ones.",
+                    "default": 30
                 },
                 "max_tokens": {
                     "type": "integer",

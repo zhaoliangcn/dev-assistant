@@ -858,15 +858,25 @@ pub async fn process_user_message(
         }
     };
 
-    // Add result to conversation history so it appears at the end
-    // of the message list, not just as a status message at the top.
-    agent.add_message(
-        crate::agent::context::Role::Assistant,
-        result.message.clone(),
-        None,
-        None,
-    );
-    session_log.log_assistant(&result.message);
+    // 判断结果是否来自 finish 工具调用。
+    // finish 工具的结果内容以 "[finish]" 开头，且已在 step() 中作为工具结果
+    // 添加到历史（tool role），并在 drain 阶段作为 ToolResult 块渲染。
+    // 此处不应再重复添加为 assistant 消息或重复渲染。
+    let is_finish_result = result.message.starts_with("[finish]");
+
+    if !is_finish_result {
+        // 非 finish 结果：添加到对话历史中以在末尾显示，
+        // 避免仅作为状态消息出现在顶部。
+        agent.add_message(
+            crate::agent::context::Role::Assistant,
+            result.message.clone(),
+            None,
+            None,
+        );
+        session_log.log_assistant(&result.message);
+    } else {
+        session_log.log_status("完成", &result.message);
+    }
 
     // 渲染上一轮流式完成后的助手内容（未在循环中消费时，如 Done 后直接跳出）
     let last_assistant = output.take_pending_assistant();
@@ -878,8 +888,12 @@ pub async fn process_user_message(
         ui::render_block(&block, markdown_renderer)?;
     }
 
-    // 渲染最终结果：仅当与已渲染的助手内容不同时才渲染，避免重复
-    if result.message != last_assistant.unwrap_or_default() && !result.message.is_empty() {
+    // 渲染最终结果：仅当与已渲染的助手内容不同时才渲染，避免重复。
+    // finish 结果已作为 ToolResult 在 drain 阶段渲染，不再重复渲染。
+    if !is_finish_result
+        && result.message != last_assistant.unwrap_or_default()
+        && !result.message.is_empty()
+    {
         let result_block = ui::MessageBlock::Assistant {
             content: result.message.clone(),
             is_streaming: false,

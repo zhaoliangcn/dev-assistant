@@ -46,6 +46,7 @@ pub struct App {
     #[allow(dead_code)]
     system_prompt: String,
     /// 定时任务调度器。
+    #[allow(dead_code)]
     scheduler: Arc<Scheduler>,
 }
 

@@ -12,11 +12,17 @@ use crate::utils::message_level::MessageLevel;
 pub struct UIMessageOutput {
     verbose: bool,
     buffer: Vec<(MessageLevel, String)>,
+    /// 上一次流式渲染的助手内容，用于跳过重复渲染
+    last_streamed_content: String,
 }
 
 impl UIMessageOutput {
     pub fn new(verbose: bool) -> Self {
-        Self { verbose, buffer: Vec::new() }
+        Self {
+            verbose,
+            buffer: Vec::new(),
+            last_streamed_content: String::new(),
+        }
     }
 
     /// 取出所有暂存的消息并清空缓冲区。
@@ -47,6 +53,38 @@ impl MessageOutput for UIMessageOutput {
         let entry = (level, msg.to_string());
         if self.buffer.last() != Some(&entry) {
             self.buffer.push(entry);
+        }
+    }
+
+    /// 流式输出助手消息，直接渲染到终端。
+    ///
+    /// 每次调用时，使用 ANSI 控制序列覆盖当前行，显示累积的助手内容。
+    /// 完成后（is_final=true），输出完整内容并移除闪烁光标。
+    fn streaming_assistant(&mut self, content: &str, is_final: bool) {
+        use std::io::Write;
+
+        let mut stdout = std::io::stdout();
+        if is_final {
+            // 最终输出：先换行离开流式行，再渲染完整内容
+            let _ = writeln!(stdout);
+            let block = crate::ui::MessageBlock::Assistant {
+                content: content.to_string(),
+                is_streaming: false,
+            };
+            let renderer = crate::ui::MarkdownRenderer::new();
+            let _ = crate::ui::render_block(&block, &renderer);
+            // 重置流式跟踪状态
+            self.last_streamed_content.clear();
+        } else {
+            // 内容未变时跳过重复渲染，避免内容包含换行时产生多行残留
+            if content == self.last_streamed_content {
+                return;
+            }
+            self.last_streamed_content = content.to_string();
+            // 将换行替换为可见表示，防止 \r 无法清除多行残留
+            let display = format!("{} \x1b[5m▊\x1b[0m", content.replace('\n', "\\n"));
+            let _ = write!(stdout, "\r\x1b[2K🤖 助手: {}", display);
+            let _ = stdout.flush();
         }
     }
 }

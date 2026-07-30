@@ -48,11 +48,13 @@ pub enum ScheduledTaskStatus {
 
 impl ScheduledTaskStatus {
     /// 判断状态是否为"活跃"（可调度）
+    #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
         matches!(self, ScheduledTaskStatus::Active)
     }
 
     /// 判断状态是否为"终止态"（不再调度）
+    #[allow(dead_code)]
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
@@ -178,6 +180,7 @@ pub struct ExecutionRecord {
 
 impl ExecutionRecord {
     /// 创建一条新的执行记录。
+    #[allow(dead_code)]
     pub fn new(
         task_id: ScheduledTaskId,
         success: bool,

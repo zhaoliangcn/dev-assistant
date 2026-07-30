@@ -3,6 +3,7 @@
 //! 负责定时任务的调度触发、状态管理和生命周期管理。
 //! 使用时间轮 (TimingWheel) 进行高精度触发，
 //! 使用持久化存储 (ScheduledTaskStore) 管理任务状态。
+#![allow(dead_code)]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

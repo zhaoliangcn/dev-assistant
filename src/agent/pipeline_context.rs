@@ -77,6 +77,7 @@ pub struct PipelineContext {
     pub updated_at: i64,
 }
 
+#[allow(dead_code)]
 impl PipelineContext {
     /// 创建新的 pipeline 上下文
     pub fn new(task: &str, stage_count: usize) -> Self {
@@ -103,11 +104,13 @@ impl PipelineContext {
     }
 
     /// 获取当前阶段
+    #[allow(dead_code)]
     pub fn current_stage(&self) -> Option<&StageContext> {
         self.stages.get(self.current_stage)
     }
 
     /// 获取当前阶段的可变引用
+    #[allow(dead_code)]
     pub fn current_stage_mut(&mut self) -> Option<&mut StageContext> {
         self.stages.get_mut(self.current_stage)
     }
@@ -153,11 +156,13 @@ impl PipelineContext {
 }
 
 /// Pipeline 上下文文件存储
+#[allow(dead_code)]
 pub struct PipelineContextStore {
     /// 存储根目录 (.kb/pipeline/)
     base_dir: PathBuf,
 }
 
+#[allow(dead_code)]
 impl PipelineContextStore {
     /// 初始化存储
     pub fn new(working_dir: &Path) -> Result<Self, AppError> {
@@ -172,6 +177,7 @@ impl PipelineContextStore {
     }
 
     /// 获取存储根目录
+    #[allow(dead_code)]
     pub fn base_dir(&self) -> &Path {
         &self.base_dir
     }
@@ -200,6 +206,7 @@ impl PipelineContextStore {
     }
 
     /// 加载 pipeline 上下文索引
+    #[allow(dead_code)]
     pub fn load_pipeline_context(&self) -> Result<Option<PipelineContext>, AppError> {
         let path = self.base_dir.join("context.json");
         if !path.exists() {

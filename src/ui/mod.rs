@@ -8,6 +8,7 @@ pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};
 
 use std::io::{self, Write};
+use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 // ── 新 API：块级渲染 ──────────────────────────────────────────────────
@@ -43,7 +44,7 @@ pub fn render_blocks_to_string(
     for block in blocks {
         // 分隔线块
         if matches!(block, MessageBlock::Divider) {
-            let _ = writeln!(buf, "{}", "─".repeat(term_width));
+            let _ = writeln!(buf, "{}", "╌".repeat(term_width));
             continue;
         }
 
@@ -64,7 +65,7 @@ pub fn render_blocks_to_string(
 
         // 消息分隔线
         let _ = writeln!(buf);
-        let _ = writeln!(buf, "{}", "─".repeat(term_width));
+        let _ = writeln!(buf, "{}", "╌".repeat(term_width));
 
         // 对 ToolResult 块：折叠长内容，保留完整内容用于 /expand
         let rendering_content = if matches!(block, MessageBlock::ToolResult { .. }) {
@@ -129,6 +130,63 @@ pub fn render_blocks(
     Ok(())
 }
 
+/// 消息类型标签（用于节流判断）
+#[allow(dead_code)]
+fn message_block_type(block: &MessageBlock) -> &'static str {
+    match block {
+        MessageBlock::User { .. } => "user",
+        MessageBlock::Assistant { .. } => "assistant",
+        MessageBlock::Thinking { .. } => "thinking",
+        MessageBlock::ToolCall { .. } => "tool_call",
+        MessageBlock::ToolResult { success, .. } => if *success { "tool_success" } else { "tool_error" },
+        MessageBlock::System { .. } => "system",
+        MessageBlock::Error { .. } => "error",
+        MessageBlock::Diff { .. } => "diff",
+        MessageBlock::Divider => "divider",
+    }
+}
+
+/// 渲染消息块列表（节流模式：合并 50ms 内的相同类型消息）
+#[allow(dead_code)]
+pub fn render_blocks_throttled(
+    blocks: &[MessageBlock],
+    markdown_renderer: &MarkdownRenderer,
+) -> io::Result<()> {
+    let mut last_block_type: Option<(&'static str, Instant)> = None;
+    let mut batch_count: usize = 0;
+
+    for block in blocks {
+        let block_type = message_block_type(block);
+        let now = Instant::now();
+
+        let is_same_type = match &last_block_type {
+            Some((last_type, last_time)) => *last_type == block_type && now.duration_since(*last_time).as_millis() < 50,
+            None => false,
+        };
+
+        if is_same_type {
+            batch_count += 1;
+            // 更新最后时间
+            last_block_type = Some((block_type, now));
+            // 相同类型 50ms 内：跳过渲染（节流）
+            continue;
+        }
+
+        // 不同类型或超过 50ms：渲染上一个块（如果累积了多个，显示计数）
+        if batch_count > 0 {
+            // 如果累积了多个被节流的块，这里理论上可以显示计数
+            // 但实际渲染由上层（repl.rs）决定
+        }
+
+        // 渲染当前块
+        render_block(block, markdown_renderer)?;
+        last_block_type = Some((block_type, now));
+        batch_count = 0;
+    }
+
+    Ok(())
+}
+
 // ── 进度条 ────────────────────────────────────────────────────────────
 
 /// 渲染进度条到标准输出。
@@ -190,8 +248,15 @@ pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
     write!(stdout, "\x1b[1G\x1b[K")?;
     
     match status_line {
-        Some(status) => write!(stdout, "{}", status)?,
-        None => write!(stdout, "> ")?,
+        Some(status) => {
+            // 增强状态栏：解析状态文本，添加更丰富的视觉样式
+            let enhanced = enhance_status(status);
+            write!(stdout, "{}", enhanced)?;
+        }
+        None => {
+            // 使用柔和的前景色显示输入提示
+            write!(stdout, "\x1b[38;2;128;128;128m> \x1b[0m")?;
+        }
     }
     
     // 清除行尾残留内容
@@ -199,6 +264,28 @@ pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
     stdout.flush()?;
     
     Ok(())
+}
+
+/// 增强状态栏文本，根据状态类型添加更丰富的视觉样式。
+fn enhance_status(status: &str) -> String {
+    // 移除可能已有的 spinner 前缀
+    let clean = status
+        .trim_start_matches("⏳ ")
+        .trim_start_matches("⌛ ");
+
+    if clean.contains("工具调用") || clean.contains("执行工具") {
+        format!("🔧 {}", clean)
+    } else if clean.contains("等待 LLM") || clean.contains("LLM 正在思考") {
+        format!("🤖 {}", clean)
+    } else if clean.contains("分析") || clean.contains("检查") {
+        format!("🔍 {}", clean)
+    } else if clean.contains("读取文件") || clean.contains("搜索") {
+        format!("📂 {}", clean)
+    } else if clean.contains("完成") || clean.contains("处理完成") {
+        format!("✅ {}", clean)
+    } else {
+        format!("⏳ {}", clean)
+    }
 }
 
 /// 初始化 UI（显示标题栏）

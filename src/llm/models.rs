@@ -97,6 +97,20 @@ pub enum LlmResponse {
     Error(String),
 }
 
+/// 流式响应事件。
+///
+/// 用于 `LlmProvider::chat_stream()` 和 `LlmClient::call_streaming()` 的流式接口。
+/// 每个事件代表 LLM 响应中的一个增量片段。
+#[derive(Debug, Clone)]
+pub enum LlmStreamEvent {
+    /// 文本增量片段（content 为累计内容，非增量）。
+    Chunk(String),
+    /// 单个工具调用增量（首批 chunk 中就包含完整的 tool_calls 信息）。
+    ToolCallDelta(ToolCall),
+    /// 流结束。
+    Done,
+}
+
 /// 单模型配置（旧接口，保留向后兼容）
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

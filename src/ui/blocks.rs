@@ -130,7 +130,7 @@ impl MessageBlock {
     ///
     /// 对常见工具提取关键字段以简洁显示，减少视觉噪音。
     /// 不识别的工具回退到完整的 JSON pretty-print。
-    fn summarize_tool_args(tool_name: &str, args: &serde_json::Value) -> String {
+    pub fn summarize_tool_args(tool_name: &str, args: &serde_json::Value) -> String {
         let obj = match args.as_object() {
             Some(o) => o,
             None => return serde_json::to_string_pretty(args).unwrap_or_default(),

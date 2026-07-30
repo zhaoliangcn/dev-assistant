@@ -3,6 +3,7 @@
 //! 定义 `ScheduledTaskHandler` trait 及内置实现：
 //! - `AgentTaskHandler`: 通过子代理执行自然语言指令
 //! - `CommandTaskHandler`: 执行 Shell 命令
+#![allow(dead_code)]
 
 use std::path::PathBuf;
 use std::time::Instant;

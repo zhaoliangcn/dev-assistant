@@ -2,6 +2,7 @@
 //!
 //! 使用 JSONL 格式存储任务定义和执行记录。
 //! 启动时全量加载到内存缓存，运行时先更新缓存再异步写文件。
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::fs;
@@ -17,6 +18,7 @@ use crate::utils::error::AppError;
 /// 任务持久化存储。
 pub struct ScheduledTaskStore {
     /// 存储根目录
+    #[allow(dead_code)]
     base_dir: PathBuf,
     /// 任务文件路径
     tasks_path: PathBuf,

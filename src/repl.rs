@@ -34,6 +34,100 @@ fn derive_thinking_status(last_msg: Option<&str>) -> &'static str {
     }
 }
 
+/// 合并连续相同类型的消息块
+///
+/// 例如：连续 15 次 "🔧 ReadFile" 调用合并为一条 "🔧 ReadFile (×15)"
+fn merge_consecutive_blocks(blocks: &[ui::MessageBlock]) -> Vec<ui::MessageBlock> {
+    if blocks.is_empty() {
+        return Vec::new();
+    }
+
+    // 只有一个块时直接返回原块，避免 Debug 格式泄露
+    if blocks.len() == 1 {
+        return blocks.to_vec();
+    }
+
+    let mut result = Vec::new();
+    let mut current_run: Vec<&ui::MessageBlock> = Vec::new();
+
+    for block in blocks {
+        let block_type_key = message_block_type(block);
+
+        if let Some(&first) = current_run.first() {
+            if message_block_type(first) == block_type_key {
+                current_run.push(block);
+                continue;
+            }
+
+            // 不同类型的块：先处理当前批次
+            if current_run.len() > 1 {
+                let prefix = current_run[0].prefix();
+                let content = current_run[0].content();
+                // 使用摘要作为合并后的显示内容
+                let merged_content = if content.is_empty() {
+                    format!("{} (×{})", prefix, current_run.len())
+                } else {
+                    let first_line = content.lines().next().unwrap_or("");
+                    let truncated = if first_line.len() > 80 {
+                        format!("{}...", &first_line[..80])
+                    } else {
+                        first_line.to_string()
+                    };
+                    format!("{} {} (×{})", prefix, truncated, current_run.len())
+                };
+                result.push(ui::MessageBlock::System {
+                    content: merged_content,
+                });
+            } else {
+                result.push((*current_run[0]).clone());
+            }
+            current_run.clear();
+        }
+        current_run.push(block);
+    }
+
+    // 处理最后一个批次
+    if !current_run.is_empty() {
+        if current_run.len() > 1 {
+            let prefix = current_run[0].prefix();
+            let content = current_run[0].content();
+            let merged_content = if content.is_empty() {
+                format!("{} (×{})", prefix, current_run.len())
+            } else {
+                let first_line = content.lines().next().unwrap_or("");
+                let truncated = if first_line.len() > 80 {
+                    format!("{}...", &first_line[..80])
+                } else {
+                    first_line.to_string()
+                };
+                format!("{} {} (×{})", prefix, truncated, current_run.len())
+            };
+            result.push(ui::MessageBlock::System {
+                content: merged_content,
+            });
+        } else {
+            result.push((*current_run[0]).clone());
+        }
+    }
+
+    result
+}
+
+/// 获取消息块的类型标签（用于节流判断）
+fn message_block_type(block: &ui::MessageBlock) -> &'static str {
+    match block {
+        ui::MessageBlock::User { .. } => "user",
+        ui::MessageBlock::Assistant { .. } => "assistant",
+        ui::MessageBlock::Thinking { .. } => "thinking",
+        ui::MessageBlock::ToolCall { .. } => "tool_call",
+        ui::MessageBlock::ToolResult { success, .. } => if *success { "tool_success" } else { "tool_error" },
+        ui::MessageBlock::System { .. } => "system",
+        ui::MessageBlock::Error { .. } => "error",
+        ui::MessageBlock::Diff { .. } => "diff",
+        ui::MessageBlock::Divider => "divider",
+    }
+}
+
 /// 根据消息内容将 Info 级别消息分类为具体的 MessageBlock 类型。
 ///
 /// 优先通过前导 emoji 判断，避免字符串误匹配。
@@ -546,6 +640,9 @@ pub async fn process_user_message(
     // Thinking 块合并状态
     let mut pending_thinking: Option<String> = None;
     let mut thinking_count: usize = 0;
+    // 连续相同类型消息合并状态
+    let mut last_block_type: Option<(&'static str, std::time::Instant)> = None;
+    let mut current_type_blocks: Vec<ui::MessageBlock> = Vec::new();
 
     let result = loop {
         // Drain buffered messages and render blocks
@@ -589,8 +686,43 @@ pub async fn process_user_message(
                         content: msg,
                     }
                 }
-            };
-            ui::render_block(&block, markdown_renderer)?;
+        };
+
+        // 检查是否是连续相同类型的消息（50ms 内）
+        let block_type = message_block_type(&block);
+        let now = std::time::Instant::now();
+
+        match &last_block_type {
+            Some((last_type, last_time)) if *last_type == block_type && now.duration_since(*last_time).as_millis() < 50 => {
+                // 相同类型，50ms 内：加入当前批次
+                current_type_blocks.push(block);
+            }
+            _ => {
+                // 不同类型或超过 50ms：先渲染上一批次
+                if !current_type_blocks.is_empty() {
+                    let merged_blocks = merge_consecutive_blocks(&current_type_blocks);
+                    for merged in merged_blocks {
+                        ui::render_block(&merged, markdown_renderer)?;
+                    }
+                }
+                // 开始新批次
+                current_type_blocks.clear();
+                current_type_blocks.push(block);
+                last_block_type = Some((block_type, now));
+            }
+        }
+        }
+
+        // 刷新本轮剩余的待处理 Thinking 块
+        flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+
+        // 渲染剩余批次
+        if !current_type_blocks.is_empty() {
+            let merged_blocks = merge_consecutive_blocks(&current_type_blocks);
+            for merged in merged_blocks {
+                ui::render_block(&merged, markdown_renderer)?;
+            }
+            current_type_blocks.clear();
         }
 
         // 刷新本轮剩余的待处理 Thinking 块
@@ -664,10 +796,42 @@ pub async fn process_user_message(
                 }
             }
         };
-        ui::render_block(&block, markdown_renderer)?;
+
+        // 检查是否是连续相同类型的消息（50ms 内）
+        let block_type = message_block_type(&block);
+        let now = std::time::Instant::now();
+
+        match &last_block_type {
+            Some((last_type, last_time)) if *last_type == block_type && now.duration_since(*last_time).as_millis() < 50 => {
+                // 相同类型，50ms 内：加入当前批次
+                current_type_blocks.push(block);
+            }
+            _ => {
+                // 不同类型或超过 50ms：先渲染上一批次
+                if !current_type_blocks.is_empty() {
+                    let merged_blocks = merge_consecutive_blocks(&current_type_blocks);
+                    for merged in merged_blocks {
+                        ui::render_block(&merged, markdown_renderer)?;
+                    }
+                }
+                // 开始新批次
+                current_type_blocks.clear();
+                current_type_blocks.push(block);
+                last_block_type = Some((block_type, now));
+            }
+        }
     }
     // 刷新本轮剩余的待处理 Thinking 块
     flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+
+    // 渲染剩余批次
+    if !current_type_blocks.is_empty() {
+        let merged_blocks = merge_consecutive_blocks(&current_type_blocks);
+        for merged in merged_blocks {
+            ui::render_block(&merged, markdown_renderer)?;
+        }
+        current_type_blocks.clear();
+    }
 
     // 处理用户中断的情况：回到输入提示，不处理结果
     let result = match result {
@@ -690,15 +854,6 @@ pub async fn process_user_message(
         None,
     );
     session_log.log_assistant(&result.message);
-
-    // 渲染 LLM 最终回复到终端（写入历史后立即展示）
-    if !result.message.is_empty() {
-        let assistant_block = ui::MessageBlock::Assistant {
-            content: result.message.clone(),
-            is_streaming: false,
-        };
-        ui::render_block(&assistant_block, markdown_renderer)?;
-    }
 
     // 持久化：记录最终助手消息（如果 step 循环中尚未记录）
     agent.record_assistant_message_to_store(&result.message);

@@ -1,5 +1,8 @@
 use async_trait::async_trait;
+use futures::Stream;
+use futures::StreamExt;
 use reqwest::Client;
+use std::pin::Pin;
 
 use super::models::*;
 use crate::utils::error::AppError;
@@ -16,6 +19,34 @@ pub trait LlmProvider: Send + Sync {
         http_client: &Client,
         request: &LlmRequest,
     ) -> Result<LlmResponse, AppError>;
+
+    /// 发起流式 chat 请求，返回一个流式事件序列。
+    ///
+    /// 默认实现 fallback 到非流式 `chat()`，包装为单元素流。
+    /// 各 provider 可以覆盖此方法以实现真正的流式支持。
+    async fn chat_stream(
+        &self,
+        http_client: &Client,
+        request: &LlmRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<LlmStreamEvent, AppError>> + Send>>, AppError>
+    {
+        // fallback: 调用非流式接口，包装为流
+        let response = self.chat(http_client, request).await?;
+        let stream = futures::stream::once(async move {
+            match response {
+                LlmResponse::Text(content) => Ok(LlmStreamEvent::Chunk(content)),
+                LlmResponse::ToolCalls(tcs) => {
+                    // ToolCalls 变体不存在，使用 Chunk 包装
+                    let content = serde_json::to_string(&tcs).unwrap_or_default();
+                    Ok(LlmStreamEvent::Chunk(content))
+                }
+                LlmResponse::Error(err) => Err(AppError::Llm(err)),
+            }
+        });
+        // 追加 Done 事件
+        let stream = stream.chain(futures::stream::once(async { Ok(LlmStreamEvent::Done) }));
+        Ok(Box::pin(stream))
+    }
 }
 
 // ---------------------------------------------------------------------------

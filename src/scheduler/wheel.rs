@@ -2,6 +2,7 @@
 //!
 //! 使用单层时间轮，3600 个槽（精度 1 秒，覆盖 1 小时）。
 //! 超过 1 小时的任务放入"溢出队列"，定期检查。
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,6 +14,7 @@ use crate::scheduler::task::{ScheduledTask, ScheduledTaskId};
 #[derive(Debug, Clone)]
 struct SlotEntry {
     task_id: ScheduledTaskId,
+    #[allow(dead_code)]
     epoch: u64,
 }
 
@@ -105,6 +107,7 @@ impl TimingWheel {
     }
 
     /// 推进指针，返回当前 tick 到期的任务 ID 列表。
+    #[allow(dead_code)]
     pub fn tick(&self) -> Vec<ScheduledTaskId> {
         let now = chrono::Utc::now().timestamp() as u64;
         let cursor = self.cursor.load(Ordering::Relaxed);

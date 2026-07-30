@@ -12,7 +12,9 @@ pub use pipeline_context::{PipelineContext, PipelineContextStore, StageStatus};
 
 use std::sync::Arc;
 
-use crate::llm::{LlmClient, LlmResponse, ToolCall};
+use futures::StreamExt;
+
+use crate::llm::{LlmClient, LlmStreamEvent, ToolCall};
 use crate::persist::SessionStore;
 use crate::skills::Skill;
 use crate::tools::{async_tool::AsyncToolRegistry, ToolRegistry, ToolResult};
@@ -237,116 +239,143 @@ impl Agent {
         let messages = self.context.build_messages();
         let tool_schemas = self.get_all_tool_schemas();
 
-        let response = self.llm.call(messages, tool_schemas).await?;
+        // 使用流式响应
+        let mut stream = self.llm.call_streaming(messages, tool_schemas).await?;
+        let mut assistant_content = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
 
-        match response {
-            LlmResponse::Text(content) => {
-                debug!(content = %content, "LLM responded directly");
-                self.context.add_message(
-                    crate::agent::context::Role::Assistant,
-                    content.clone(),
-                    None,
-                    None,
-                );
-                self.context.increment_no_tool_rounds();
+        // 循环读取流式事件
+        while let Some(event_result) = stream.next().await {
+            match event_result {
+                Ok(LlmStreamEvent::Chunk(text)) => {
+                    assistant_content.push_str(&text);
+                    // 实时渲染流式内容
+                    output.streaming_assistant(&assistant_content, false);
+                    debug!(content = %text, "Received streaming chunk");
+                }
+                Ok(LlmStreamEvent::ToolCallDelta(tc)) => {
+                    // 收集工具调用
+                    tool_calls.push(tc);
+                }
+                Ok(LlmStreamEvent::Done) => {
+                    // 最终渲染（移除闪烁光标）
+                    output.streaming_assistant(&assistant_content, true);
+                    debug!("Streaming complete");
+                    break;
+                }
+                Err(e) => {
+                    output.error(&format!("LLM 流式错误: {}", e));
+                    return Err(e);
+                }
+            }
+        }
 
-                // 持久化：记录助手文本回复
+        // 根据是否包含工具调用来处理响应
+        if !tool_calls.is_empty() {
+            output.info(&format!("LLM 请求调用 {} 个工具", tool_calls.len()));
+            self.context.reset_no_tool_rounds();
+
+            // 持久化：记录工具调用请求
+            for tc in &tool_calls {
                 if let Some(ref mut store) = self.session_store {
-                    store.record_assistant_message(&content);
+                    store.record_tool_call(
+                        &tc.id,
+                        &tc.function.name,
+                        tc.function.arguments.clone(),
+                    );
+                }
+            }
+
+            let results = self.process_tool_calls(&tool_calls, output).await?;
+
+            for (tool_call, result) in tool_calls.iter().zip(results.iter()) {
+                // 持久化：记录工具执行结果
+                if let Some(ref mut store) = self.session_store {
+                    store.record_tool_result(
+                        &tool_call.id,
+                        &tool_call.function.name,
+                        result.success,
+                        &result.content,
+                    );
                 }
 
-                // 主 Agent 连续 2 轮纯文本回应即视为任务完成（交互式 REPL 场景）。
-                // 子 Agent（depth > 0）不受此影响：必须显式调用 `finish` 工具终止，
-                // 否则会撞上 max_iterations 上限——这是设计意图，确保子 Agent 产出
-                // 明确的阶段交付物（finish 的 summary 参数），而非中途的纯文本解释。
-                if self.depth == 0 && self.context.get_consecutive_no_tool_rounds() >= 2 {
+                // 先把工具结果写入历史，再处理 finish/restart 等终止语义，
+                // 否则这些工具的结果会丢失在上下文中。
+                self.context.add_tool_result(tool_call, &result.content);
+
+                if tool_call.function.name == "finish" {
                     return Ok(AgentStep::Done(AgentResult {
                         success: true,
-                        message: content,
-                        restart_requested: false,
+                        message: result.content.clone(),
+                        restart_requested: result.restart_requested,
                     }));
                 }
-                Ok(AgentStep::Continue)
+
+                if result.restart_requested {
+                    return Ok(AgentStep::Done(AgentResult {
+                        success: true,
+                        message: result.content.clone(),
+                        restart_requested: true,
+                    }));
+                }
             }
-            LlmResponse::ToolCalls(tool_calls) => {
-                output.info(&format!("LLM 请求调用 {} 个工具", tool_calls.len()));
-                self.context.reset_no_tool_rounds();
 
-                // 持久化：记录工具调用请求
-                for tc in &tool_calls {
-                    if let Some(ref mut store) = self.session_store {
-                        store.record_tool_call(
-                            &tc.id,
-                            &tc.function.name,
-                            tc.function.arguments.clone(),
-                        );
-                    }
-                }
+            // 压缩上下文，防止 token 无限制增长
+            let compression_info = self.context.compress()?;
 
-                let results = self.process_tool_calls(&tool_calls, output).await?;
-
-                for (tool_call, result) in tool_calls.iter().zip(results.iter()) {
-                    // 持久化：记录工具执行结果
-                    if let Some(ref mut store) = self.session_store {
-                        store.record_tool_result(
-                            &tool_call.id,
-                            &tool_call.function.name,
-                            result.success,
-                            &result.content,
-                        );
-                    }
-
-                    // 先把工具结果写入历史，再处理 finish/restart 等终止语义，
-                    // 否则这些工具的结果会丢失在上下文中。
-                    self.context.add_tool_result(tool_call, &result.content);
-
-                    if tool_call.function.name == "finish" {
-                        return Ok(AgentStep::Done(AgentResult {
-                            success: true,
-                            message: result.content.clone(),
-                            restart_requested: result.restart_requested,
-                        }));
-                    }
-
-                    if result.restart_requested {
-                        return Ok(AgentStep::Done(AgentResult {
-                            success: true,
-                            message: result.content.clone(),
-                            restart_requested: true,
-                        }));
-                    }
-                }
-
-                // 压缩上下文，防止 token 无限制增长
-                let compression_info = self.context.compress()?;
-
-                // 持久化：记录压缩事件
-                if compression_info.did_compress {
-                    if let Some(ref mut store) = self.session_store {
-                        store.record_compression(
-                            compression_info.original_messages,
-                            compression_info.after_messages,
-                            compression_info.kept_rounds,
-                            compression_info.original_tokens,
-                            compression_info.after_tokens,
-                        );
-                    }
-                    output.info(&format!(
-                        "上下文压缩: {} → {} 条消息 (保留 {} 轮, {} → {} tokens)",
+            // 持久化：记录压缩事件
+            if compression_info.did_compress {
+                if let Some(ref mut store) = self.session_store {
+                    store.record_compression(
                         compression_info.original_messages,
                         compression_info.after_messages,
                         compression_info.kept_rounds,
                         compression_info.original_tokens,
                         compression_info.after_tokens,
-                    ));
+                    );
                 }
+                output.info(&format!(
+                    "上下文压缩: {} → {} 条消息 (保留 {} 轮, {} → {} tokens)",
+                    compression_info.original_messages,
+                    compression_info.after_messages,
+                    compression_info.kept_rounds,
+                    compression_info.original_tokens,
+                    compression_info.after_tokens,
+                ));
+            }
 
-                Ok(AgentStep::Continue)
+            Ok(AgentStep::Continue)
+        } else if !assistant_content.is_empty() {
+            debug!(content = %assistant_content, "LLM responded directly");
+            self.context.add_message(
+                crate::agent::context::Role::Assistant,
+                assistant_content.clone(),
+                None,
+                None,
+            );
+            self.context.increment_no_tool_rounds();
+
+            // 持久化：记录助手文本回复
+            if let Some(ref mut store) = self.session_store {
+                store.record_assistant_message(&assistant_content);
             }
-            LlmResponse::Error(err) => {
-                output.error(&format!("LLM 错误: {}", err));
-                Err(AppError::Llm(format!("LLM error: {}", err)))
+
+            // 主 Agent 连续 2 轮纯文本回应即视为任务完成（交互式 REPL 场景）。
+            // 子 Agent（depth > 0）不受此影响：必须显式调用 `finish` 工具终止，
+            // 否则会撞上 max_iterations 上限——这是设计意图，确保子 Agent 产出
+            // 明确的阶段交付物（finish 的 summary 参数），而非中途的纯文本解释。
+            if self.depth == 0 && self.context.get_consecutive_no_tool_rounds() >= 2 {
+                return Ok(AgentStep::Done(AgentResult {
+                    success: true,
+                    message: assistant_content,
+                    restart_requested: false,
+                }));
             }
+            Ok(AgentStep::Continue)
+        } else {
+            // LLM 返回空响应
+            output.error("LLM 返回空响应");
+            Err(AppError::Llm("LLM returned empty response".to_string()))
         }
     }
 
@@ -835,8 +864,26 @@ impl Agent {
         let mut results = Vec::new();
 
         for tool_call in tool_calls {
-            output.info(&format!("执行工具: {} (id: {})", tool_call.function.name, tool_call.id));
+            // 工具调用开始：显示工具名称和参数摘要
+            let display_name = if tool_call.function.name.is_empty() {
+                "未知工具"
+            } else {
+                &tool_call.function.name
+            };
+            let args_summary = crate::ui::blocks::MessageBlock::summarize_tool_args(&tool_call.function.name, &tool_call.function.arguments);
+            output.info(&format!("🔧 {} ({})", display_name, args_summary));
             debug!(tool = %tool_call.function.name, args = %tool_call.function.arguments, "Tool arguments");
+
+            // ── 提前拦截空名工具调用 ──
+            if tool_call.function.name.is_empty() {
+                output.error("工具名称不能为空，请检查 LLM 输出");
+                let result = ToolResult::failure(
+                    "工具名称不能为空：LLM 返回了空的 tool_call.function.name".into(),
+                    crate::tools::ErrorCategory::Permanent,
+                );
+                results.push(result);
+                continue;
+            }
 
             // ── 拦截 spawn_subagent 工具调用 ──
             if tool_call.function.name == "spawn_subagent" {
@@ -904,6 +951,8 @@ impl Agent {
                 ));
             }
 
+            let tool_name = &tool_call.function.name;
+
             if result.success {
                 // 将执行成功的状态与结果内容合并为一条消息（避免 output.info 被 verbose 过滤）
                 let preview = result.content.lines().next().unwrap_or(&result.content);
@@ -915,12 +964,12 @@ impl Agent {
                     preview.to_string()
                 };
                 if !preview.is_empty() && preview != "()" {
-                    output.success(&format!("工具 {} 执行成功：{}", tool_call.function.name, preview));
+                    output.success(&format!("工具 {} 执行成功：{}", tool_name, preview));
                 } else {
-                    output.success(&format!("工具 {} 执行成功", tool_call.function.name));
+                    output.success(&format!("工具 {} 执行成功", tool_name));
                 }
             } else {
-                output.error(&format!("工具 {} 执行失败", tool_call.function.name));
+                output.error(&format!("工具 {} 执行失败", tool_name));
             }
             results.push(result);
         }

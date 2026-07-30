@@ -26,4 +26,16 @@ pub trait MessageOutput: Send + Sync {
     fn debug(&mut self, msg: &str) {
         self.emit(MessageLevel::Debug, msg);
     }
+
+    /// 流式输出助手消息的增量内容。
+    ///
+    /// 默认实现是缓冲到 emit() 中，但交互模式应直接渲染到终端。
+    /// `content` 是到目前为止累积的完整助手内容（不是增量）。
+    /// `is_final` 表示是否是最后一块（完成后应移除闪烁光标）。
+    fn streaming_assistant(&mut self, content: &str, is_final: bool) {
+        // 默认实现：只在 final 时 emit 完整内容
+        if is_final && !content.is_empty() {
+            self.emit(MessageLevel::Info, content);
+        }
+    }
 }

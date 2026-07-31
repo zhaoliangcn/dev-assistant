@@ -73,7 +73,19 @@ pub async fn switch_model(
 pub async fn index_page(
     State(state): State<Arc<AppState>>,
 ) -> Html<String> {
-    let html = match state.templates.get_template("index.html") {
+    render_template(&state, "index.html")
+}
+
+/// 渲染文件浏览器页面。
+pub async fn files_page(
+    State(state): State<Arc<AppState>>,
+) -> Html<String> {
+    render_template(&state, "files.html")
+}
+
+/// 公共模板渲染辅助：按模板名渲染并返回 HTML。
+fn render_template(state: &AppState, name: &str) -> Html<String> {
+    let html = match state.templates.get_template(name) {
         Ok(tmpl) => tmpl.render(&minijinja::Value::UNDEFINED).unwrap_or_else(|e| {
             format!("<!DOCTYPE html><html><body><h1>模板渲染失败</h1><p>{}</p></body></html>", e)
         }),

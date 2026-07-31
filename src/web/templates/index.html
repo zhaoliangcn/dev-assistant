@@ -100,8 +100,15 @@
                               autofocus
                               required
                               @keydown="onInputKeydown($event)"></textarea>
-                    <button type="submit" class="primary" :disabled="!input.trim()">
+                    <!-- W10: 生成中显示停止按钮，否则显示发送按钮 -->
+                    <button type="submit" class="primary" :disabled="!input.trim() || busy"
+                            x-show="!busy">
                         发送
+                    </button>
+                    <button type="button" class="secondary stop-btn"
+                            x-show="busy"
+                            @click="stopGeneration()">
+                        ⏹ 停止
                     </button>
                 </div>
             </form>

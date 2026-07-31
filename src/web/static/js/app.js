@@ -75,6 +75,8 @@ function chatApp() {
         messageId: 0,
         input: '',
         messages: [],
+        // W10: 是否正在生成（停止按钮显示）
+        busy: false,
         // 状态条：thinking/status 事件显示在此（可替换，不进入消息列表）
         pendingStatus: null,
 
@@ -189,10 +191,12 @@ function chatApp() {
                     break;
                 case 'error':
                     this.pendingStatus = null;
+                    this.busy = false;
                     this.addMessage('error', msg.content);
                     break;
                 case 'done':
                     this.pendingStatus = null;
+                    this.busy = false;
                     this.finishStreaming();
                     break;
             }
@@ -243,10 +247,11 @@ function chatApp() {
 
         sendMessage() {
             const text = this.input.trim();
-            if (!text) return;
+            if (!text || this.busy) return;
 
             this.addMessage('user', text);
             this.input = '';
+            this.busy = true;
             // 用户主动发送：强制滚动到底部
             this.$nextTick(() => this.scrollToBottom(true));
 
@@ -257,6 +262,20 @@ function chatApp() {
                     id: 'msg_' + Date.now() + '_' + (this.messageId++)
                 }));
             }
+        },
+
+        // W10: 停止生成 — 发送 Cancel 事件，服务端中断 agent 任务并回 done
+        stopGeneration() {
+            if (!wsInstance || wsInstance.readyState !== WebSocket.OPEN) {
+                this.busy = false;
+                return;
+            }
+            this.pendingStatus = null;
+            this.busy = false;
+            wsInstance.send(JSON.stringify({
+                type: 'cancel',
+                message_id: 'msg_' + Date.now() + '_' + (this.messageId++)
+            }));
         },
 
         // W8: textarea 按键处理 — Enter 发送，Shift+Enter 换行。
@@ -449,6 +468,86 @@ function chatApp() {
 
             return out.join('\n');
         }
+    };
+}
+
+// ── 文件浏览器组件（W11） ──────────────────────────────────────────
+// 对接现有 /api/files* 接口，替代依赖未加载 htmx 的半成品模板。
+
+function fileExplorer() {
+    return {
+        entries: [],
+        currentPath: '.',
+        activePath: null,
+        content: '',
+        modified: false,
+        saved: false,
+        saving: false,
+        loading: false,
+
+        async loadDir(path) {
+            this.loading = true;
+            this.currentPath = path;
+            try {
+                const resp = await fetch('/api/files?path=' + encodeURIComponent(path));
+                const data = await resp.json();
+                this.entries = data.entries || [];
+            } catch (e) {
+                console.error('加载目录失败:', e);
+                this.entries = [];
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async openFile(path) {
+            this.activePath = path;
+            this.modified = false;
+            this.saved = false;
+            try {
+                const resp = await fetch('/api/files/content?path=' + encodeURIComponent(path));
+                const data = await resp.json();
+                this.content = data.content || '';
+            } catch (e) {
+                console.error('加载文件失败:', e);
+                this.content = '';
+            }
+        },
+
+        onEdit() {
+            this.modified = true;
+            this.saved = false;
+        },
+
+        async saveFile() {
+            if (!this.activePath || this.saving) return;
+            this.saving = true;
+            try {
+                const resp = await fetch('/api/files/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: this.activePath, content: this.content }),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    this.modified = false;
+                    this.saved = true;
+                    setTimeout(() => { this.saved = false; }, 1500);
+                } else {
+                    console.error('保存失败:', data.error);
+                }
+            } catch (e) {
+                console.error('保存失败:', e);
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        },
     };
 }
 

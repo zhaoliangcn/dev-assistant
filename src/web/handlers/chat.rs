@@ -13,7 +13,7 @@ use axum::{
 };
 use futures::stream::StreamExt;
 use futures::SinkExt;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tracing::{debug, error, info, warn};
 
 use crate::persist::SessionStore;
@@ -65,6 +65,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (conn_id, mut event_rx) = conn_manager
         .register(session_id.clone())
         .await;
+
+    // W10: 每连接一个取消通知 — 前端"停止生成"时唤醒正在运行的 agent 任务
+    let cancel_notify = Arc::new(Notify::new());
 
     // 发送就绪事件
     let session_ready = ServerEvent::session_ready(&session_id);
@@ -139,6 +142,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     let msg_id = id.clone();
                     let msg_content = content.clone();
                     let session = recv_web_session.clone();
+                    let cancel_notify = cancel_notify.clone();
 
                     tokio::spawn(async move {
                         // 发送 thinking 事件
@@ -152,8 +156,18 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                         let mut session_guard = session.lock().await;
                         let agent = &mut session_guard.agent;
 
-                        // 运行 Agent 直到完成（run 内部会调用 start_turn）
-                        let result = agent.run(msg_content.clone(), &mut output).await;
+                        // W10: 运行 Agent，同时监听取消通知。
+                        // 前端发送 Cancel 后，notify_one 唤醒此分支，
+                        // agent.run 的 future 被 drop，锁随之释放。
+                        let result = tokio::select! {
+                            r = agent.run(msg_content.clone(), &mut output) => r,
+                            _ = cancel_notify.notified() => {
+                                output.status_aborted();
+                                // 补发 done，让前端复位 busy 状态
+                                let _ = conn_manager.send_to(conn_id, ServerEvent::done(msg_id)).await;
+                                return;
+                            }
+                        };
 
                         // 释放锁，避免在发送事件时持有
                         drop(session_guard);
@@ -188,6 +202,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 }
                 ClientMessage::Cancel { message_id } => {
                     info!("取消请求: message_id={:?}", message_id);
+                    // W10: 唤醒正在运行的 agent 任务（若存在）
+                    cancel_notify.notify_one();
                     let status = ServerEvent::status("已取消");
                     let _ = recv_conn_manager.send_to(recv_conn_id, status).await;
                 }
@@ -228,6 +244,14 @@ impl WebMessageOutput {
             conn_manager,
             conn_id,
             streamed: false,
+        }
+    }
+
+    /// 发送"已停止生成"状态事件（取消分支用）。
+    fn status_aborted(&self) {
+        let event = ServerEvent::status("已停止生成");
+        if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event) {
+            tracing::warn!("WebSocket 取消状态发送失败: {}", e);
         }
     }
 }

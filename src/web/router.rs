@@ -60,7 +60,8 @@ pub fn build_router(state: AppState) -> Router {
 
     // ── 主页面路由 ──
     let page_routes = Router::new()
-        .route("/", get(handlers::status::index_page));
+        .route("/", get(handlers::status::index_page))
+        .route("/files", get(handlers::status::files_page));
 
     // ── 合并所有路由 ──
     Router::new()

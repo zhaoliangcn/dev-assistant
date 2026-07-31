@@ -334,8 +334,20 @@ impl App {
             // 更新输入面板
             ui::render_input_panel(None)?;
 
-            // 使用 InputSystem 读取输入（支持行编辑和历史记录）
-            let input = match input_system.read_line("│ > ") {
+            // T5: 动态提示符 — 显示模式 / 模型 / 消息数
+            let mode = if verbose { "详细" } else { "安静" };
+            let model = self.agent.active_model();
+            let msg_count = self.agent.display_messages().len();
+            let prompt = format!(
+                "│ {}模式 {} 模型 {} {} 消息 > ",
+                ui::style::ICON_INFO,
+                mode,
+                model,
+                msg_count
+            );
+
+            // 使用 InputSystem 读取输入（支持行编辑、历史记录、Tab 补全）
+            let input = match input_system.read_line(&prompt) {
                 Ok(Some(input)) => input,
                 Ok(None) => {
                     // EOF (Ctrl+D)

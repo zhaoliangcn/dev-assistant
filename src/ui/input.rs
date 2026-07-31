@@ -5,23 +5,98 @@
 
 use std::path::PathBuf;
 
-use rustyline::DefaultEditor;
+use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
-use rustyline::history::History;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::history::{DefaultHistory, History};
+use rustyline::validate::Validator;
+use rustyline::{Editor, Helper, Context};
+
+// ── Slash 命令补全 ────────────────────────────────────────────────────
+
+/// 可补全的 Slash 命令列表（含 SlashCommand 枚举 + REPL 扩展命令）。
+const SLASH_COMMANDS: &[&str] = &[
+    "/help", "/history", "/clear", "/expand", "/grep", "/search",
+    "/exit", "/quit", "/verbose", "/quiet",
+    "/model", "/status", "/pipeline", "/background",
+    "/schedule", "/unschedule", "/scheduled", "/tasks",
+];
+
+/// rustyline Helper：为 Slash 命令提供 Tab 补全。
+///
+/// 输入以 `/` 开头时，按前缀匹配候选命令；否则不做补全。
+#[derive(Clone, Default)]
+pub struct SlashHelper {
+    /// 已输入的候选命令集合（首次补全时惰性收集，避免每次重建）。
+    candidates: std::cell::RefCell<Vec<Pair>>,
+}
+
+impl SlashHelper {
+    pub fn new() -> Self {
+        Self {
+            candidates: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+}
+
+impl Completer for SlashHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        // 仅补全命令行首（光标在末尾且输入以 / 开头）
+        if !line.starts_with('/') || pos != line.len() {
+            return Ok((0, Vec::new()));
+        }
+
+        let mut candidates = self.candidates.borrow_mut();
+        candidates.clear();
+        for cmd in SLASH_COMMANDS {
+            if cmd.starts_with(line) {
+                candidates.push(Pair {
+                    display: cmd.to_string(),
+                    replacement: cmd.to_string(),
+                });
+            }
+        }
+        Ok((0, candidates.clone()))
+    }
+}
+
+impl Hinter for SlashHelper {
+    type Hint = String;
+}
+
+impl Highlighter for SlashHelper {}
+
+impl Validator for SlashHelper {}
+
+impl Helper for SlashHelper {}
 
 // ── InputSystem ────────────────────────────────────────────────────────
 
 /// 输入系统，封装行编辑和历史记录管理。
+///
+/// 使用带 `SlashHelper` 的 `Editor`（而非 `DefaultEditor`，
+/// 后者 helper 泛型固定为 `()`），以启用 Slash 命令 Tab 补全。
 pub struct InputSystem {
-    rl: DefaultEditor,
+    rl: Editor<SlashHelper, DefaultHistory>,
     history_file: Option<PathBuf>,
 }
 
 impl InputSystem {
     /// 创建新的输入系统，自动加载历史记录。
     pub fn new() -> Self {
-        let mut rl = DefaultEditor::new()
+        let mut rl = Editor::<SlashHelper, DefaultHistory>::new()
             .expect("Failed to create input editor");
+
+        // 启用 Slash 命令 Tab 补全
+        let _ = rl.set_helper(Some(SlashHelper::new()));
 
         // 尝试加载历史记录
         let history_file = if let Some(dir) = dirs::data_local_dir() {

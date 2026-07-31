@@ -297,7 +297,7 @@ fn enhance_status(status: &str) -> String {
     }
 }
 
-/// 初始化 UI（显示标题栏）
+/// 初始化 UI（显示标题栏 + 快捷键提示）
 pub fn init_ui() -> io::Result<()> {
     let mut stdout = io::stdout();
     let term_width = get_terminal_width().unwrap_or(80);
@@ -305,6 +305,14 @@ pub fn init_ui() -> io::Result<()> {
     writeln!(stdout, "{}", "═".repeat(term_width))?;
     writeln!(stdout, "  Dev-Assistant — 消息窗口")?;
     writeln!(stdout, "{}", "═".repeat(term_width))?;
+    // T6: 快捷键提示行（灰色，启动时显示一次）
+    let theme = crate::ui::theme::active_theme();
+    writeln!(
+        stdout,
+        "{}  快捷键: Tab 补全 / 上下键 历史 / Ctrl+D 退出 / /help 查看命令{}",
+        theme.muted_fg,
+        crate::ui::theme::RESET
+    )?;
     writeln!(stdout)?;
     
     stdout.flush()?;

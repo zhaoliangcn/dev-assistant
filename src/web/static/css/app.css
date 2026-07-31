@@ -185,6 +185,18 @@ footer {
     font-family: var(--pico-font-family);
 }
 
+.code-block-actions {
+    display: flex;
+    gap: 0.375rem;
+    align-items: center;
+}
+
+/* W13: 折叠态 — 限制代码块高度，超出部分隐藏 */
+.code-block-collapsed pre {
+    max-height: 300px;
+    overflow: hidden;
+}
+
 .copy-btn {
     font-size: 0.75em;
     padding: 0.125rem 0.5rem;
@@ -462,6 +474,21 @@ footer {
 .session-item-main {
     min-width: 0;
     flex: 1;
+}
+
+.session-item-actions {
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* S4: 重命名内联输入框 */
+.session-rename-input {
+    margin: 0;
+    padding: 0.125rem 0.375rem;
+    font-size: 0.85em;
+    width: 100%;
 }
 
 .session-item-title {

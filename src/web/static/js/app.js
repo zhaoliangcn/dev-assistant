@@ -81,6 +81,9 @@ function chatApp() {
         sessions: [],
         loadingSessions: false,
         activeSessionId: null,
+        // S4: 会话重命名编辑态
+        renamingId: null,
+        renameTitle: '',
         // 状态条：thinking/status 事件显示在此（可替换，不进入消息列表）
         pendingStatus: null,
 
@@ -148,6 +151,45 @@ function chatApp() {
                 }
             } catch (e) {
                 console.error('删除会话失败:', e);
+            }
+        },
+
+        // S4: 进入重命名编辑态（预填当前标题）
+        startRename(session) {
+            this.renamingId = session.id;
+            this.renameTitle = session.title || '';
+        },
+
+        // S4: 取消重命名
+        cancelRename() {
+            this.renamingId = null;
+            this.renameTitle = '';
+        },
+
+        // S4: 提交重命名（调用后端 /rename，成功后更新本地列表）
+        async submitRename(id) {
+            const title = this.renameTitle.trim();
+            if (!title) {
+                this.cancelRename();
+                return;
+            }
+            try {
+                const resp = await fetch('/api/sessions/' + encodeURIComponent(id) + '/rename', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: title }),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    const s = this.sessions.find((x) => x.id === id);
+                    if (s) s.title = data.title;
+                } else {
+                    console.error('重命名失败:', data.error || '未知错误');
+                }
+            } catch (e) {
+                console.error('重命名会话失败:', e);
+            } finally {
+                this.cancelRename();
             }
         },
 
@@ -414,6 +456,7 @@ function chatApp() {
 
         // 代码块高亮：优先用 highlight.js；未加载时回退为转义文本。
         // 外层包复制按钮（onclick 委托给全局 copyCode）。
+        // W13: 超过 20 行的长代码块默认折叠，头部显示"展开"按钮。
         highlightCode(code, lang) {
             const escaped = this.escapeHtml(code);
             let html;
@@ -431,10 +474,16 @@ function chatApp() {
             }
             const cls = lang ? ' class="language-' + lang + '"' : '';
             const langLabel = lang ? lang : 'code';
-            return '<div class="code-block">' +
+            const lineCount = code.split('\n').length;
+            const collapsible = lineCount > 20;
+            const actions = (collapsible
+                ? '<button type="button" class="copy-btn" onclick="toggleCodeBlock(this)">展开</button>'
+                : '') +
+                '<button type="button" class="copy-btn" onclick="copyCode(this)">📋 复制</button>';
+            return '<div class="code-block' + (collapsible ? ' code-block-collapsed' : '') + '">' +
                 '<div class="code-block-header">' +
                 '<span class="code-block-lang">' + this.escapeHtml(langLabel) + '</span>' +
-                '<button type="button" class="copy-btn" onclick="copyCode(this)">📋 复制</button>' +
+                '<div class="code-block-actions">' + actions + '</div>' +
                 '</div>' +
                 '<pre><code' + cls + '>' + html + '</code></pre>' +
                 '</div>';
@@ -688,4 +737,13 @@ function copyCode(btn) {
         setTimeout(() => { btn.textContent = '📋 复制'; }, 1500);
     });
 }
+
+// W13: 展开/折叠长代码块（切换 .code-block-collapsed 类）
+function toggleCodeBlock(btn) {
+    const block = btn.closest('.code-block');
+    if (!block) return;
+    const collapsed = block.classList.toggle('code-block-collapsed');
+    btn.textContent = collapsed ? '展开' : '收起';
+}
+
 

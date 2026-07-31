@@ -37,6 +37,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sessions", get(handlers::session::list_sessions))
         .route("/api/sessions/{id}", get(handlers::session::get_session))
         .route("/api/sessions/{id}", delete(handlers::session::delete_session))
+        .route("/api/sessions/{id}/rename", post(handlers::session::rename_session))
         // 文件管理
         .route("/api/files", get(handlers::files::list_files))
         .route("/api/files/content", get(handlers::files::get_file_content))

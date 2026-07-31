@@ -17,15 +17,31 @@
                      @click="selectSession(s.id)"
                      :class="{ 'session-active': activeSessionId === s.id }">
                     <div class="session-item-main">
-                        <div class="session-item-title" x-text="s.title || ('会话 ' + s.id)"></div>
+                        <!-- 重命名编辑态：内联输入框 -->
+                        <div x-show="renamingId === s.id" @click.stop>
+                            <input type="text" class="session-rename-input"
+                                   x-model="renameTitle"
+                                   :key="s.id"
+                                   @keydown.enter="submitRename(s.id)"
+                                   @keydown.escape="cancelRename()"
+                                   @click.stop>
+                        </div>
+                        <!-- 常规显示态 -->
+                        <template x-if="renamingId !== s.id">
+                            <div class="session-item-title" x-text="s.title || ('会话 ' + s.id)"></div>
+                        </template>
                         <div class="session-item-meta">
                             <span x-text="formatSessionTime(s.created_at)"></span>
                             <span>·</span>
                             <span x-text="s.message_count + ' 条'"></span>
                         </div>
                     </div>
-                    <button type="button" class="copy-btn small session-delete"
-                            @click.stop="deleteSession(s.id)">🗑</button>
+                    <div class="session-item-actions">
+                        <button type="button" class="copy-btn small"
+                                @click.stop="startRename(s)">✏️</button>
+                        <button type="button" class="copy-btn small session-delete"
+                                @click.stop="deleteSession(s.id)">🗑</button>
+                    </div>
                 </div>
             </template>
             <div class="session-empty" x-show="!loadingSessions && sessions.length === 0">

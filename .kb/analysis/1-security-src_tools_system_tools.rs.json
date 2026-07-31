@@ -1,19 +1,19 @@
 {
   "file_path": "src/tools/system_tools.rs",
   "analysis_type": "Security",
-  "summary": "exec_command工具。Unix平台使用进程组管理，支持超时终止（默认300秒）。不经过shell执行，减少命令注入风险。超时可通过环境变量配置。",
+  "summary": "修复了 exec_command 超时杀死进程时的 TOCTOU 竞态：在 spawn 后从父进程设置进程组（setpgid），跟踪 pgid_created 状态，kill 时根据 pgid_created 选择 killpg 或 kill。",
   "details": null,
   "issues": [
     {
-      "severity": "Low",
-      "description": "Windows平台进程组管理未实现",
-      "location": "system_tools.rs:80-90",
-      "suggestion": null
+      "severity": "Critical",
+      "description": "exec_command 超时后 kill_process_tree 使用 kill(pid, 0) 检查存活，但进程组可能尚未在 pre_exec 中创建完成，导致 killpg 失败",
+      "location": "src/tools/system_tools.rs:85-115",
+      "suggestion": "在 spawn 后从父进程调用 setpgid 作为 fallback，跟踪 pgid_created 状态，在超时处理时根据 pgid_created 选择 killpg 或 kill"
     }
   ],
   "timestamp": {
-    "secs_since_epoch": 1785057754,
-    "nanos_since_epoch": 874716000
+    "secs_since_epoch": 1785495950,
+    "nanos_since_epoch": 654193000
   },
   "batch_number": 1
 }

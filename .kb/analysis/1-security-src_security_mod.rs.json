@@ -1,25 +1,31 @@
 {
   "file_path": "src/security/mod.rs",
   "analysis_type": "Security",
-  "summary": "安全策略模块。提供路径规范化（防止路径遍历）、危险命令检测（正则匹配）、危险文件过滤（.env/.key/.pem/.crt）、符号链接检测。多层安全防护设计良好。",
+  "summary": "修复了 contains_symlink 的 TOCTOU 竞态条件：移除 current.exists() 前置检查，直接使用 symlink_metadata()（不会跟随符号链接，对不存在路径返回 Err(NotFound)）。同时修复了危险命令正则误报问题，在 rm -rf 正则中添加了 \\b 词边界断言。",
   "details": null,
   "issues": [
     {
-      "severity": "Medium",
-      "description": "危险命令正则仅匹配rm -rf/sudo等，缺少对wget/curl下载到可执行路径等复合攻击的检测",
-      "location": "security/mod.rs:118-165",
-      "suggestion": null
+      "severity": "Critical",
+      "description": "contains_symlink 使用 current.exists() + symlink_metadata() 存在 TOCTOU 竞态：攻击者可在 exists() 通过后 metadata() 调用前创建符号链接绕过检测",
+      "location": "src/security/mod.rs:60-94",
+      "suggestion": "移除 exists() 前置检查，直接使用 symlink_metadata() — 它对不存在路径返回 Err(NotFound)，不会跟随符号链接"
     },
     {
-      "severity": "Low",
-      "description": "contains_symlink函数在路径不存在时逐级向上检查，性能可能受影响",
-      "location": "security/mod.rs:60-88",
-      "suggestion": null
+      "severity": "Critical",
+      "description": "kill_process_tree 中 kill(pid, 0) 存活检查与 killpg 调用间存在 TOCTOU 竞态，且进程组可能尚未创建",
+      "location": "src/tools/system_tools.rs:190-210",
+      "suggestion": "在 spawn 后从父进程设置进程组并跟踪 pgid_created 状态，kill 时根据 pgid_created 选择 killpg 或 kill"
+    },
+    {
+      "severity": "High",
+      "description": "rm -rf 正则 r\"(?i)\\brm\\s+-[rf]\\w*\" 可能误匹配 rm -rfx（误报）或遗漏 rm --recursive --force",
+      "location": "src/security/mod.rs:141",
+      "suggestion": "使用更精确的正则 r\"(?i)\\brm\\s+-(?:[rf]+\\b|-[a-z]*-[rf]\\b)\" 添加词边界断言"
     }
   ],
   "timestamp": {
-    "secs_since_epoch": 1785057754,
-    "nanos_since_epoch": 868809000
+    "secs_since_epoch": 1785495950,
+    "nanos_since_epoch": 653229000
   },
   "batch_number": 1
 }

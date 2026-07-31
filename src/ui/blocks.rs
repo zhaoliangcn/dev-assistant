@@ -73,6 +73,7 @@ impl MessageBlock {
     /// 工具调用 → `tool_fg`，成功结果 → `success_fg`，
     /// 失败结果/错误 → `error_fg`，其余 → `muted_fg`。
     /// 色值来自当前主题（亮/暗自适应），见 [`crate::ui::theme`]。
+    #[allow(dead_code)]
     pub fn status_color(&self) -> &'static str {
         let theme = crate::ui::theme::active_theme();
         match self {

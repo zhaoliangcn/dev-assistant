@@ -21,43 +21,61 @@ use std::sync::OnceLock;
 // ── 暗色系（对齐 CodeWhale Whale Dark 深海军蓝氛围） ──
 
 /// 行内代码前景（暗色）：#9CBCF8 淡蓝
+#[allow(dead_code)]
 pub const DARK_CODE_FG_RGB: (u8, u8, u8) = (156, 189, 248);
 /// 错误/失败前景（暗色）：#EF4444 红
+#[allow(dead_code)]
 pub const DARK_ERROR_FG_RGB: (u8, u8, u8) = (239, 68, 68);
 /// 成功/新增前景（暗色）：#48BB78 绿
+#[allow(dead_code)]
 pub const DARK_SUCCESS_FG_RGB: (u8, u8, u8) = (72, 187, 120);
 /// 工具调用/进度前景（暗色）：#4FC1FF 青
+#[allow(dead_code)]
 pub const DARK_TOOL_FG_RGB: (u8, u8, u8) = (79, 193, 255);
 /// 警告前景（暗色）：#F0A030 琥珀
+#[allow(dead_code)]
 pub const DARK_WARNING_FG_RGB: (u8, u8, u8) = (240, 160, 48);
 /// 输入提示符（暗色）：#808080 灰
+#[allow(dead_code)]
 pub const DARK_INPUT_PROMPT_FG_RGB: (u8, u8, u8) = (128, 128, 128);
 /// diff 新增行背景（暗色）：#122A22 深绿（对齐 CodeWhale WHALE_DIFF_ADDED_BG）
+#[allow(dead_code)]
 pub const DARK_DIFF_ADDED_BG_RGB: (u8, u8, u8) = (18, 42, 34);
 /// diff 删除行背景（暗色）：#2A121A 深红（对齐 CodeWhale WHALE_DIFF_DELETED_BG）
+#[allow(dead_code)]
 pub const DARK_DIFF_DELETED_BG_RGB: (u8, u8, u8) = (42, 18, 26);
 
 // ── 亮色系（浅色终端高对比） ──
 
 /// 行内代码前景（亮色）：#1E50A0 深蓝
+#[allow(dead_code)]
 pub const LIGHT_CODE_FG_RGB: (u8, u8, u8) = (30, 80, 160);
 /// 错误/失败前景（亮色）：#B91C1C 深红
+#[allow(dead_code)]
 pub const LIGHT_ERROR_FG_RGB: (u8, u8, u8) = (185, 28, 28);
 /// 成功/新增前景（亮色）：#15803D 深绿
+#[allow(dead_code)]
 pub const LIGHT_SUCCESS_FG_RGB: (u8, u8, u8) = (21, 128, 61);
 /// 工具调用/进度前景（亮色）：#0066CC 蓝
+#[allow(dead_code)]
 pub const LIGHT_TOOL_FG_RGB: (u8, u8, u8) = (0, 102, 204);
 /// 警告前景（亮色）：#92400E 深琥珀
+#[allow(dead_code)]
 pub const LIGHT_WARNING_FG_RGB: (u8, u8, u8) = (146, 64, 14);
 /// 标题前景（亮色）：#92400E 深琥珀（粗体）
+#[allow(dead_code)]
 pub const LIGHT_HEADING_FG_RGB: (u8, u8, u8) = (146, 64, 14);
 /// 链接前景（亮色）：#1D4ED8 蓝
+#[allow(dead_code)]
 pub const LIGHT_LINK_FG_RGB: (u8, u8, u8) = (29, 78, 216);
 /// 输入提示符（亮色）：#64748B 灰蓝
+#[allow(dead_code)]
 pub const LIGHT_INPUT_PROMPT_FG_RGB: (u8, u8, u8) = (100, 116, 139);
 /// diff 新增行背景（亮色）：#D8F0DA 浅绿
+#[allow(dead_code)]
 pub const LIGHT_DIFF_ADDED_BG_RGB: (u8, u8, u8) = (216, 240, 218);
 /// diff 删除行背景（亮色）：#F8D6D6 浅红
+#[allow(dead_code)]
 pub const LIGHT_DIFF_DELETED_BG_RGB: (u8, u8, u8) = (248, 214, 214);
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -119,6 +137,7 @@ pub struct Theme {
     /// 链接前景
     pub link_fg: &'static str,
     /// 警告前景
+    #[allow(dead_code)]
     pub warning_fg: &'static str,
     /// 输入提示符前景
     pub input_prompt_fg: &'static str,

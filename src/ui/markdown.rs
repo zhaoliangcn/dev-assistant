@@ -63,6 +63,7 @@ impl MarkdownRenderer {
 
     /// 使用指定主题创建渲染器（测试/定制用）。
     #[must_use]
+    #[allow(dead_code)]
     pub fn with_theme(theme: crate::ui::theme::Theme) -> Self {
         Self { theme }
     }

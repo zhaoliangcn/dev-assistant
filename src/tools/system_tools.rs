@@ -97,6 +97,13 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
 
     let pid = child.id();
 
+    // SECURITY: Also set the process group from the parent side, as a fallback
+    // in case the pre_exec setpgid fails. This is a common pattern to avoid
+    // race conditions between fork and exec. We track whether the PGID was
+    // successfully created so we know whether killpg() is safe to use.
+    #[cfg(unix)]
+    let pgid_created = unsafe { libc::setpgid(pid as i32, pid as i32) == 0 };
+
     // Use wait_with_output() in a separate thread for timeout support.
     // wait_with_output() internally reads stdout/stderr pipes to completion,
     // avoiding the deadlock that would occur if we only waited on the child.
@@ -163,7 +170,7 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
             // Timeout — kill the entire process group (Unix) or process tree (Windows)
             // to prevent resource leaks from grandchildren.
             debug!(command = %command, pid = %pid, timeout_secs = %timeout, "Command timed out, killing process group");
-            let _killed = kill_process_tree(pid);
+            let _killed = kill_process_tree(pid, pgid_created);
 
             Ok(ToolResult {
                 success: false,
@@ -186,8 +193,11 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
 ///
 /// 调用 `killpg` 前先使用 `kill(pid, 0)` 检查进程是否仍然存活，
 /// 防止在子进程已自然退出、PID 被内核回收后误杀不相关的进程。
+///
+/// `pgid_created` 表示进程组是否已成功创建（Unix 下），
+/// 如果为 false 则回退到 kill 单个进程而非进程组。
 #[cfg(unix)]
-fn kill_process_tree(pid: u32) -> bool {
+fn kill_process_tree(pid: u32, pgid_created: bool) -> bool {
     // First check if the process is still alive (kill with signal 0).
     // This prevents killing a process whose PID has been reused after
     // the child exited naturally between the timeout detection and the kill call.
@@ -196,12 +206,18 @@ fn kill_process_tree(pid: u32) -> bool {
         // because it means the process isn't ours to kill).
         return false;
     }
-    // Negative PID = process group, which kills the process and all its children.
-    unsafe { libc::killpg(pid as i32, libc::SIGKILL) == 0 }
+    if pgid_created {
+        // Negative PID = process group, which kills the process and all its children.
+        unsafe { libc::killpg(pid as i32, libc::SIGKILL) == 0 }
+    } else {
+        // Fallback: kill just the process itself (not the group).
+        // This is safe when the process group couldn't be created.
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) == 0 }
+    }
 }
 
 #[cfg(not(unix))]
-fn kill_process_tree(pid: u32) -> bool {
+fn kill_process_tree(pid: u32, _pgid_created: bool) -> bool {
     std::process::Command::new("taskkill")
         .args(&["/F", "/T", "/PID", &pid.to_string()])
         .output()

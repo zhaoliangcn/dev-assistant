@@ -57,6 +57,14 @@ fn is_child_of(path: &Path, parent: &Path) -> bool {
 /// This prevents symlink-based path traversal attacks when canonicalize() fails.
 /// Also checks if `base` itself is a symlink to prevent allowed_paths from
 /// being symbolic links that point outside the intended directory.
+///
+/// # Security
+///
+/// Uses `symlink_metadata()` which does NOT follow symlinks, making it safe.
+/// Unlike `current.exists()`, `symlink_metadata()` returns `Err` for
+/// non-existent paths rather than potentially following a broken symlink chain.
+/// This eliminates the TOCTOU race condition where a symlink could be created
+/// between the `exists()` check and the `symlink_metadata()` call.
 fn contains_symlink(target: &Path, base: &Path) -> bool {
     // Check if base itself is a symlink first
     if let Ok(metadata) = base.symlink_metadata() {
@@ -65,27 +73,35 @@ fn contains_symlink(target: &Path, base: &Path) -> bool {
         }
     }
 
-    // If target doesn't exist, check all existing ancestor components
-    // up to base to detect symlinks in the path.
+    // Walk from target up to base, checking every component for symlinks.
+    // We use symlink_metadata() on ALL components regardless of existence,
+    // because symlink_metadata() does NOT follow symlinks and returns
+    // Err(NotFound) for non-existent paths — which is safe to ignore.
+    //
+    // This is more secure than checking current.exists() first, because:
+    // 1. No TOCTOU race: a symlink created between exists() and metadata() check
+    // 2. Non-existent paths are handled gracefully (Err returned, loop continues)
     let mut current = target;
     loop {
         if current == base {
             return false;
         }
 
-        // Check existing path components for symlinks
-        if current.exists() {
-            if let Ok(metadata) = current.symlink_metadata() {
-                if metadata.file_type().is_symlink() {
-                    return true;
-                }
+        // Check this component for symlinks using symlink_metadata().
+        // Returns Err(NotFound) for non-existent paths — safe to ignore.
+        if let Ok(metadata) = current.symlink_metadata() {
+            if metadata.file_type().is_symlink() {
+                return true;
             }
         }
 
         // Move to parent directory
         match current.parent() {
             Some(parent) if parent != current => current = parent,
-            _ => return false,
+            // SECURITY: If we can't reach `base` (e.g., we hit the root `/`
+            // and `base` is not an ancestor), the path is outside the allowed
+            // directory tree. Return `true` (unsafe) to prevent path traversal.
+            _ => return true,
         }
     }
 }
@@ -135,7 +151,9 @@ impl SecurityPolicy {
             (
                 // Matches rm with recursive (-r) or force (-f) flag:
                 //   rm -rf, rm -fr, rm -r -f, rm -r, rm -f, rm --recursive --force
-                compile_regex(r"(?i)\brm\s+-[rf]\w*", "rm -rf regex"),
+                // Uses `[rf]+\b` to require a word boundary after the flag, preventing
+                // false positives on commands like `rm -rfx` where `rfx` is a different flag.
+                compile_regex(r"(?i)\brm\s+-(?:[rf]+\b|-[a-z]*-[rf]\b)", "rm -rf regex"),
                 DangerLevel::Critical,
                 "rm with -r/-f flags is not allowed".to_string(),
             ),

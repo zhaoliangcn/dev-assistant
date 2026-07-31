@@ -45,6 +45,9 @@
                             <div class="message-header">
                                 <span class="message-role">助手</span>
                                 <span class="message-time" x-text="msg.time || ''"></span>
+                                <button type="button" class="copy-btn small"
+                                        @click="copyMessage(msg.content)"
+                                        x-text="copiedMessageId ? '✅ 已复制' : '📋 复制'"></button>
                             </div>
                             <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
                         </div>
@@ -91,11 +94,12 @@
             <form class="input-form"
                   @submit.prevent="sendMessage()">
                 <div class="grid">
-                    <input type="text"
-                           x-model="input"
-                           placeholder="输入消息... (Enter 发送)"
-                           autofocus
-                           required>
+                    <textarea x-model="input"
+                              placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
+                              rows="2"
+                              autofocus
+                              required
+                              @keydown="onInputKeydown($event)"></textarea>
                     <button type="submit" class="primary" :disabled="!input.trim()">
                         发送
                     </button>

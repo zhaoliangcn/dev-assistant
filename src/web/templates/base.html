@@ -15,15 +15,22 @@
 </head>
 <body>
     <header class="container-fluid">
-        <nav>
+        <nav x-data="{}">
             <ul>
                 <li><strong><a href="/" class="contrast">🤖 Dev-Assistant</a></strong></li>
             </ul>
             <ul>
                 <li>
+                    <span class="status-indicator"
+                          :class="$store.connection.connected ? 'online' : 'offline'">
+                        <span class="status-dot"></span>
+                        <span x-text="$store.connection.connected ? '在线' : '离线'"></span>
+                    </span>
+                </li>
+                <li>
                     <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
-                            @click="toggleTheme()" :title="themeLabel()" aria-label="切换主题">
-                        <span x-text="themeLabel()"></span>
+                            @click="$store.theme.toggle()" :title="$store.theme.modeLabel()" aria-label="切换主题">
+                        <span x-text="$store.theme.label()"></span>
                     </button>
                 </li>
                 <li><a href="/" role="button" class="outline secondary">对话</a></li>

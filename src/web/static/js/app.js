@@ -5,6 +5,65 @@
 // 功能：WS 连接/重连、消息渲染（markdown + 语法高亮）、
 //       可替换状态条、assistant 消息流式增量更新。
 
+// W7: 全局状态 store — header 在线指示器与主题按钮位于 chatApp 的
+// x-data 作用域之外，因此连接/主题状态通过 Alpine store 共享。
+document.addEventListener('alpine:init', () => {
+    if (!window.Alpine) return;
+
+    window.Alpine.store('connection', { connected: false });
+
+    window.Alpine.store('theme', {
+        theme: localStorage.getItem('dev-assistant-theme') || 'auto',
+        systemDark: false,
+
+        init() {
+            this.systemDark = window.matchMedia &&
+                window.matchMedia('(prefers-color-scheme: dark)').matches;
+            this.apply();
+        },
+
+        get dark() {
+            return this.theme === 'dark' ||
+                (this.theme === 'auto' && this.systemDark);
+        },
+
+        // 当前主题图标（按钮显示）
+        label() {
+            return this.dark ? '☀️' : '🌙';
+        },
+
+        // 主题模式提示（按钮 title）：自动 / 深色 / 浅色
+        modeLabel() {
+            if (this.theme === 'auto') return '主题：自动（当前' + (this.dark ? '深色' : '浅色') + '）';
+            return this.theme === 'dark' ? '主题：深色' : '主题：浅色';
+        },
+
+        // 应用 data-theme + 同步 highlight.js 主题样式表
+        apply() {
+            document.documentElement.setAttribute('data-theme', this.dark ? 'dark' : 'light');
+            const hlCss = document.getElementById('hljs-theme');
+            if (hlCss) {
+                hlCss.href = this.dark
+                    ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css'
+                    : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+            }
+        },
+
+        // 循环切换：auto → dark → light → auto
+        toggle() {
+            if (this.theme === 'auto') {
+                this.theme = this.systemDark ? 'light' : 'dark';
+            } else if (this.theme === 'dark') {
+                this.theme = 'light';
+            } else {
+                this.theme = 'auto';
+            }
+            localStorage.setItem('dev-assistant-theme', this.theme);
+            this.apply();
+        },
+    });
+});
+
 function chatApp() {
     let wsInstance = null;
     let reconnectTimer = null;
@@ -21,49 +80,19 @@ function chatApp() {
 
         init() {
             this.connectWS();
-            this.initTheme();
-        },
-
-        // ── 主题 ──────────────────────────────────────────────────────
-
-        // 读取本地偏好主题，缺省跟随系统 prefers-color-scheme
-        theme: 'auto',
-        systemDark: false,
-
-        initTheme() {
-            this.systemDark = window.matchMedia &&
-                window.matchMedia('(prefers-color-scheme: dark)').matches;
-            this.theme = localStorage.getItem('dev-assistant-theme') || 'auto';
-            this.applyTheme();
-        },
-
-        applyTheme() {
-            const dark = this.theme === 'dark' ||
-                (this.theme === 'auto' && this.systemDark);
-            document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-            // 同步 highlight.js 主题样式表（暗色用 github-dark，亮色用 github）
-            const hlCss = document.getElementById('hljs-theme');
-            if (hlCss) {
-                hlCss.href = dark
-                    ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css'
-                    : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+            // 主题由全局 store 管理（header 按钮与聊天区共享）
+            if (window.Alpine) {
+                window.Alpine.store('theme').init();
             }
         },
 
-        toggleTheme() {
-            if (this.theme === 'auto') {
-                this.theme = this.systemDark ? 'light' : 'dark';
-            } else {
-                this.theme = this.theme === 'dark' ? 'light' : 'dark';
-            }
-            localStorage.setItem('dev-assistant-theme', this.theme);
-            this.applyTheme();
-        },
+        // ── 连接状态 ──────────────────────────────────────────────────
 
-        themeLabel() {
-            const dark = this.theme === 'dark' ||
-                (this.theme === 'auto' && this.systemDark);
-            return dark ? '☀️' : '🌙';
+        // W7: 同步连接状态到全局 store（header 指示器）
+        setConnected(v) {
+            if (window.Alpine) {
+                window.Alpine.store('connection').connected = v;
+            }
         },
 
         // ── WebSocket ─────────────────────────────────────────────────
@@ -87,10 +116,12 @@ function chatApp() {
             wsInstance.onopen = () => {
                 self.connected = true;
                 reconnectAttempts = 0;
+                self.setConnected(true);
             };
 
             wsInstance.onclose = () => {
                 self.connected = false;
+                self.setConnected(false);
                 if (reconnectAttempts < 10) {
                     const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
                     reconnectAttempts++;
@@ -120,6 +151,18 @@ function chatApp() {
                 content: content,
                 time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
             }, extra || {})];
+            this.$nextTick(() => this.scrollToBottom(false));
+        },
+
+        // W5: 消息更新后自动滚动到底部。
+        // 用户上翻阅读历史（距底部超过阈值）时不打扰；force=true 强制滚动
+        // （用于用户主动发送消息的场景）。
+        scrollToBottom(force) {
+            const el = this.$refs.list;
+            if (!el) return;
+            const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+            if (!force && !nearBottom) return;
+            el.scrollTop = el.scrollHeight;
         },
 
         handleServerEvent(msg) {
@@ -182,6 +225,8 @@ function chatApp() {
                         streaming: true,
                         time: this.messages[idx].time,
                     };
+                    // 流式跟随：用户若停留在底部则实时滚动
+                    this.$nextTick(() => this.scrollToBottom(false));
                     return;
                 }
                 // 找不到进行中的 assistant 消息则按完整消息追加
@@ -202,6 +247,8 @@ function chatApp() {
 
             this.addMessage('user', text);
             this.input = '';
+            // 用户主动发送：强制滚动到底部
+            this.$nextTick(() => this.scrollToBottom(true));
 
             if (wsInstance && wsInstance.readyState === WebSocket.OPEN) {
                 wsInstance.send(JSON.stringify({
@@ -209,6 +256,15 @@ function chatApp() {
                     content: text,
                     id: 'msg_' + Date.now() + '_' + (this.messageId++)
                 }));
+            }
+        },
+
+        // W8: textarea 按键处理 — Enter 发送，Shift+Enter 换行。
+        // isComposing 排除中文输入法选字时的 Enter 确认。
+        onInputKeydown(event) {
+            if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+                event.preventDefault();
+                this.sendMessage();
             }
         },
 
@@ -236,24 +292,41 @@ function chatApp() {
             return out;
         },
 
-        // 代码块高亮：优先用 highlight.js；未加载时回退为转义文本
+        // 代码块高亮：优先用 highlight.js；未加载时回退为转义文本。
+        // 外层包复制按钮（onclick 委托给全局 copyCode）。
         highlightCode(code, lang) {
             const escaped = this.escapeHtml(code);
-            if (typeof window.hljs === 'undefined') {
-                const cls = lang ? ' class="language-' + lang + '"' : '';
-                return '<pre><code' + cls + '>' + escaped + '</code></pre>';
-            }
             let html;
-            try {
-                const detected = lang && window.hljs.getLanguage(lang)
-                    ? { language: lang }
-                    : {};
-                html = window.hljs.highlight(code, detected).value;
-            } catch (e) {
+            if (typeof window.hljs === 'undefined') {
                 html = escaped;
+            } else {
+                try {
+                    const detected = lang && window.hljs.getLanguage(lang)
+                        ? { language: lang }
+                        : {};
+                    html = window.hljs.highlight(code, detected).value;
+                } catch (e) {
+                    html = escaped;
+                }
             }
             const cls = lang ? ' class="language-' + lang + '"' : '';
-            return '<pre><code' + cls + '>' + html + '</code></pre>';
+            const langLabel = lang ? lang : 'code';
+            return '<div class="code-block">' +
+                '<div class="code-block-header">' +
+                '<span class="code-block-lang">' + this.escapeHtml(langLabel) + '</span>' +
+                '<button type="button" class="copy-btn" onclick="copyCode(this)">📋 复制</button>' +
+                '</div>' +
+                '<pre><code' + cls + '>' + html + '</code></pre>' +
+                '</div>';
+        },
+
+        // W6: 复制消息全文（消息头复制按钮）
+        copyMessage(content) {
+            const self = this;
+            copyTextToClipboard(content).then(() => {
+                self.copiedMessageId = Date.now();
+                setTimeout(() => { self.copiedMessageId = null; }, 1500);
+            });
         },
 
         formatContent(content) {
@@ -378,3 +451,41 @@ function chatApp() {
         }
     };
 }
+
+// ── 全局复制工具（W6） ─────────────────────────────────────────────
+
+// 异步复制文本到剪贴板；回退到 document.execCommand（旧浏览器/非 https）
+function copyTextToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    }
+    return Promise.resolve(fallbackCopy(text));
+}
+
+function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand('copy');
+    } catch (e) {
+        console.error('复制失败:', e);
+    }
+    document.body.removeChild(ta);
+}
+
+// 代码块复制按钮：从按钮向上找到 .code-block 容器内的 <code> 文本
+function copyCode(btn) {
+    const block = btn.closest('.code-block');
+    if (!block) return;
+    const code = block.querySelector('pre code');
+    const text = code ? code.innerText : '';
+    copyTextToClipboard(text).then(() => {
+        btn.textContent = '✅ 已复制';
+        setTimeout(() => { btn.textContent = '📋 复制'; }, 1500);
+    });
+}
+

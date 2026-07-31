@@ -468,6 +468,20 @@ impl Agent {
         self.depth
     }
 
+    /// 构建 stage 模板的 finish 警告后缀。
+    ///
+    /// 所有 6 个阶段共享相同的"必须调用 finish 工具终止本阶段"警告格式，
+    /// 仅输出描述和示例摘要不同。提取为辅助函数减少重复。
+    fn finish_warning(output_desc: &str, example_summary: &str) -> String {
+        format!(
+            "⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
+             并将{}摘要作为 `summary` 参数传入，例如：\n\
+             finish(summary=\"{}\")。\n\
+             切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
+            output_desc, example_summary
+        )
+    }
+
     /// 运行流水线：按 设计→编码→测试→审查→修复→记录 六个阶段顺序执行。
     ///
     /// 每个阶段创建一个对应身份的子 Agent，上下文通过文件系统存储。
@@ -514,11 +528,9 @@ impl Agent {
                      3. 数据流设计\n\
                      4. 关键设计决策和理由\n\n\
                      请使用 kb_store 记录架构决策到 pipeline/stage-0-architecture/ 目录下。\n\n\
-                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
-                     并将架构设计摘要作为 `summary` 参数传入，例如：\n\
-                     finish(summary=\"架构设计完成：模块划分、接口定义、数据流、决策理由\")。\n\
-                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
-                    task
+                     {}",
+                    task,
+                    Self::finish_warning("架构设计", "架构设计完成：模块划分、接口定义、数据流、决策理由")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[0]),
             },
@@ -537,11 +549,9 @@ impl Agent {
                      3. 确保代码编译通过\n\n\
                      注意：严格遵循架构设计，不擅自修改接口定义。\n\n\
                      请使用 kb_store 记录修改的文件列表到 pipeline/stage-1-implementation/ 目录下。\n\n\
-                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
-                     并将代码实现摘要作为 `summary` 参数传入，例如：\n\
-                     finish(summary=\"代码实现完成：新增文件、关键接口、测试覆盖\")。\n\
-                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
-                    task
+                     {}",
+                    task,
+                    Self::finish_warning("代码实现", "代码实现完成：新增文件、关键接口、测试覆盖")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[1]),
             },
@@ -559,11 +569,9 @@ impl Agent {
                      2. 运行测试并收集结果\n\
                      3. 报告测试覆盖率和问题\n\n\
                      请使用 kb_store 记录测试结果到 pipeline/stage-2-testing/ 目录下。\n\n\
-                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
-                     并将测试报告摘要作为 `summary` 参数传入，例如：\n\
-                     finish(summary=\"测试完成：N 个测试用例，M 个通过，K 个失败\")。\n\
-                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
-                    task
+                     {}",
+                    task,
+                    Self::finish_warning("测试报告", "测试完成：N 个测试用例，M 个通过，K 个失败")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[2]),
             },
@@ -584,11 +592,9 @@ impl Agent {
                      5. 错误处理是否完善\n\n\
                      请使用 kb_store 记录审查结果到 pipeline/stage-3-review/ 目录下。\n\n\
                      请输出问题清单（含严重程度）和改进建议。\n\n\
-                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
-                     并将审查报告摘要作为 `summary` 参数传入，例如：\n\
-                     finish(summary=\"审查完成：发现 N 个问题，其中严重 X 个，建议 Y 项\")。\n\
-                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
-                    task
+                     {}",
+                    task,
+                    Self::finish_warning("审查报告", "审查完成：发现 N 个问题，其中严重 X 个，建议 Y 项")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[3]),
             },
@@ -607,11 +613,9 @@ impl Agent {
                      3. 验证修复效果\n\n\
                      注意：只修复审查中提出的问题，不要引入新的功能变更。\n\n\
                      请使用 kb_store 记录修复记录到 pipeline/stage-4-debug/ 目录下。\n\n\
-                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
-                     并将修复摘要作为 `summary` 参数传入，例如：\n\
-                     finish(summary=\"修复完成：处理 N 个问题，编译通过\")。\n\
-                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
-                    task
+                     {}",
+                    task,
+                    Self::finish_warning("修复", "修复完成：处理 N 个问题，编译通过")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[4]),
             },
@@ -630,11 +634,9 @@ impl Agent {
                      3. 测试结果概要\n\
                      4. 未解决的问题（如果有）\n\n\
                      然后使用 git add 和 git commit 提交代码变更。\n\n\
-                     ⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
-                     并将记录摘要作为 `summary` 参数传入，例如：\n\
-                     finish(summary=\"进度已记录：功能列表、文件清单、测试结果\")。\n\
-                     切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
-                    task
+                     {}",
+                    task,
+                    Self::finish_warning("进度记录", "进度已记录：功能列表、文件清单、测试结果")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[5]),
             }];

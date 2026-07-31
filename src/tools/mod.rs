@@ -293,7 +293,7 @@ impl ToolRegistry {
     /// 仅用于：
     /// - 元工具（finish/restart）——它们不操作外部资源
     /// - 用户已显式批准的工具
-    pub fn execute_approved(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
+    fn execute_approved(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
         debug!(tool = name, "Executing approved tool (security check bypassed)");
         self.execute_tool(name, arguments)
     }

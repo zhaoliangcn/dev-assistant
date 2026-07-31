@@ -8,6 +8,7 @@
     --message-user-bg: #e3f2fd;
     --message-user-color: #1a1a2e;
     --message-user-border: #bbdefb;
+    --status-thinking-color: #6aaef2;
 }
 
 /* 暗色模式适配：使用 Pico CSS 的 data-theme 属性 */
@@ -152,21 +153,77 @@ footer {
     border-radius: 0.375rem;
     padding: 0.75rem;
     overflow-x: auto;
+    background: var(--pico-card-sectioning-background-color);
 }
 
 .message-content code {
     font-size: 0.875em;
 }
 
-/* ── 思考中指示器 ── */
+/* ── Markdown 扩展样式（W1：标题/引用/表格/列表） ── */
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4,
+.message-content h5,
+.message-content h6 {
+    margin: 0.5rem 0 0.25rem;
+    line-height: 1.3;
+}
+
+.message-content p {
+    margin: 0.25rem 0;
+}
+
+.message-content blockquote {
+    margin: 0.25rem 0;
+    padding: 0.25rem 0.75rem;
+    border-left: 3px solid var(--pico-muted-border-color);
+    color: var(--pico-muted-color);
+}
+
+.message-content ul,
+.message-content ol {
+    margin: 0.25rem 0;
+    padding-left: 1.5rem;
+}
+
+.message-content table {
+    margin: 0.5rem 0;
+    border-collapse: collapse;
+    font-size: 0.9em;
+    width: 100%;
+}
+
+.message-content th,
+.message-content td {
+    border: 1px solid var(--pico-muted-border-color);
+    padding: 0.375rem 0.625rem;
+    text-align: left;
+}
+
+.message-content th {
+    background: var(--pico-card-sectioning-background-color);
+    font-weight: 600;
+}
+
+/* ── 思考/状态条（W2：可替换，不进入消息列表） ── */
 
 .thinking {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem;
-    color: var(--pico-muted-color);
+    color: var(--status-thinking-color, var(--pico-muted-color));
     font-style: italic;
+    border-left: 3px solid var(--status-thinking-color, var(--pico-primary));
+    background: var(--pico-card-sectioning-background-color);
+    border-radius: 0.375rem;
+}
+
+[data-theme="dark"] .thinking {
+    --status-thinking-color: #6aaef2;
 }
 
 .spinner {
@@ -177,6 +234,7 @@ footer {
     border-top-color: var(--pico-primary);
     border-radius: 50%;
     animation: spin 0.6s linear infinite;
+    flex-shrink: 0;
 }
 
 @keyframes spin {
@@ -217,6 +275,10 @@ footer {
     padding: 0.5rem;
     background: var(--pico-card-sectioning-background-color);
     border-radius: 0.25rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 40vh;
+    overflow-y: auto;
 }
 
 /* ── 工具栏 ── */

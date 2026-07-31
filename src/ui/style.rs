@@ -1,51 +1,53 @@
 //! UI 样式常量（颜色、间距、符号）
 //!
 //! # 约定
+//! - 颜色统一由 [`crate::ui::theme`] 管理（三层语义化调色板，支持亮/暗自适应）。
+//!   本模块的历史颜色常量仅作为**向后兼容别名**转发到暗色主题值，
+//!   新代码应使用 [`crate::ui::theme::active_theme`] 取角色色。
+//! - 图标、分隔线等非颜色常量保留在本模块。
 //! - 使用 `const` 而非 `static`，编译时内联，无运行时开销。
-//! - 新代码应优先引用这些常量而非硬编码 ANSI 序列，以保持一致性。
-//! - 未使用的常量会被保留（`#[allow(dead_code)]`），方便后续 UI 开发直接使用。
 
 #![allow(dead_code)]
 
-// ── ANSI 颜色 ──────────────────────────────────────────────────────────
+use crate::ui::theme::Theme;
+
+// ── 颜色常量（向后兼容别名，转发自暗色主题） ─────────────────────────────
 
 /// 重置所有样式
-pub const RESET: &str = "\x1b[0m";
+pub const RESET: &str = crate::ui::theme::RESET;
 
 /// 粗体
-pub const BOLD: &str = "\x1b[1m";
+pub const BOLD: &str = crate::ui::theme::BOLD;
 
 /// 暗淡（灰色）
-pub const DIM: &str = "\x1b[2m";
+pub const DIM: &str = crate::ui::theme::DIM;
 
 /// 斜体
-pub const ITALIC: &str = "\x1b[3m";
+pub const ITALIC: &str = crate::ui::theme::ITALIC;
 
 /// 下划线
-pub const UNDERLINE: &str = "\x1b[4m";
+pub const UNDERLINE: &str = crate::ui::theme::UNDERLINE;
 
-// ── 前景色 (24-bit) ────────────────────────────────────────────────────
+/// 蓝色（行内代码用）→ 语义角色 `code_fg`
+pub const CODE_BLUE: &str = Theme::dark().code_fg;
 
-/// 蓝色（行内代码用）
-pub const CODE_BLUE: &str = "\x1b[38;2;156;189;248m";
+/// 红色（错误用）→ 语义角色 `error_fg`
+pub const ERROR_RED: &str = Theme::dark().error_fg;
 
-/// 红色（错误用）
-pub const ERROR_RED: &str = "\x1b[38;2;239;68;68m";
+/// 绿色（成功用）→ 语义角色 `success_fg`
+pub const SUCCESS_GREEN: &str = Theme::dark().success_fg;
 
-/// 绿色（成功用）
-pub const SUCCESS_GREEN: &str = "\x1b[38;2;72;187;120m";
+/// 黄色（标题用）→ 语义角色 `heading_fg`
+pub const HEADING_YELLOW: &str = Theme::dark().heading_fg;
 
-/// 黄色（标题用）
-pub const HEADING_YELLOW: &str = "\x1b[1;33m";
+/// 灰色（系统消息用）→ 语义角色 `muted_fg`
+pub const SYSTEM_GRAY: &str = Theme::dark().muted_fg;
 
-/// 灰色（系统消息用）
-pub const SYSTEM_GRAY: &str = "\x1b[2m";
+/// 青色（工具调用用）→ 语义角色 `tool_fg`
+pub const TOOL_CYAN: &str = Theme::dark().tool_fg;
 
-/// 青色（工具调用用）
-pub const TOOL_CYAN: &str = "\x1b[38;2;79;193;255m";
-
-/// 链接蓝色
-pub const LINK_BLUE: &str = "\x1b[4;34m";
+/// 链接蓝色 → 语义角色 `link_fg`
+pub const LINK_BLUE: &str = Theme::dark().link_fg;
 
 // ── 分隔线字符 ─────────────────────────────────────────────────────────
 

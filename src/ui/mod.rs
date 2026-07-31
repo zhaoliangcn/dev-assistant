@@ -3,6 +3,7 @@ pub mod input;
 pub mod markdown;
 pub mod output_impls;
 pub mod style;
+pub mod theme;
 pub use blocks::MessageBlock;
 pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};
@@ -78,9 +79,10 @@ pub fn render_blocks_to_string(
                     *guard = Some(content.clone());
                 }
                 let mut result = truncated.join("\n");
+                let theme = crate::ui::theme::active_theme();
                 result.push_str(&format!(
-                    "\n\x1b[2m... 还有 {} 行（输入 /expand 查看完整内容）\x1b[0m",
-                    remaining
+                    "\n{}... 还有 {} 行（输入 /expand 查看完整内容）{}",
+                    theme.muted_fg, remaining, crate::ui::theme::RESET
                 ));
                 result
             } else {
@@ -213,8 +215,10 @@ pub fn render_progress_bar(
     let empty = bar_width.saturating_sub(filled);
 
     let bar = format!(
-        "\x1b[38;2;72;187;120m{}\x1b[0m{}",
+        "{}{}{}{}",
+        crate::ui::theme::active_theme().success_fg,
         "█".repeat(filled),
+        crate::ui::theme::RESET,
         "░".repeat(empty),
     );
 
@@ -255,7 +259,12 @@ pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
         }
         None => {
             // 使用柔和的前景色显示输入提示
-            write!(stdout, "\x1b[38;2;128;128;128m> \x1b[0m")?;
+            write!(
+                stdout,
+                "{}> {}",
+                crate::ui::theme::active_theme().input_prompt_fg,
+                crate::ui::theme::RESET
+            )?;
         }
     }
     

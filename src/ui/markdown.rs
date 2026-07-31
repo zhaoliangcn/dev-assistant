@@ -39,13 +39,32 @@ static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(|| {
     ThemeSet::load_defaults()
 });
 
-/// Markdown 渲染器（无状态，所有数据来自全局缓存）。
-#[derive(Debug, Clone, Default)]
-pub struct MarkdownRenderer;
+/// Markdown 渲染器（渲染样式来自当前主题，语法集/主题集为全局缓存）。
+///
+/// 主题默认取 [`crate::ui::theme::active_theme`]（自动检测亮/暗），
+/// 测试可通过 [`MarkdownRenderer::with_theme`] 注入固定主题保证断言稳定。
+#[derive(Debug, Clone)]
+pub struct MarkdownRenderer {
+    theme: crate::ui::theme::Theme,
+}
+
+impl Default for MarkdownRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MarkdownRenderer {
     pub fn new() -> Self {
-        Self
+        Self {
+            theme: *crate::ui::theme::active_theme(),
+        }
+    }
+
+    /// 使用指定主题创建渲染器（测试/定制用）。
+    #[must_use]
+    pub fn with_theme(theme: crate::ui::theme::Theme) -> Self {
+        Self { theme }
     }
     
     /// 渲染 Markdown 文本为终端格式
@@ -146,7 +165,10 @@ impl MarkdownRenderer {
                 }
                 Event::Code(code) => {
                     if in_cell {
-                        current_cell.push_str(&format!("\x1b[38;2;156;189;248m{}\x1b[0m", code));
+                        current_cell.push_str(&format!(
+                            "{}{}{}",
+                            self.theme.code_fg, code, crate::ui::theme::RESET
+                        ));
                     } else {
                         self.render_inline_code(&mut output, &code);
                     }
@@ -288,8 +310,14 @@ impl MarkdownRenderer {
             .find_syntax_by_token(clean_lang)
             .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
 
-        let theme = &THEME_SET.themes["base16-ocean.dark"];
-        let mut highlighter = HighlightLines::new(syntax, theme);
+        // 语法高亮主题：暗色用 base16-ocean.dark，亮色用 InspiredGitHub
+        let syntect_theme_name = if self.theme.mode == crate::ui::theme::ThemeMode::Light {
+            "InspiredGitHub"
+        } else {
+            "base16-ocean.dark"
+        };
+        let syntect_theme = &THEME_SET.themes[syntect_theme_name];
+        let mut highlighter = HighlightLines::new(syntax, syntect_theme);
 
         // 收集所有行（含换行标记）
         let lines: Vec<&str> = LinesWithEndings::from(code).collect();
@@ -337,19 +365,21 @@ impl MarkdownRenderer {
 
     /// 渲染 diff 代码块（unified diff 格式）。
     ///
-    /// 配色：
-    /// - `+` 开头 → 🟢 绿色 `\x1b[38;2;72;187;120m`
-    /// - `-` 开头 → 🔴 红色 `\x1b[38;2;239;68;68m`
-    /// - `@@` 开头 → 青色粗体 `\x1b[1;38;2;79;193;255m`
-    /// - `---`/`+++` 开头 → 暗淡 `\x1b[2m`
+    /// 配色（来自当前主题）：
+    /// - `+` 开头 → `diff_added_fg` 前景 + `diff_added_bg` 背景（绿）
+    /// - `-` 开头 → `diff_deleted_fg` 前景 + `diff_deleted_bg` 背景（红）
+    /// - `@@` 开头 → `diff_hunk_fg`（青色粗体）
+    /// - `---`/`+++` 开头 → `muted_fg`（暗淡）
     /// - 其余行 → 普通
-    const DIFF_GREEN: &str = "\x1b[38;2;72;187;120m";
-    const DIFF_RED: &str = "\x1b[38;2;239;68;68m";
-    const DIFF_CYAN: &str = "\x1b[1;38;2;79;193;255m";
-    const DIFF_DIM: &str = "\x1b[2m";
-    const RESET: &str = "\x1b[0m";
-
     fn render_diff_block(&self, output: &mut String, code: &str) {
+        let added_fg = self.theme.diff_added_fg;
+        let added_bg = self.theme.diff_added_bg;
+        let deleted_fg = self.theme.diff_deleted_fg;
+        let deleted_bg = self.theme.diff_deleted_bg;
+        let hunk = self.theme.diff_hunk_fg;
+        let dim = self.theme.muted_fg;
+        let reset = crate::ui::theme::RESET;
+
         for line in LinesWithEndings::from(code) {
             let line = line.strip_suffix('\n').unwrap_or(line);
             let line = line.strip_suffix('\r').unwrap_or(line);
@@ -363,25 +393,27 @@ impl MarkdownRenderer {
 
             // 先检查 ---/+++ 文件头，再检查 +/-
             if line.starts_with("---") || line.starts_with("+++") {
-                output.push_str(Self::DIFF_DIM);
+                output.push_str(dim);
                 output.push_str(line);
-                output.push_str(Self::RESET);
+                output.push_str(reset);
             } else {
                 match first {
                     '+' => {
-                        output.push_str(Self::DIFF_GREEN);
+                        output.push_str(added_fg);
+                        output.push_str(added_bg);
                         output.push_str(line);
-                        output.push_str(Self::RESET);
+                        output.push_str(reset);
                     }
                     '-' => {
-                        output.push_str(Self::DIFF_RED);
+                        output.push_str(deleted_fg);
+                        output.push_str(deleted_bg);
                         output.push_str(line);
-                        output.push_str(Self::RESET);
+                        output.push_str(reset);
                     }
                     '@' if line.starts_with("@@") => {
-                        output.push_str(Self::DIFF_CYAN);
+                        output.push_str(hunk);
                         output.push_str(line);
-                        output.push_str(Self::RESET);
+                        output.push_str(reset);
                     }
                     _ => {
                         output.push_str(line);
@@ -394,21 +426,23 @@ impl MarkdownRenderer {
     
     /// 渲染行内代码
     fn render_inline_code(&self, output: &mut String, code: &str) {
-        output.push_str("\x1b[38;2;156;189;248m`");  // 蓝色
+        output.push_str(self.theme.code_fg);  // 行内代码前景色
+        output.push('`');
         output.push_str(code);
-        output.push_str("`\x1b[0m");
+        output.push('`');
+        output.push_str(crate::ui::theme::RESET);
     }
     
     /// 渲染标签开始
     fn render_start_tag(&self, output: &mut String, tag: &Tag) {
         match tag {
-            Tag::Strong => output.push_str("\x1b[1m"),
-            Tag::Emphasis => output.push_str("\x1b[3m"),
-            Tag::Link { .. } => output.push_str("\x1b[4;34m"),
+            Tag::Strong => output.push_str(crate::ui::theme::BOLD),
+            Tag::Emphasis => output.push_str(crate::ui::theme::ITALIC),
+            Tag::Link { .. } => output.push_str(self.theme.link_fg),
             Tag::List(..) => {}
             Tag::Item => output.push_str("• "),
             Tag::Paragraph => {}
-            Tag::Heading { .. } => output.push_str("\x1b[1;33m"),  // 粗体黄色
+            Tag::Heading { .. } => output.push_str(self.theme.heading_fg),  // 标题
             _ => {}
         }
     }
@@ -416,8 +450,10 @@ impl MarkdownRenderer {
     /// 渲染标签结束
     fn render_end_tag(&self, output: &mut String, tag_end: &TagEnd) {
         match tag_end {
-            TagEnd::Strong | TagEnd::Emphasis | TagEnd::Heading(..) => output.push_str("\x1b[0m"),
-            TagEnd::Link => output.push_str("\x1b[0m"),
+            TagEnd::Strong | TagEnd::Emphasis | TagEnd::Heading(..) => {
+                output.push_str(crate::ui::theme::RESET);
+            }
+            TagEnd::Link => output.push_str(crate::ui::theme::RESET),
             TagEnd::Paragraph => output.push('\n'),
             _ => {}
         }
@@ -430,7 +466,7 @@ mod tests {
     
     #[test]
     fn test_inline_code() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let result = renderer.render("`let x = 1;`");
         assert!(result.contains("let x = 1;"));
         assert!(result.contains("\x1b[38;2;156;189;248m"));  // 蓝色
@@ -438,7 +474,7 @@ mod tests {
     
     #[test]
     fn test_bold() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let result = renderer.render("**bold text**");
         assert!(result.contains("\x1b[1m"));  // 粗体
         assert!(result.contains("\x1b[0m"));  // 重置
@@ -446,14 +482,14 @@ mod tests {
     
     #[test]
     fn test_heading() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let result = renderer.render("# Heading");
         assert!(result.contains("\x1b[1;33m"));  // 粗体黄色
     }
     
     #[test]
     fn test_code_block() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let result = renderer.render("```rust\nfn main() {}\n```");
         // 包含行号（灰色 ANSI 序列）
         assert!(result.contains("\x1b[2m"), "Code block should contain dim line numbers");
@@ -463,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_code_block_with_filename() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let result = renderer.render("```rust:src/main.rs\nfn main() {}\n```");
         // 应包含文件名栏
         assert!(result.contains("src/main.rs"), "Should contain filename in header");
@@ -472,7 +508,7 @@ mod tests {
 
     #[test]
     fn test_code_block_single_line() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let result = renderer.render("```rust\nlet x = 1;\n```");
         // 至少包含行号
         assert!(result.contains("\x1b[2m"), "Should have line numbers");
@@ -480,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_diff_block_added_lines() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let diff = "\
 ```diff
 +fn new_function() {}
@@ -494,7 +530,7 @@ mod tests {
 
     #[test]
     fn test_diff_block_removed_lines() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let diff = "\
 ```diff
 -old_function()
@@ -508,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_diff_block_hunk_header() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let diff = "\
 ```diff
 @@ -1,4 +1,5 @@
@@ -523,7 +559,7 @@ mod tests {
 
     #[test]
     fn test_diff_block_file_header() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let diff = "\
 ```diff
 --- a/old.rs
@@ -537,7 +573,7 @@ mod tests {
 
     #[test]
     fn test_diff_block_mixed() {
-        let renderer = MarkdownRenderer::new();
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
         let diff = "\
 ```diff
 --- a/src/lib.rs
@@ -555,5 +591,28 @@ mod tests {
         assert!(result.contains("\x1b[2m"), "Should contain dim for file headers");
         assert!(result.contains("println"), "Code content should be preserved");
         assert!(result.contains("\x1b[0m"), "Should reset colors");
+    }
+
+    #[test]
+    fn test_diff_block_backgrounds() {
+        let renderer = MarkdownRenderer::with_theme(crate::ui::theme::Theme::dark());
+        let diff = "\
+```diff
++fn new_function() {}
+-old_function()
+```";
+        let result = renderer.render(diff);
+        // 新增行应带绿底（48;2 背景色），删除行应带红底
+        assert!(
+            result.contains("\x1b[48;2;18;42;34m"),
+            "Added lines should have dark green background"
+        );
+        assert!(
+            result.contains("\x1b[48;2;42;18;26m"),
+            "Removed lines should have dark red background"
+        );
+        // 前景色仍保留
+        assert!(result.contains("\x1b[38;2;72;187;120m"), "Added fg preserved");
+        assert!(result.contains("\x1b[38;2;239;68;68m"), "Removed fg preserved");
     }
 }

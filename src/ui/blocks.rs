@@ -68,6 +68,22 @@ impl MessageBlock {
         }
     }
 
+    /// 获取块前缀的状态色（用于渲染时包裹前缀文本）。
+    ///
+    /// 工具调用 → `tool_fg`，成功结果 → `success_fg`，
+    /// 失败结果/错误 → `error_fg`，其余 → `muted_fg`。
+    /// 色值来自当前主题（亮/暗自适应），见 [`crate::ui::theme`]。
+    pub fn status_color(&self) -> &'static str {
+        let theme = crate::ui::theme::active_theme();
+        match self {
+            MessageBlock::ToolCall { .. } => theme.tool_fg,
+            MessageBlock::ToolResult { success: true, .. } => theme.success_fg,
+            MessageBlock::ToolResult { success: false, .. } => theme.error_fg,
+            MessageBlock::Error { .. } => theme.error_fg,
+            _ => theme.muted_fg,
+        }
+    }
+
     /// 获取块的渲染前缀（含文件路径，用于渲染时的完整标题）
     pub fn full_prefix(&self) -> String {
         match self {
@@ -109,9 +125,12 @@ impl MessageBlock {
             MessageBlock::Thinking { content } => content.clone(),
             MessageBlock::ToolCall { tool_name, args } => {
                 let summary = Self::summarize_tool_args(tool_name, args);
+                let theme = crate::ui::theme::active_theme();
                 format!(
-                    "\x1b[38;2;156;189;248m{}\x1b[0m\n{}",
+                    "{}{}{}\n{}",
+                    theme.tool_fg,
                     tool_name,
+                    crate::ui::theme::RESET,
                     summary
                 )
             }

@@ -76,9 +76,9 @@ impl MessageOutput for UIMessageOutput {
         if is_final {
             // 清除可能因终端自动换行产生的残留行，再输出最终内容
             let term_width = crate::ui::get_terminal_width().unwrap_or(80);
-            let prefix = "🤖 助手: ";
-            // 计算总行数：自动换行行数 + 内容中的显式换行数
-            let visual_len = prefix.width() + content.width();
+            // 前缀宽度按纯文本计算（不含 ANSI 色），避免换行行数误判
+            let plain_prefix = "🤖 助手: ";
+            let visual_len = plain_prefix.width() + content.width();
             let wrap_lines = visual_len.saturating_sub(1) / term_width;
             let explicit_lines = content.matches('\n').count();
             let total_lines = wrap_lines + explicit_lines;
@@ -99,7 +99,9 @@ impl MessageOutput for UIMessageOutput {
             self.last_streamed_content = content.to_string();
             // 将换行替换为可见表示，防止 \r 无法清除多行残留
             let display = format!("{} \x1b[5m▊\x1b[0m", content.replace('\n', "\\n"));
-            let _ = write!(stdout, "\r\x1b[2K🤖 助手: {}", display);
+            let theme = crate::ui::theme::active_theme();
+            let prefix = format!("{}🤖 助手:{} ", theme.tool_fg, crate::ui::theme::RESET);
+            let _ = write!(stdout, "\r\x1b[2K{}{}", prefix, display);
             let _ = stdout.flush();
         }
     }

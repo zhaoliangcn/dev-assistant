@@ -161,12 +161,15 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                         match result {
                             Ok(agent_result) => {
                                 if agent_result.success {
-                                    // 发送最终消息（非流式，已完整生成）
-                                    let msg = ServerEvent::assistant_message(
-                                        agent_result.message,
-                                        false,
-                                    );
-                                    let _ = conn_manager.send_to(conn_id, msg).await;
+                                    // 已流式推送过内容时不再重复发送最终消息，
+                                    // 避免前端出现两条 assistant 消息
+                                    if !output.streamed {
+                                        let msg = ServerEvent::assistant_message(
+                                            agent_result.message,
+                                            false,
+                                        );
+                                        let _ = conn_manager.send_to(conn_id, msg).await;
+                                    }
                                 } else {
                                     let err = ServerEvent::error(agent_result.message);
                                     let _ = conn_manager.send_to(conn_id, err).await;
@@ -214,6 +217,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 struct WebMessageOutput {
     conn_manager: Arc<ConnectionManager>,
     conn_id: usize,
+    /// 是否已通过 `streaming_assistant` 推送过流式内容。
+    /// 为 true 时，run() 返回后不再重复发送最终消息，避免前端出现两条。
+    streamed: bool,
 }
 
 impl WebMessageOutput {
@@ -221,6 +227,7 @@ impl WebMessageOutput {
         Self {
             conn_manager,
             conn_id,
+            streamed: false,
         }
     }
 }
@@ -269,5 +276,20 @@ impl MessageOutput for WebMessageOutput {
                 tracing::warn!("WebSocket 同步发送事件失败: {}", e);
             }
         }
+    }
+
+    /// W3: 将 Agent 的流式内容转发为 `assistant_message(streaming=true)` 事件。
+    ///
+    /// `content` 是**累积的完整内容**（见 trait 约定），前端定位最后一条
+    /// assistant 消息并整体替换，实现增量渲染。最终块（`is_final=true`）
+    /// 也以 streaming 事件发送，由 `streamed` 标志阻止 run() 返回后
+    /// 重复发送最终消息。
+    fn streaming_assistant(&mut self, content: &str, is_final: bool) {
+        self.streamed = true;
+        let event = ServerEvent::assistant_message(content.to_string(), true);
+        if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event) {
+            tracing::warn!("WebSocket 流式事件发送失败: {}", e);
+        }
+        let _ = is_final;
     }
 }

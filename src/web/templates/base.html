@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Dev-Assistant{% endblock %}</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <!-- highlight.js 主题样式：由 app.js 按当前主题切换（暗色 github-dark / 亮色 github） -->
+    <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <link rel="stylesheet" href="/static/css/app.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
@@ -19,6 +20,12 @@
                 <li><strong><a href="/" class="contrast">🤖 Dev-Assistant</a></strong></li>
             </ul>
             <ul>
+                <li>
+                    <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
+                            @click="toggleTheme()" :title="themeLabel()" aria-label="切换主题">
+                        <span x-text="themeLabel()"></span>
+                    </button>
+                </li>
                 <li><a href="/" role="button" class="outline secondary">对话</a></li>
             </ul>
         </nav>

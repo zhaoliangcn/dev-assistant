@@ -175,6 +175,8 @@ pub enum SlashCommand {
     Expand,
     /// /grep — 搜索文件内容（支持正则）
     Grep,
+    /// /model — 查看/切换 LLM 模型
+    Model,
 }
 
 impl SlashCommand {
@@ -189,6 +191,7 @@ impl SlashCommand {
             "quiet" => Some(Self::Quiet),
             "expand" => Some(Self::Expand),
             "grep" | "search" => Some(Self::Grep),
+            "model" => Some(Self::Model),
             _ => None,
         }
     }
@@ -248,6 +251,11 @@ impl SlashCommand {
                 println!("🔍 /grep 命令正在搜索文件内容...");
                 SlashAction::Continue
             }
+            SlashCommand::Model => {
+                // /model 由调用方在 REPL 循环中处理（需要访问 LLM 客户端）
+                println!("📦 /model 命令正在切换模型...");
+                SlashAction::Continue
+            }
         }
     }
 
@@ -287,9 +295,23 @@ mod tests {
 
     #[test]
     fn test_parse_slash_command_with_unknown_command() {
-        // "model" is not a built-in builtin, so parse returns None
+        // "unknown" is not a built-in command, so parse returns None
+        let result = SlashCommand::parse("/unknowncmd arg");
+        assert!(result.is_none(), "unknown is not a built-in command");
+    }
+
+    #[test]
+    fn test_parse_model_command() {
+        // /model 是内置命令，应解析为 Model 变体并携带参数
         let result = SlashCommand::parse("/model gpt-4");
-        assert!(result.is_none(), "model is not a built-in command");
+        let (cmd, args) = result.expect("model should be a built-in command");
+        assert_eq!(cmd, SlashCommand::Model);
+        assert_eq!(args, vec!["gpt-4".to_string()]);
+
+        // 无参数也应解析成功
+        let (cmd, args) = SlashCommand::parse("/model").unwrap();
+        assert_eq!(cmd, SlashCommand::Model);
+        assert!(args.is_empty());
     }
 
     #[test]

@@ -428,6 +428,106 @@ impl App {
                         continue;
                     }
 
+                    // /model 特殊处理：查看/切换 LLM 模型（交互式）
+                    if matches!(cmd, ui::input::SlashCommand::Model) {
+                        // 收集为自有 String，释放对 self.agent 的借用，便于后续可变借用
+                        let models: Vec<String> = self
+                            .agent
+                            .list_models()
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect();
+                        let active = self.agent.active_model().to_string();
+
+                        // 带参数：直接按名称切换
+                        if !args.is_empty() {
+                            let target = args.join(" ");
+                            match self.agent.switch_model(&target) {
+                                Ok(_) => {
+                                    let block = ui::MessageBlock::System {
+                                        content: format!("✅ 已切换到模型: {}", target),
+                                    };
+                                    ui::render_block(&block, &markdown_renderer)?;
+                                }
+                                Err(e) => {
+                                    let block = ui::MessageBlock::Error {
+                                        content: format!("❌ 切换失败: {}", e),
+                                    };
+                                    ui::render_block(&block, &markdown_renderer)?;
+                                }
+                            }
+                            continue;
+                        }
+
+                        if models.is_empty() {
+                            let block = ui::MessageBlock::System {
+                                content: "ℹ️ 当前没有可用的模型配置".to_string(),
+                            };
+                            ui::render_block(&block, &markdown_renderer)?;
+                            continue;
+                        }
+
+                        // 列出所有模型，等待用户输入编号选择
+                        let mut lines: Vec<String> = Vec::new();
+                        for (i, name) in models.iter().enumerate() {
+                            let marker = if *name == active { "👉" } else { "  " };
+                            lines.push(format!("  {}. {}{}", i + 1, marker, name));
+                        }
+                        let content = format!(
+                            "📦 可用模型（当前: {}）:\n{}\n\n  输入编号切换（直接回车取消）: ",
+                            active,
+                            lines.join("\n")
+                        );
+                        let block = ui::MessageBlock::System { content };
+                        ui::render_block(&block, &markdown_renderer)?;
+
+                        // 交互式读取编号
+                        match input_system.read_line("  > ") {
+                            Ok(Some(choice)) => {
+                                let choice = choice.trim();
+                                if choice.is_empty() {
+                                    let block = ui::MessageBlock::System {
+                                        content: "ℹ️ 已取消切换".to_string(),
+                                    };
+                                    ui::render_block(&block, &markdown_renderer)?;
+                                    continue;
+                                }
+                                match choice.parse::<usize>() {
+                                    Ok(idx) if idx >= 1 && idx <= models.len() => {
+                                        let target = &models[idx - 1];
+                                        match self.agent.switch_model(target) {
+                                            Ok(_) => {
+                                                let block = ui::MessageBlock::System {
+                                                    content: format!("✅ 已切换到模型: {}", target),
+                                                };
+                                                ui::render_block(&block, &markdown_renderer)?;
+                                            }
+                                            Err(e) => {
+                                                let block = ui::MessageBlock::Error {
+                                                    content: format!("❌ 切换失败: {}", e),
+                                                };
+                                                ui::render_block(&block, &markdown_renderer)?;
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        let block = ui::MessageBlock::Error {
+                                            content: format!("❌ 无效编号: {}", choice),
+                                        };
+                                        ui::render_block(&block, &markdown_renderer)?;
+                                    }
+                                }
+                            }
+                            _ => {
+                                let block = ui::MessageBlock::System {
+                                    content: "ℹ️ 已取消切换".to_string(),
+                                };
+                                ui::render_block(&block, &markdown_renderer)?;
+                            }
+                        }
+                        continue;
+                    }
+
                     // /history 特殊处理：需要访问 agent 的历史数据
                     if matches!(cmd, ui::input::SlashCommand::History) {
                         let messages = self.agent.history_messages();

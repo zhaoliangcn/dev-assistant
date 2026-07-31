@@ -77,15 +77,111 @@ function chatApp() {
         messages: [],
         // W10: 是否正在生成（停止按钮显示）
         busy: false,
+        // S2: 会话历史列表
+        sessions: [],
+        loadingSessions: false,
+        activeSessionId: null,
         // 状态条：thinking/status 事件显示在此（可替换，不进入消息列表）
         pendingStatus: null,
 
         init() {
             this.connectWS();
+            this.loadSessions();
             // 主题由全局 store 管理（header 按钮与聊天区共享）
             if (window.Alpine) {
                 window.Alpine.store('theme').init();
             }
+        },
+
+        // ── 会话历史（S2） ────────────────────────────────────────────
+
+        async loadSessions() {
+            this.loadingSessions = true;
+            try {
+                const resp = await fetch('/api/sessions');
+                const data = await resp.json();
+                this.sessions = Array.isArray(data) ? data : [];
+            } catch (e) {
+                console.error('加载会话列表失败:', e);
+                this.sessions = [];
+            } finally {
+                this.loadingSessions = false;
+            }
+        },
+
+        // 切换会话：加载历史事件并渲染为消息（只读展示）
+        async selectSession(id) {
+            try {
+                const resp = await fetch('/api/sessions/' + encodeURIComponent(id));
+                const data = await resp.json();
+                this.activeSessionId = id;
+                this.messages = this.eventsToMessages(data.events || []);
+                this.pendingStatus = null;
+                this.$nextTick(() => this.scrollToBottom(true));
+            } catch (e) {
+                console.error('加载会话详情失败:', e);
+            }
+        },
+
+        // 新对话：清空当前消息与选中态
+        newChat() {
+            this.messages = [];
+            this.activeSessionId = null;
+            this.pendingStatus = null;
+        },
+
+        // 删除会话（前端乐观移除，失败时重新加载）
+        async deleteSession(id) {
+            if (!confirm('确定删除该会话？')) return;
+            try {
+                const resp = await fetch('/api/sessions/' + encodeURIComponent(id), {
+                    method: 'DELETE',
+                });
+                const data = await resp.json();
+                if (data.deleted) {
+                    this.sessions = this.sessions.filter((s) => s.id !== id);
+                    if (this.activeSessionId === id) {
+                        this.newChat();
+                    }
+                } else {
+                    console.error('删除失败:', data.error || '未知错误');
+                }
+            } catch (e) {
+                console.error('删除会话失败:', e);
+            }
+        },
+
+        // 将持久化事件（serde tag=type, snake_case）映射为消息
+        eventsToMessages(events) {
+            return events
+                .filter((ev) => ev && ev.type)
+                .map((ev) => {
+                    switch (ev.type) {
+                        case 'user_message':
+                            return { role: 'user', content: ev.content || '', time: ev.timestamp };
+                        case 'assistant_message':
+                            return { role: 'assistant', content: ev.content || '', time: ev.timestamp };
+                        case 'system_message':
+                            return { role: 'system', content: ev.content || '', time: ev.timestamp };
+                        case 'tool_call_request':
+                            return { role: 'tool-call', content: ev.name || '工具调用', time: ev.timestamp };
+                        case 'tool_result':
+                            return { role: 'tool-result', content: ev.content || '', time: ev.timestamp };
+                        default:
+                            return null;
+                    }
+                })
+                .filter((m) => m !== null);
+        },
+
+        // 格式化会话时间（ISO → 月-日 时:分）
+        formatSessionTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return iso;
+            const pad = (n) => String(n).padStart(2, '0');
+            return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+                pad(d.getHours()) + ':' + pad(d.getMinutes());
         },
 
         // ── 连接状态 ──────────────────────────────────────────────────
@@ -248,6 +344,11 @@ function chatApp() {
         sendMessage() {
             const text = this.input.trim();
             if (!text || this.busy) return;
+
+            // 处于历史会话查看态时，发送消息自动开启新对话
+            if (this.activeSessionId) {
+                this.newChat();
+            }
 
             this.addMessage('user', text);
             this.input = '';

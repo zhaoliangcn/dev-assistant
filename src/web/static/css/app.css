@@ -527,6 +527,23 @@ footer {
     }
 }
 
+/* ── 会话重命名等 header 控件 ── */
+
+/* W15: 模型切换下拉框 */
+.model-select {
+    margin: 0;
+    width: auto;
+    padding: 0.25rem 1.5rem 0.25rem 0.5rem;
+    font-size: 0.85em;
+    max-width: 160px;
+}
+
+.model-label {
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+    white-space: nowrap;
+}
+
 /* ── 文件浏览器页面（W11） ── */
 
 .file-page {

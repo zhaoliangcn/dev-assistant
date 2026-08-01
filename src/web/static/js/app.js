@@ -12,6 +12,46 @@ document.addEventListener('alpine:init', () => {
 
     window.Alpine.store('connection', { connected: false });
 
+    // W15: 模型列表与切换 store（header 下拉框使用）
+    window.Alpine.store('models', {
+        list: [],
+        active: '',
+        loaded: false,
+
+        async load() {
+            try {
+                const resp = await fetch('/api/models');
+                const data = await resp.json();
+                this.list = Array.isArray(data) ? data : [];
+                const active = this.list.find((m) => m.active);
+                this.active = active ? active.name : (this.list[0] ? this.list[0].name : '');
+                this.loaded = true;
+            } catch (e) {
+                console.error('加载模型列表失败:', e);
+            }
+        },
+
+        async switchModel(name) {
+            if (!name || name === this.active) return;
+            try {
+                const resp = await fetch('/api/models/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name }),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    this.active = name;
+                    this.list.forEach((m) => { m.active = m.name === name; });
+                } else {
+                    console.error('切换模型失败:', data.error || '未知错误');
+                }
+            } catch (e) {
+                console.error('切换模型失败:', e);
+            }
+        },
+    });
+
     window.Alpine.store('theme', {
         theme: localStorage.getItem('dev-assistant-theme') || 'auto',
         systemDark: false,
@@ -90,8 +130,9 @@ function chatApp() {
         init() {
             this.connectWS();
             this.loadSessions();
-            // 主题由全局 store 管理（header 按钮与聊天区共享）
+            // 加载模型列表（header 下拉框）
             if (window.Alpine) {
+                window.Alpine.store('models').load();
                 window.Alpine.store('theme').init();
             }
         },

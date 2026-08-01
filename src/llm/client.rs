@@ -100,6 +100,16 @@ impl LlmClient {
         self.provider_configs.iter().map(|c| c.name.as_str()).collect()
     }
 
+    /// 列出所有可用模型详情：(名称, provider, 是否当前激活)
+    pub fn list_model_info(&self) -> Vec<(String, String, bool)> {
+        let active_idx = *self.active_idx.lock().unwrap();
+        self.provider_configs
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.name.clone(), c.provider.clone(), i == active_idx))
+            .collect()
+    }
+
     #[allow(dead_code)]
     pub async fn call(
         &self,

@@ -28,6 +28,20 @@
                     </span>
                 </li>
                 <li>
+                    <!-- W15: 模型切换下拉框 -->
+                    <select class="model-select"
+                            x-model="$store.models.active"
+                            x-show="$store.models.loaded && $store.models.list.length > 1"
+                            @change="$store.models.switchModel($store.models.active)"
+                            :title="'当前模型: ' + $store.models.active">
+                        <template x-for="m in $store.models.list" :key="m.name">
+                            <option :value="m.name" x-text="m.name"></option>
+                        </template>
+                    </select>
+                    <span class="model-label" x-show="$store.models.loaded && $store.models.list.length <= 1"
+                          x-text="$store.models.active ? ('模型: ' + $store.models.active) : ''"></span>
+                </li>
+                <li>
                     <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
                             @click="$store.theme.toggle()" :title="$store.theme.modeLabel()" aria-label="切换主题">
                         <span x-text="$store.theme.label()"></span>

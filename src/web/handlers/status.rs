@@ -46,27 +46,45 @@ pub struct ModelInfo {
     pub active: bool,
 }
 
-/// 获取可用模型列表。
-pub async fn get_models(
-    State(_state): State<Arc<AppState>>,
-) -> Json<Vec<ModelInfo>> {
-    Json(vec![
-        ModelInfo {
-            name: "default".to_string(),
-            provider: "openai".to_string(),
-            active: true,
-        },
-    ])
+/// 切换模型请求体。
+#[derive(serde::Deserialize)]
+pub struct SwitchModelRequest {
+    pub name: String,
 }
 
-/// 切换模型（暂为桩实现）。
+/// 获取可用模型列表（真实数据，来自 LlmClient）。
+pub async fn get_models(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<ModelInfo>> {
+    let models: Vec<ModelInfo> = state
+        .llm
+        .list_model_info()
+        .into_iter()
+        .map(|(name, provider, active)| ModelInfo {
+            name,
+            provider,
+            active,
+        })
+        .collect();
+    Json(models)
+}
+
+/// 切换模型（真实切换，来自 LlmClient）。
 pub async fn switch_model(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SwitchModelRequest>,
 ) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "success": true,
-        "message": "模型切换功能将在后续版本实现"
-    }))
+    match state.llm.switch_model(&body.name) {
+        Ok(_) => Json(serde_json::json!({
+            "success": true,
+            "name": body.name,
+        })),
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "name": body.name,
+            "error": e.to_string(),
+        })),
+    }
 }
 
 /// 渲染主页面。

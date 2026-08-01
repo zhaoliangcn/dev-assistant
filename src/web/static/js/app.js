@@ -662,8 +662,9 @@ function chatApp() {
     };
 }
 
-// ── 文件浏览器组件（W11） ──────────────────────────────────────────
+// ── 文件浏览器组件（W11 / N1-N3） ────────────────────────────────
 // 对接现有 /api/files* 接口，替代依赖未加载 htmx 的半成品模板。
+// 支持：新建文件、编辑、Markdown/代码预览、修改的 diff 预览。
 
 function fileExplorer() {
     return {
@@ -671,10 +672,17 @@ function fileExplorer() {
         currentPath: '.',
         activePath: null,
         content: '',
+        // 打开时的原始内容（diff 对比基线）
+        originalContent: '',
         modified: false,
         saved: false,
         saving: false,
         loading: false,
+        // 视图模式：edit / preview / diff
+        viewMode: 'edit',
+        previewHtml: '',
+        diffLines: [],
+        diffStats: null,
 
         async loadDir(path) {
             this.loading = true;
@@ -691,17 +699,52 @@ function fileExplorer() {
             }
         },
 
+        // 上一级目录路径
+        parentPath() {
+            if (!this.currentPath || this.currentPath === '.') return '.';
+            const idx = this.currentPath.lastIndexOf('/');
+            const parent = idx <= 0 ? '.' : this.currentPath.slice(0, idx);
+            return parent || '.';
+        },
+
+        // N1: 新建文件 — 提示输入路径，直接进入编辑（空内容）
+        async newFile() {
+            const name = prompt('输入新文件路径（相对项目目录，如 src/foo.rs）:', '');
+            if (!name || !name.trim()) return;
+            const path = name.trim().replace(/^\.\//, '');
+            this.activePath = path;
+            this.content = '';
+            this.originalContent = '';
+            this.modified = false;
+            this.saved = false;
+            this.viewMode = 'edit';
+            this.previewHtml = '';
+            this.diffLines = [];
+            this.diffStats = null;
+            // 进入所在目录便于保存后看到文件
+            const idx = path.lastIndexOf('/');
+            if (idx > 0) {
+                this.loadDir(path.slice(0, idx));
+            }
+        },
+
         async openFile(path) {
             this.activePath = path;
             this.modified = false;
             this.saved = false;
+            this.viewMode = 'edit';
             try {
                 const resp = await fetch('/api/files/content?path=' + encodeURIComponent(path));
                 const data = await resp.json();
                 this.content = data.content || '';
+                this.originalContent = this.content;
+                this.previewHtml = '';
+                this.diffLines = [];
+                this.diffStats = null;
             } catch (e) {
                 console.error('加载文件失败:', e);
                 this.content = '';
+                this.originalContent = '';
             }
         },
 
@@ -721,6 +764,7 @@ function fileExplorer() {
                 });
                 const data = await resp.json();
                 if (data.success) {
+                    this.originalContent = this.content;
                     this.modified = false;
                     this.saved = true;
                     setTimeout(() => { this.saved = false; }, 1500);
@@ -734,12 +778,216 @@ function fileExplorer() {
             }
         },
 
+        // 状态文案：新建 / 已修改 / 已保存
+        statusText() {
+            if (this.saved) return '✅ 已保存';
+            if (this.modified) return '📝 已修改';
+            if (this.isNewFile()) return '🆕 新建文件';
+            return '';
+        },
+
+        isNewFile() {
+            return this.originalContent === '' && this.modified === false &&
+                this.activePath !== null;
+        },
+
+        // N2: 切换视图；进入 preview/diff 时按需生成内容
+        switchView(mode) {
+            this.viewMode = mode;
+            if (mode === 'preview') {
+                this.previewHtml = this.renderPreview();
+            } else if (mode === 'diff') {
+                this.computeDiff();
+            }
+        },
+
+        // N2: 预览渲染 — Markdown 用 chatApp 的渲染器（消息区复用），
+        // 其他类型做 HTML 转义 + 代码高亮
+        renderPreview() {
+            const path = this.activePath || '';
+            const isMarkdown = /\.(md|markdown|mdown)$/i.test(path);
+            if (isMarkdown) {
+                // 复用聊天组件的 markdown 渲染（生成器函数）
+                return this.markdownToHtml(this.content);
+            }
+            // 代码/文本：转义后包 <pre>，交给 highlight.js 高亮
+            const escaped = escapeHtmlText(this.content);
+            if (typeof window.hljs !== 'undefined' && this.content.trim()) {
+                try {
+                    const langMatch = path.match(/\.([a-zA-Z0-9]+)$/);
+                    const lang = langMatch ? langMatch[1] : '';
+                    const detected = lang && window.hljs.getLanguage(lang)
+                        ? { language: lang }
+                        : {};
+                    const highlighted = window.hljs.highlight(this.content, detected).value;
+                    const cls = lang ? ' class="language-' + lang + '"' : '';
+                    return '<pre class="preview-code"><code' + cls + '>' + highlighted + '</code></pre>';
+                } catch (e) {
+                    return '<pre class="preview-code"><code>' + escaped + '</code></pre>';
+                }
+            }
+            return '<pre class="preview-code"><code>' + escaped + '</code></pre>';
+        },
+
+        // 简版 Markdown 渲染（标题/列表/引用/代码块/粗体/行内码），
+        // 与聊天消息渲染保持一致体验。
+        markdownToHtml(text) {
+            if (!text) return '<p class="file-empty">（空文件）</p>';
+            const lines = text.split('\n');
+            const out = [];
+            let i = 0;
+            while (i < lines.length) {
+                const line = lines[i];
+                const fence = line.match(/^```(\w*)/);
+                if (fence) {
+                    const lang = fence[1];
+                    const buf = [];
+                    i++;
+                    while (i < lines.length && !lines[i].startsWith('```')) {
+                        buf.push(lines[i]);
+                        i++;
+                    }
+                    i++;
+                    const code = buf.join('\n');
+                    const escaped = escapeHtmlText(code);
+                    let html = escaped;
+                    if (typeof window.hljs !== 'undefined') {
+                        try {
+                            const detected = lang && window.hljs.getLanguage(lang)
+                                ? { language: lang } : {};
+                            html = window.hljs.highlight(code, detected).value;
+                        } catch (e) { /* fallback */ }
+                    }
+                    const cls = lang ? ' class="language-' + lang + '"' : '';
+                    out.push('<pre><code' + cls + '>' + html + '</code></pre>');
+                    continue;
+                }
+                const heading = line.match(/^(#{1,6})\s+(.*)$/);
+                if (heading) {
+                    const level = Math.min(heading[1].length + 1, 6);
+                    out.push('<h' + level + '>' + inlineMdFormat(heading[2]) + '</h' + level + '>');
+                    i++;
+                    continue;
+                }
+                if (line.startsWith('>')) {
+                    out.push('<blockquote>' + inlineMdFormat(line.replace(/^>\s?/, '')) + '</blockquote>');
+                    i++;
+                    continue;
+                }
+                const ul = line.match(/^[-*+]\s+(.*)$/);
+                if (ul) {
+                    const items = [];
+                    while (i < lines.length) {
+                        const m = lines[i].match(/^[-*+]\s+(.*)$/);
+                        if (!m) break;
+                        items.push('<li>' + inlineMdFormat(m[1]) + '</li>');
+                        i++;
+                    }
+                    out.push('<ul>' + items.join('') + '</ul>');
+                    continue;
+                }
+                if (line.trim() === '') {
+                    if (out.length && !out[out.length - 1].endsWith('<br>')) out.push('<br>');
+                    i++;
+                    continue;
+                }
+                out.push('<p>' + inlineMdFormat(line) + '</p>');
+                i++;
+            }
+            return out.join('\n');
+        },
+
+        // N2: LCS 行级 diff — 对比 originalContent 与 content
+        computeDiff() {
+            const oldLines = (this.originalContent || '').split('\n');
+            const newLines = this.content.split('\n');
+            const result = lcsDiff(oldLines, newLines);
+            this.diffLines = result.lines;
+            this.diffStats = result.stats;
+        },
+
         formatSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         },
     };
+}
+
+// ── 全局文件工具（N2） ────────────────────────────────────────────
+
+// HTML 转义（预览用）
+function escapeHtmlText(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// 行内 markdown 格式：行内码 / 粗体 / 链接
+function inlineMdFormat(line) {
+    let out = escapeHtmlText(line);
+    out = out.replace(/`([^`]+)`/g, (_, code) => '<code>' + code + '</code>');
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+        (_, text, url) => '<a href="' + url + '" target="_blank" rel="noopener">' + text + '</a>');
+    return out;
+}
+
+// LCS 最长公共子序列 diff，返回带类型标记的行与统计
+function lcsDiff(oldLines, newLines) {
+    const n = oldLines.length;
+    const m = newLines.length;
+    // dp[i][j] = oldLines[i..] 与 newLines[j..] 的 LCS 长度
+    const dp = [];
+    for (let i = 0; i <= n; i++) {
+        dp.push(new Array(m + 1).fill(0));
+    }
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            if (oldLines[i] === newLines[j]) {
+                dp[i][j] = dp[i + 1][j + 1] + 1;
+            } else {
+                dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+            }
+        }
+    }
+
+    const lines = [];
+    let i = 0;
+    let j = 0;
+    let add = 0;
+    let del = 0;
+    let ctx = 0;
+    while (i < n && j < m) {
+        if (oldLines[i] === newLines[j]) {
+            lines.push({ type: 'ctx', marker: ' ', text: oldLines[i] });
+            ctx++;
+            i++;
+            j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            lines.push({ type: 'del', marker: '-', text: oldLines[i] });
+            del++;
+            i++;
+        } else {
+            lines.push({ type: 'add', marker: '+', text: newLines[j] });
+            add++;
+            j++;
+        }
+    }
+    while (i < n) {
+        lines.push({ type: 'del', marker: '-', text: oldLines[i] });
+        del++;
+        i++;
+    }
+    while (j < m) {
+        lines.push({ type: 'add', marker: '+', text: newLines[j] });
+        add++;
+        j++;
+    }
+
+    return { lines, stats: { add, del, ctx } };
 }
 
 // ── 全局复制工具（W6） ─────────────────────────────────────────────

@@ -9,11 +9,16 @@
         <div class="file-tree-panel">
             <div class="file-panel-header">
                 <strong>📁 文件浏览器</strong>
-                <button type="button" class="copy-btn" @click="loadDir(currentPath)">🔄 刷新</button>
+                <div class="file-content-actions">
+                    <button type="button" class="copy-btn" @click="newFile()" title="新建文件">＋ 新建</button>
+                    <button type="button" class="copy-btn" @click="loadDir(currentPath)">🔄</button>
+                </div>
             </div>
             <div class="file-tree" x-show="!loading">
                 <div class="file-nav">
                     <span class="file-nav-path" x-text="'📂 ' + (currentPath || '.')"></span>
+                    <button type="button" class="copy-btn" @click="loadDir(parentPath())"
+                            x-show="currentPath !== '.'" title="上一级">⬆ 上级</button>
                 </div>
                 <template x-for="entry in entries" :key="entry.path">
                     <div class="file-row"
@@ -35,20 +40,49 @@
                     <div class="file-panel-header">
                         <strong x-text="'📄 ' + activePath"></strong>
                         <div class="file-content-actions">
-                            <span class="file-status" x-text="saved ? '✅ 已保存' : (modified ? '📝 已修改' : '')"></span>
+                            <span class="file-status" x-text="statusText()"></span>
+                            <!-- 编辑/预览/Diff 视图切换 -->
+                            <button type="button" class="copy-btn" @click="switchView('edit')"
+                                    :class="{ 'view-active': viewMode === 'edit' }">✏️ 编辑</button>
+                            <button type="button" class="copy-btn" @click="switchView('preview')"
+                                    :class="{ 'view-active': viewMode === 'preview' }">👁 预览</button>
+                            <button type="button" class="copy-btn" @click="switchView('diff')"
+                                    :disabled="!modified" :class="{ 'view-active': viewMode === 'diff' }">⇄ Diff</button>
                             <button type="button" class="copy-btn" @click="saveFile()" :disabled="!modified || saving">
                                 💾 保存
                             </button>
                         </div>
                     </div>
-                    <textarea class="file-editor"
+
+                    <!-- 编辑视图 -->
+                    <textarea class="file-editor" x-show="viewMode === 'edit'"
                               x-model="content"
                               spellcheck="false"
                               @input="onEdit()"></textarea>
+
+                    <!-- 预览视图（新建文件/文本内容预览） -->
+                    <div class="file-preview markdown-body" x-show="viewMode === 'preview'"
+                         x-html="previewHtml"></div>
+
+                    <!-- Diff 视图（修改预览） -->
+                    <div class="file-diff" x-show="viewMode === 'diff'">
+                        <div class="file-diff-meta" x-show="diffStats">
+                            <span class="diff-stat-add">+<span x-text="diffStats.add"></span></span>
+                            <span class="diff-stat-del">-<span x-text="diffStats.del"></span></span>
+                            <span class="diff-stat-ctx"><span x-text="diffStats.ctx"></span> 行不变</span>
+                        </div>
+                        <template x-for="(line, idx) in diffLines" :key="idx">
+                            <div class="diff-line" :class="'diff-' + line.type">
+                                <span class="diff-marker" x-text="line.marker"></span>
+                                <span class="diff-text" x-text="line.text"></span>
+                            </div>
+                        </template>
+                        <div class="file-empty" x-show="diffLines.length === 0">无差异</div>
+                    </div>
                 </div>
             </template>
             <div class="file-placeholder" x-show="!activePath">
-                <p>👈 从左侧选择文件查看或编辑</p>
+                <p>👈 从左侧选择文件查看或编辑，或点击「＋ 新建」创建文件</p>
             </div>
         </div>
     </div>

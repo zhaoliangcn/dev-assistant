@@ -9,9 +9,9 @@
         <!-- D1: Tab 切换 -->
         <div class="sidebar-tabs">
             <button type="button" class="sidebar-tab" :class="{ 'tab-active': sidebarTab === 'sessions' }"
-                    @click="sidebarTab = 'sessions'">💬 会话</button>
+                    @click="switchSidebarTab('sessions')">💬 会话</button>
             <button type="button" class="sidebar-tab" :class="{ 'tab-active': sidebarTab === 'files' }"
-                    @click="sidebarTab = 'files'">📁 文件</button>
+                    @click="switchSidebarTab('files')">📁 文件</button>
         </div>
 
         <!-- 会话历史 Tab -->

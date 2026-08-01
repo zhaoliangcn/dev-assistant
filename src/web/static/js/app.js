@@ -284,6 +284,14 @@ function chatApp() {
 
         // ── 侧栏文件树（D2） ──────────────────────────────────────────
 
+        // D7: 切换侧栏 Tab；切到文件 Tab 时自动加载项目目录（首次/空时）
+        switchSidebarTab(tab) {
+            this.sidebarTab = tab;
+            if (tab === 'files' && this.treeEntries.length === 0) {
+                this.loadFileDir('.');
+            }
+        },
+
         // 加载目录列表（复用 /api/files）
         async loadFileDir(path) {
             this.treeLoading = true;

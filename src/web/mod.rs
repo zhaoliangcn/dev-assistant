@@ -197,6 +197,9 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
     templates
         .add_template("index.html", include_str!("templates/index.html"))
         .map_err(|e| AppError::Config(format!("模板 index.html 加载失败: {}", e)))?;
+    templates
+        .add_template("files.html", include_str!("templates/files.html"))
+        .map_err(|e| AppError::Config(format!("模板 files.html 加载失败: {}", e)))?;
 
     // ── 共享状态 ──
     let state = AppState {

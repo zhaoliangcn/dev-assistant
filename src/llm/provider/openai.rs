@@ -56,7 +56,7 @@ impl OpenAIProvider {
         body: &'a Value,
     ) -> reqwest::RequestBuilder {
         let mut req = http_client
-            .post(&self.api_url())
+            .post(self.api_url())
             .header("Content-Type", "application/json")
             .json(body);
 
@@ -355,8 +355,7 @@ where
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let stream = stream.map(|result| {
-        result.map(|bytes| tokio_util::bytes::Bytes::from(bytes))
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        result.map_err(|e| std::io::Error::other(e.to_string()))
     });
     let reader = tokio_util::io::StreamReader::new(stream);
     let reader = BufReader::new(reader);
@@ -416,8 +415,9 @@ where
             }
 
             // SSE 格式: "data: {...}"
-            if line.starts_with("data: ") {
-                let data_str = &line[6..];
+            let Some(data_str) = line.strip_prefix("data: ") else {
+                continue;
+            };
 
                 // 处理结束信号
                 if data_str == "[DONE]" {
@@ -438,53 +438,52 @@ where
 
                 // 提取 delta 内容
                 if let Some(delta) = data["choices"].as_array()
-                    .and_then(|arr| arr.get(0))
+                    .and_then(|arr| arr.first())
                     .and_then(|c| c["delta"].as_object())
                 {
                     // 处理文本增量
-                    if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
-                        if !content.is_empty() {
-                            yield LlmStreamEvent::Chunk(content.to_string());
-                        }
-                    }
+            if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
+                if !content.is_empty() {
+                    yield LlmStreamEvent::Chunk(content.to_string());
+                }
+            }
 
-                    // 处理工具调用增量：按 index 累积
-                    if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
-                        for tc in tool_calls {
-                            let index = tc["index"].as_i64().unwrap_or(0) as usize;
+            // 处理工具调用增量：按 index 累积
+            if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                for tc in tool_calls {
+                    let index = tc["index"].as_i64().unwrap_or(0) as usize;
 
-                            // 查找或创建该 index 的累积条目
-                            let pos = acc_tool_calls.iter().position(|(i, _)| *i == index);
-                            if let Some(pos) = pos {
-                                let acc = &mut acc_tool_calls[pos].1;
-                                // 合并增量
-                                if let Some(id) = tc["id"].as_str() {
-                                    if !id.is_empty() {
-                                        acc.id = id.to_string();
-                                    }
-                                }
-                                if let Some(func) = tc["function"].as_object() {
-                                    if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
-                                        if !name.is_empty() {
-                                            acc.name = name.to_string();
-                                        }
-                                    }
-                                    if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
-                                        acc.arguments.push_str(args);
-                                    }
-                                }
-                            } else {
-                                // 创建新的累积条目
-                                let id = tc["id"].as_str().unwrap_or_default().to_string();
-                                let func_obj = tc["function"].as_object().cloned().unwrap_or_default();
-                                let name = func_obj.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                                let arguments = func_obj.get("arguments").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                                acc_tool_calls.push((index, AccToolCall { id, name, arguments }));
+                    // 查找或创建该 index 的累积条目
+                    let pos = acc_tool_calls.iter().position(|(i, _)| *i == index);
+                    if let Some(pos) = pos {
+                        let acc = &mut acc_tool_calls[pos].1;
+                        // 合并增量
+                        if let Some(id) = tc["id"].as_str() {
+                            if !id.is_empty() {
+                                acc.id = id.to_string();
                             }
                         }
+                        if let Some(func) = tc["function"].as_object() {
+                            if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                                if !name.is_empty() {
+                                    acc.name = name.to_string();
+                                }
+                            }
+                            if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                                acc.arguments.push_str(args);
+                            }
+                        }
+                    } else {
+                        // 创建新的累积条目
+                        let id = tc["id"].as_str().unwrap_or_default().to_string();
+                        let func_obj = tc["function"].as_object().cloned().unwrap_or_default();
+                        let name = func_obj.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                        let arguments = func_obj.get("arguments").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                        acc_tool_calls.push((index, AccToolCall { id, name, arguments }));
                     }
                 }
             }
+        }
         }
     })
 }

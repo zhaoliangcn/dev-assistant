@@ -287,8 +287,7 @@ fn parse_anthropic_sse_stream(
     // 使用 tokio_util::StreamReader 将 Stream 转换为 AsyncRead
     let stream = response.bytes_stream();
     let stream = stream.map(|result| {
-        result.map(|bytes| tokio_util::bytes::Bytes::from(bytes))
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        result.map_err(|e| std::io::Error::other(e.to_string()))
     });
     let reader = tokio_util::io::StreamReader::new(stream);
     let reader = BufReader::new(reader);

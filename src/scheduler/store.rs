@@ -422,7 +422,7 @@ mod tests {
 
         let logs = store.get_execution_logs("test_task", 10, 0).unwrap();
         assert_eq!(logs.len(), 1);
-        assert_eq!(logs[0].success, true);
+        assert!(logs[0].success);
     }
 
     #[test]

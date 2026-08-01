@@ -96,7 +96,7 @@ impl InputSystem {
             .expect("Failed to create input editor");
 
         // 启用 Slash 命令 Tab 补全
-        let _ = rl.set_helper(Some(SlashHelper::new()));
+        rl.set_helper(Some(SlashHelper::new()));
 
         // 尝试加载历史记录
         let history_file = if let Some(dir) = dirs::data_local_dir() {

@@ -398,16 +398,28 @@ function chatApp() {
         // 服务端 `streaming: true` 事件携带的是**累积的完整内容**（见
         // MessageOutput::streaming_assistant 约定），因此前端只需替换
         // 最后一条 assistant 消息的 content，无需字符串拼接。
+        //
+        // B13: 若该 assistant 之后已有工具调用/结果消息，将其移动到数组
+        // 末尾——保证最终输出显示在工具信息**下方**（直觉顺序：
+        // 用户 → 工具调用 → 工具结果 → 最终回复）。
         appendAssistant(msg) {
             if (msg.streaming) {
                 const idx = this.lastAssistantIndex();
                 if (idx >= 0) {
-                    this.messages[idx] = {
+                    const existing = this.messages[idx];
+                    const updated = {
                         role: 'assistant',
                         content: msg.content,
                         streaming: true,
-                        time: this.messages[idx].time,
+                        time: existing.time,
                     };
+                    if (idx < this.messages.length - 1) {
+                        // assistant 后面还有工具消息：移到末尾
+                        const rest = this.messages.filter((_, i) => i !== idx);
+                        this.messages = [...rest, updated];
+                    } else {
+                        this.messages[idx] = updated;
+                    }
                     // 流式跟随：用户若停留在底部则实时滚动
                     this.$nextTick(() => this.scrollToBottom(false));
                     return;

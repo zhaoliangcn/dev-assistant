@@ -562,9 +562,10 @@ fn handle_list_scheduled_command() -> SlashOutcome {
         }
     };
 
-    let tasks = match tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(scheduler.get_all_tasks())
-    }) {
+    // 底层 store 的 get_all_tasks 本身是同步方法（engine 的 async 版本只是
+    // 简单包装），直接同步调用，避免 block_in_place（它要求多线程 runtime，
+    // 而 main.rs 用的是 current_thread runtime，会 panic）。
+    let tasks = match scheduler.store().get_all_tasks() {
         Ok(t) => t,
         Err(e) => {
             let _ = ui::render_block(

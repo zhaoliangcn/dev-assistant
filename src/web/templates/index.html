@@ -53,23 +53,47 @@
 
     <!-- 右侧：对话面板 -->
     <div class="chat-panel">
+        <!-- C1: 工具活动区（独立容器，tool-call / tool-result） -->
+        <div class="tool-activity" x-ref="toolList"
+             x-show="toolMessages.length > 0 || pendingStatus !== null">
+            <div class="tool-activity-header">
+                <span>🔧 工具活动</span>
+                <span class="tool-activity-count" x-text="toolMessages.length ? toolMessages.length + ' 项' : ''"></span>
+            </div>
+            <!-- 可替换状态条（思考/状态，不进入消息列表） -->
+            <div class="thinking" x-show="pendingStatus !== null">
+                <span class="spinner" x-show="pendingStatus && pendingStatus.role === 'thinking'"></span>
+                <span x-text="pendingStatus ? pendingStatus.content : ''"></span>
+            </div>
+            <div class="tool-activity-list">
+                <template x-for="msg in toolMessages" :key="msg._id">
+                    <!-- 工具结果（折叠展示） -->
+                    <div x-show="msg.role === 'tool-result'" class="tool-item tool-result">
+                        <details class="collapsible" :open="msg.content.length < 200">
+                            <summary>🔧 工具结果</summary>
+                            <div class="collapsible-content tool-content" x-text="msg.content"></div>
+                        </details>
+                    </div>
+                    <!-- 工具调用 -->
+                    <div x-show="msg.role === 'tool-call'" class="tool-item tool-call">
+                        <span class="tool-call-name">🔧 <span x-text="msg.content"></span></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- C1: 对话区（独立容器，user / assistant / system / error） -->
         <div id="message-list" class="message-list" x-ref="list">
             <!-- 欢迎消息 -->
-            <div class="message system" x-show="messages.length === 0">
+            <div class="message system" x-show="chatMessages.length === 0">
                 <div class="message-body">
                     <p>👋 你好！我是 Dev-Assistant，你的 AI 编程助手。</p>
                     <p>发送消息开始对话，我会使用各种工具帮助你完成任务。</p>
                 </div>
             </div>
 
-            <!-- 可替换状态条（思考/状态，不进入消息列表） -->
-            <div class="thinking" x-show="pendingStatus !== null">
-                <span class="spinner" x-show="pendingStatus && pendingStatus.role === 'thinking'"></span>
-                <span x-text="pendingStatus ? pendingStatus.content : ''"></span>
-            </div>
-
             <!-- 消息列表 -->
-            <template x-for="msg in messages">
+            <template x-for="msg in chatMessages" :key="msg._id">
                 <div>
                     <!-- 用户消息 -->
                     <div x-show="msg.role === 'user'" class="message user">
@@ -97,25 +121,6 @@
                                         x-text="copiedMessageId ? '✅ 已复制' : '📋 复制'"></button>
                             </div>
                             <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
-                        </div>
-                    </div>
-
-                    <!-- 工具结果（折叠展示） -->
-                    <div x-show="msg.role === 'tool-result'" class="message tool-result">
-                        <div class="message-avatar">🔧</div>
-                        <div class="message-body">
-                            <details class="collapsible" :open="msg.content.length < 200">
-                                <summary>工具结果</summary>
-                                <div class="collapsible-content message-content" x-text="msg.content"></div>
-                            </details>
-                        </div>
-                    </div>
-
-                    <!-- 工具调用 -->
-                    <div x-show="msg.role === 'tool-call'" class="message tool-result">
-                        <div class="message-avatar">🔧</div>
-                        <div class="message-body">
-                            <div class="message-content" x-text="msg.content"></div>
                         </div>
                     </div>
 

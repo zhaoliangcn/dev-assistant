@@ -114,7 +114,12 @@ function chatApp() {
         sessionId: null,
         messageId: 0,
         input: '',
-        messages: [],
+        // C2: 对话区消息（user/assistant/system/error）
+        chatMessages: [],
+        // C2: 工具活动区消息（tool-call/tool-result）
+        toolMessages: [],
+        // 消息序号（渲染 :key 用，保证流式替换时 DOM 稳定）
+        _msgSeq: 0,
         // W10: 是否正在生成（停止按钮显示）
         busy: false,
         // S2: 会话历史列表
@@ -159,9 +164,12 @@ function chatApp() {
                 const resp = await fetch('/api/sessions/' + encodeURIComponent(id));
                 const data = await resp.json();
                 this.activeSessionId = id;
-                this.messages = this.eventsToMessages(data.events || []);
+                const all = this.eventsToMessages(data.events || []);
+                this.chatMessages = all.filter((m) => m.role !== 'tool-call' && m.role !== 'tool-result');
+                this.toolMessages = all.filter((m) => m.role === 'tool-call' || m.role === 'tool-result');
                 this.pendingStatus = null;
                 this.scrollToBottomLater();
+                this.scrollToolLater();
             } catch (e) {
                 console.error('加载会话详情失败:', e);
             }
@@ -169,7 +177,8 @@ function chatApp() {
 
         // 新对话：清空当前消息与选中态
         newChat() {
-            this.messages = [];
+            this.chatMessages = [];
+            this.toolMessages = [];
             this.activeSessionId = null;
             this.pendingStatus = null;
         },
@@ -325,23 +334,43 @@ function chatApp() {
 
         // ── 服务端事件处理 ────────────────────────────────────────────
 
-        // 追加消息并附带时间戳（消息头显示用）
+        // 追加消息并附带时间戳（消息头显示用）。
+        // C2: 按角色分流——tool-call/tool-result 进 toolMessages，
+        // 其余进 chatMessages。
         addMessage(role, content, extra) {
-            this.messages = [...this.messages, Object.assign({
+            const item = Object.assign({
                 role: role,
                 content: content,
                 time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-            }, extra || {})];
-            this.scrollToBottomLater();
+                _id: 'm' + (++this._msgSeq),
+            }, extra || {});
+            if (role === 'tool-call' || role === 'tool-result') {
+                this.toolMessages = [...this.toolMessages, item];
+                this.scrollToolLater();
+            } else {
+                this.chatMessages = [...this.chatMessages, item];
+                this.scrollToBottomLater();
+            }
         },
 
-        // B25: 始终聚焦助手输出——消息更新后滚动到底部。
+        // B25: 始终聚焦助手输出——对话区消息更新后滚动到底部。
         // 在 $nextTick（DOM 补丁完成）后再包一层 requestAnimationFrame，
         // 确保浏览器已 reflow，scrollHeight 为最新值，滚动必然到位。
         scrollToBottomLater() {
             this.$nextTick(() => {
                 requestAnimationFrame(() => {
                     const el = this.$refs.list;
+                    if (!el) return;
+                    el.scrollTop = el.scrollHeight;
+                });
+            });
+        },
+
+        // C2: 工具活动区滚动到底部（独立容器）
+        scrollToolLater() {
+            this.$nextTick(() => {
+                requestAnimationFrame(() => {
+                    const el = this.$refs.toolList;
                     if (!el) return;
                     el.scrollTop = el.scrollHeight;
                 });
@@ -386,12 +415,12 @@ function chatApp() {
         // 流式结束后移除最后一条 assistant 消息的 streaming 边框
         finishStreaming() {
             const idx = this.lastAssistantIndex();
-            if (idx >= 0 && this.messages[idx].streaming) {
-                this.messages[idx] = {
+            if (idx >= 0 && this.chatMessages[idx].streaming) {
+                this.chatMessages[idx] = {
                     role: 'assistant',
-                    content: this.messages[idx].content,
+                    content: this.chatMessages[idx].content,
                     streaming: false,
-                    time: this.messages[idx].time,
+                    time: this.chatMessages[idx].time,
                 };
             }
         },
@@ -400,28 +429,19 @@ function chatApp() {
         // 服务端 `streaming: true` 事件携带的是**累积的完整内容**（见
         // MessageOutput::streaming_assistant 约定），因此前端只需替换
         // 最后一条 assistant 消息的 content，无需字符串拼接。
-        //
-        // B13: 若该 assistant 之后已有工具调用/结果消息，将其移动到数组
-        // 末尾——保证最终输出显示在工具信息**下方**（直觉顺序：
-        // 用户 → 工具调用 → 工具结果 → 最终回复）。
+        // C2: 工具消息已在独立容器（toolMessages），对话区 assistant
+        // 始终位于 chatMessages 末尾，无需再移动。
         appendAssistant(msg) {
             if (msg.streaming) {
                 const idx = this.lastAssistantIndex();
                 if (idx >= 0) {
-                    const existing = this.messages[idx];
-                    const updated = {
+                    const existing = this.chatMessages[idx];
+                    this.chatMessages[idx] = {
                         role: 'assistant',
                         content: msg.content,
                         streaming: true,
                         time: existing.time,
                     };
-                    if (idx < this.messages.length - 1) {
-                        // assistant 后面还有工具消息：移到末尾
-                        const rest = this.messages.filter((_, i) => i !== idx);
-                        this.messages = [...rest, updated];
-                    } else {
-                        this.messages[idx] = updated;
-                    }
                     // 流式跟随：始终聚焦助手输出，滚动到底部
                     this.scrollToBottomLater();
                     return;
@@ -432,8 +452,8 @@ function chatApp() {
         },
 
         lastAssistantIndex() {
-            for (let i = this.messages.length - 1; i >= 0; i--) {
-                if (this.messages[i].role === 'assistant') return i;
+            for (let i = this.chatMessages.length - 1; i >= 0; i--) {
+                if (this.chatMessages[i].role === 'assistant') return i;
             }
             return -1;
         },

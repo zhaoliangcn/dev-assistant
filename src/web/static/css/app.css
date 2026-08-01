@@ -493,6 +493,49 @@ footer {
     min-height: 0;
 }
 
+/* D1/D3: 侧栏 Tab 切换 */
+.sidebar-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    flex-shrink: 0;
+}
+
+.sidebar-tab {
+    flex: 1;
+    padding: 0.5rem 0.25rem;
+    font-size: 0.85em;
+    border: none;
+    background: transparent;
+    color: var(--pico-muted-color);
+    cursor: pointer;
+    text-align: center;
+}
+
+.sidebar-tab:hover {
+    color: var(--pico-primary);
+}
+
+.sidebar-tab.tab-active {
+    color: var(--pico-primary);
+    border-bottom: 2px solid var(--pico-primary);
+    font-weight: 600;
+}
+
+.sidebar-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* D3: 文件树列表 */
+.file-tree-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.25rem;
+}
+
 .session-header {
     display: flex;
     justify-content: space-between;

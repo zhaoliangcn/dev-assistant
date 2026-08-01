@@ -120,6 +120,12 @@ function chatApp() {
         toolMessages: [],
         // 消息序号（渲染 :key 用，保证流式替换时 DOM 稳定）
         _msgSeq: 0,
+        // D1: 侧栏 Tab（sessions / files）
+        sidebarTab: 'sessions',
+        // D2: 内嵌文件树状态
+        treePath: '.',
+        treeEntries: [],
+        treeLoading: false,
         // W10: 是否正在生成（停止按钮显示）
         busy: false,
         // S2: 会话历史列表
@@ -274,6 +280,42 @@ function chatApp() {
             const pad = (n) => String(n).padStart(2, '0');
             return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
                 pad(d.getHours()) + ':' + pad(d.getMinutes());
+        },
+
+        // ── 侧栏文件树（D2） ──────────────────────────────────────────
+
+        // 加载目录列表（复用 /api/files）
+        async loadFileDir(path) {
+            this.treeLoading = true;
+            this.treePath = path;
+            try {
+                const resp = await fetch('/api/files?path=' + encodeURIComponent(path));
+                const data = await resp.json();
+                this.treeEntries = data.entries || [];
+            } catch (e) {
+                console.error('加载文件树失败:', e);
+                this.treeEntries = [];
+            } finally {
+                this.treeLoading = false;
+            }
+        },
+
+        // 上一级目录路径
+        treeParent() {
+            if (!this.treePath || this.treePath === '.') return '.';
+            const idx = this.treePath.lastIndexOf('/');
+            return idx <= 0 ? '.' : (this.treePath.slice(0, idx) || '.');
+        },
+
+        // 点击文件：跳转到文件浏览器页面并选中该文件
+        openSideFile(path) {
+            window.location.href = '/files?path=' + encodeURIComponent(path);
+        },
+
+        formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         },
 
         // ── 连接状态 ──────────────────────────────────────────────────

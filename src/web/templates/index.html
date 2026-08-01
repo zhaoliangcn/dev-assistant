@@ -4,50 +4,85 @@
 
 {% block content %}
 <div class="grid chat-layout" x-data="chatApp()">
-    <!-- 左侧：会话列表 -->
+    <!-- 左侧：会话列表 + 文件树 -->
     <div class="session-sidebar">
-        <div class="session-header">
-            <strong>💬 会话历史</strong>
-            <button type="button" class="copy-btn" @click="loadSessions()">🔄</button>
+        <!-- D1: Tab 切换 -->
+        <div class="sidebar-tabs">
+            <button type="button" class="sidebar-tab" :class="{ 'tab-active': sidebarTab === 'sessions' }"
+                    @click="sidebarTab = 'sessions'">💬 会话</button>
+            <button type="button" class="sidebar-tab" :class="{ 'tab-active': sidebarTab === 'files' }"
+                    @click="sidebarTab = 'files'">📁 文件</button>
         </div>
-        <button type="button" class="session-new" @click="newChat()">＋ 新对话</button>
-        <div class="session-list">
-            <template x-for="s in sessions" :key="s.id">
-                <div class="session-item"
-                     @click="selectSession(s.id)"
-                     :class="{ 'session-active': activeSessionId === s.id }">
-                    <div class="session-item-main">
-                        <!-- 重命名编辑态：内联输入框 -->
-                        <div x-show="renamingId === s.id" @click.stop>
-                            <input type="text" class="session-rename-input"
-                                   x-model="renameTitle"
-                                   :key="s.id"
-                                   @keydown.enter="submitRename(s.id)"
-                                   @keydown.escape="cancelRename()"
-                                   @click.stop>
-                        </div>
-                        <!-- 常规显示态 -->
-                        <template x-if="renamingId !== s.id">
-                            <div class="session-item-title" x-text="s.title || ('会话 ' + s.id)"></div>
-                        </template>
-                        <div class="session-item-meta">
-                            <span x-text="formatSessionTime(s.created_at)"></span>
-                            <span>·</span>
-                            <span x-text="s.message_count + ' 条'"></span>
-                        </div>
-                    </div>
-                    <div class="session-item-actions">
-                        <button type="button" class="copy-btn small"
-                                @click.stop="startRename(s)">✏️</button>
-                        <button type="button" class="copy-btn small session-delete"
-                                @click.stop="deleteSession(s.id)">🗑</button>
-                    </div>
-                </div>
-            </template>
-            <div class="session-empty" x-show="!loadingSessions && sessions.length === 0">
-                暂无历史会话
+
+        <!-- 会话历史 Tab -->
+        <div x-show="sidebarTab === 'sessions'" class="sidebar-panel">
+            <div class="session-header">
+                <strong>💬 会话历史</strong>
+                <button type="button" class="copy-btn" @click="loadSessions()">🔄</button>
             </div>
-            <div class="session-empty" x-show="loadingSessions">加载中...</div>
+            <button type="button" class="session-new" @click="newChat()">＋ 新对话</button>
+            <div class="session-list">
+                <template x-for="s in sessions" :key="s.id">
+                    <div class="session-item"
+                         @click="selectSession(s.id)"
+                         :class="{ 'session-active': activeSessionId === s.id }">
+                        <div class="session-item-main">
+                            <!-- 重命名编辑态：内联输入框 -->
+                            <div x-show="renamingId === s.id" @click.stop>
+                                <input type="text" class="session-rename-input"
+                                       x-model="renameTitle"
+                                       :key="s.id"
+                                       @keydown.enter="submitRename(s.id)"
+                                       @keydown.escape="cancelRename()"
+                                       @click.stop>
+                            </div>
+                            <!-- 常规显示态 -->
+                            <template x-if="renamingId !== s.id">
+                                <div class="session-item-title" x-text="s.title || ('会话 ' + s.id)"></div>
+                            </template>
+                            <div class="session-item-meta">
+                                <span x-text="formatSessionTime(s.created_at)"></span>
+                                <span>·</span>
+                                <span x-text="s.message_count + ' 条'"></span>
+                            </div>
+                        </div>
+                        <div class="session-item-actions">
+                            <button type="button" class="copy-btn small"
+                                    @click.stop="startRename(s)">✏️</button>
+                            <button type="button" class="copy-btn small session-delete"
+                                    @click.stop="deleteSession(s.id)">🗑</button>
+                        </div>
+                    </div>
+                </template>
+                <div class="session-empty" x-show="!loadingSessions && sessions.length === 0">
+                    暂无历史会话
+                </div>
+                <div class="session-empty" x-show="loadingSessions">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 文件树 Tab -->
+        <div x-show="sidebarTab === 'files'" class="sidebar-panel">
+            <div class="session-header">
+                <strong>📁 文件树</strong>
+                <button type="button" class="copy-btn" @click="loadFileDir(treePath)">🔄</button>
+            </div>
+            <div class="file-nav">
+                <span class="file-nav-path" x-text="'📂 ' + (treePath || '.')"></span>
+                <button type="button" class="copy-btn" @click="loadFileDir(treeParent())"
+                        x-show="treePath !== '.'" title="上一级">⬆</button>
+            </div>
+            <div class="session-list file-tree-list">
+                <template x-for="entry in treeEntries" :key="entry.path">
+                    <div class="session-item"
+                         @click="entry.is_dir ? loadFileDir(entry.path) : openSideFile(entry.path)">
+                        <span x-text="entry.is_dir ? '📁 ' + entry.name : '📄 ' + entry.name"></span>
+                        <span class="file-size" x-show="!entry.is_dir" x-text="formatSize(entry.size)"></span>
+                    </div>
+                </template>
+                <div class="session-empty" x-show="!treeLoading && treeEntries.length === 0">（空目录）</div>
+                <div class="session-empty" x-show="treeLoading">加载中...</div>
+            </div>
         </div>
     </div>
 

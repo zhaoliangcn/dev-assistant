@@ -25,6 +25,9 @@ pub enum AppError {
         message: String,
         retry_after: Option<Duration>,
     },
+    /// 服务端错误（5xx），通常是瞬时的，适合自动重试。
+    #[error("LLM server error ({0}): {1}")]
+    ServerError(u16, String),
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
     #[error("Security error: {0}")]
@@ -56,15 +59,10 @@ impl AppError {
     /// 此类错误通常是瞬时的，适合自动重试。
     pub fn is_server_error(&self) -> bool {
         match self {
-            AppError::Llm(msg) => {
-                msg.contains("status 502") || msg.contains("Bad Gateway")
-                    || msg.contains("status 503") || msg.contains("Service Unavailable")
-                    || msg.contains("status 504") || msg.contains("Gateway Timeout")
-                    || msg.contains("status 5")
-            }
-            AppError::Http(e) => {
-                e.status().is_some_and(|s| s.as_u16() >= 500)
-            }
+            AppError::ServerError(code, _) => *code >= 500,
+            // 兼容旧 provider 直接返回 Llm 的兜底，保留但不依赖
+            AppError::Llm(msg) => msg.contains("status 5"),
+            AppError::Http(e) => e.status().is_some_and(|s| s.as_u16() >= 500),
             _ => false,
         }
     }
@@ -78,13 +76,14 @@ impl AppError {
     }
 
     /// 判断错误是否可重试
-    /// 
+    ///
     /// 只有瞬时错误才应该重试：
     /// - RateLimited: 需要等待后重试
+    /// - ServerError: 服务端瞬时故障
     /// - Io(Interrupted): 被中断，可以重试
     /// - Http(timeout/connect): 网络超时/连接失败
     /// - Llm: LLM 服务暂时不可用
-    /// 
+    ///
     /// 不可重试的错误：
     /// - NotFound: 文件不存在
     /// - PermissionDenied: 权限拒绝
@@ -94,6 +93,7 @@ impl AppError {
     pub fn is_retryable(&self) -> bool {
         match self {
             AppError::RateLimited { .. } => true,
+            AppError::ServerError { .. } => true,
             AppError::Io(e) => matches!(e.kind(), std::io::ErrorKind::Interrupted),
             AppError::Http(e) => e.is_timeout() || e.is_connect(),
             AppError::Llm(_) => true,

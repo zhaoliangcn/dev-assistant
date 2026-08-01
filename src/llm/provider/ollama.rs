@@ -96,6 +96,8 @@ impl LlmProvider for OllamaProvider {
             let msg = format!("Ollama API returned error (status {}): {}", status, body_text);
             return Err(if status.as_u16() == 429 {
                 AppError::RateLimited { message: msg, retry_after }
+            } else if status.as_u16() >= 500 {
+                AppError::ServerError(status.as_u16(), msg)
             } else {
                 AppError::Llm(msg)
             });
@@ -134,6 +136,8 @@ impl LlmProvider for OllamaProvider {
             let msg = format!("Ollama API returned error (status {}): {}", status, body_text);
             return Err(if status.as_u16() == 429 {
                 AppError::RateLimited { message: msg, retry_after }
+            } else if status.as_u16() >= 500 {
+                AppError::ServerError(status.as_u16(), msg)
             } else {
                 AppError::Llm(msg)
             });

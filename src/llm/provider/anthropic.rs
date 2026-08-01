@@ -7,7 +7,7 @@ use tracing::debug;
 use tracing::warn;
 
 use super::super::models::*;
-use super::LlmProvider;
+use super::{parse_arguments, LlmProvider};
 use crate::utils::error::AppError;
 
 /// Anthropic Claude provider
@@ -136,6 +136,8 @@ impl LlmProvider for AnthropicProvider {
             let msg = format!("Anthropic API returned error (status {}): {}", status, body_text);
             return Err(if status.as_u16() == 429 {
                 AppError::RateLimited { message: msg, retry_after }
+            } else if status.as_u16() >= 500 {
+                AppError::ServerError(status.as_u16(), msg)
             } else {
                 AppError::Llm(msg)
             });
@@ -253,6 +255,8 @@ impl LlmProvider for AnthropicProvider {
             let msg = format!("Anthropic API returned error (status {}): {}", status, body_text);
             return Err(if status.as_u16() == 429 {
                 AppError::RateLimited { message: msg, retry_after }
+            } else if status.as_u16() >= 500 {
+                AppError::ServerError(status.as_u16(), msg)
             } else {
                 AppError::Llm(msg)
             });
@@ -421,19 +425,6 @@ fn parse_anthropic_sse_stream(
             }
         }
     })
-}
-
-/// 解析工具调用参数（简单版本，用于 Anthropic 流式响应）。
-#[allow(dead_code)]
-fn parse_arguments(args: Value) -> Result<Value, AppError> {
-    if let Some(s) = args.as_str() {
-        if let Ok(v) = serde_json::from_str(s) {
-            return Ok(v);
-        }
-        Ok(serde_json::Value::String(s.to_string()))
-    } else {
-        Ok(args)
-    }
 }
 
 /// 标准化 Anthropic 的响应为 LlmResponse

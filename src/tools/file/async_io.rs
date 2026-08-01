@@ -16,7 +16,6 @@ async fn open_file_read(path: &Path) -> Result<tokio::fs::File, std::io::Error> 
 }
 
 #[cfg(unix)]
-#[allow(dead_code)]
 async fn open_file_write(path: &Path) -> Result<tokio::fs::File, std::io::Error> {
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);

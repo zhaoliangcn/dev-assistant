@@ -7,7 +7,7 @@ use tracing::debug;
 use tracing::warn;
 
 use super::super::models::*;
-use super::LlmProvider;
+use super::{parse_arguments, LlmProvider};
 use crate::utils::error::AppError;
 
 /// OpenAI / OpenAI-compatible provider（Ollama /v1/chat/completions 等）
@@ -92,6 +92,8 @@ impl LlmProvider for OpenAIProvider {
             let msg = format!("LLM API returned error (status {}): {}", status, body_text);
             return Err(if status.as_u16() == 429 {
                 AppError::RateLimited { message: msg, retry_after }
+            } else if status.as_u16() >= 500 {
+                AppError::ServerError(status.as_u16(), msg)
             } else {
                 AppError::Llm(msg)
             });
@@ -124,6 +126,8 @@ impl LlmProvider for OpenAIProvider {
             let msg = format!("LLM API returned error (status {}): {}", status, body_text);
             return Err(if status.as_u16() == 429 {
                 AppError::RateLimited { message: msg, retry_after }
+            } else if status.as_u16() >= 500 {
+                AppError::ServerError(status.as_u16(), msg)
             } else {
                 AppError::Llm(msg)
             });
@@ -176,156 +180,6 @@ fn normalize_chat_response(data: Value) -> Result<LlmResponse, AppError> {
     } else {
         Ok(LlmResponse::Text(content.to_string()))
     }
-}
-
-fn parse_arguments(args: Value) -> Result<Value, AppError> {
-    if let Some(s) = args.as_str() {
-        if let Ok(parsed) = try_parse_json_args(s) {
-            return Ok(parsed);
-        }
-        // 尽力修复后仍无法解析，返回原始字符串作为 Value，
-        // 避免整个响应解析失败，让工具执行器有机会给出可读错误。
-        let preview: String = s.chars().take(80).collect();
-        debug!(
-            len = s.len(),
-            preview = %preview,
-            "Failed to parse tool arguments as JSON, falling back to raw string"
-        );
-        Ok(serde_json::Value::String(s.to_string()))
-    } else {
-        Ok(args)
-    }
-}
-
-/// 尝试以多种容错策略解析 LLM 生成的工具参数 JSON。
-///
-/// 常见模型错误：
-/// - 字符串值中包含未转义的换行符
-/// - 外层包裹 markdown code fence
-/// - 首尾空白
-fn try_parse_json_args(raw: &str) -> Result<Value, serde_json::Error> {
-    // 1. 原样解析
-    if let Ok(v) = serde_json::from_str(raw) {
-        return Ok(v);
-    }
-
-    // 2. 去除首尾空白和 markdown fence
-    let trimmed = raw.trim();
-    let without_fence = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .and_then(|s| s.strip_suffix("```"))
-        .unwrap_or(trimmed)
-        .trim();
-    if let Ok(v) = serde_json::from_str(without_fence) {
-        return Ok(v);
-    }
-
-    // 3. 转义字符串值内部的实际换行符（LLM 最容易犯的 JSON 错误）
-    let escaped = escape_newlines_in_json(without_fence);
-    if let Ok(v) = serde_json::from_str(&escaped) {
-        return Ok(v);
-    }
-
-    // 4. 移除 trailing comma（仅在字符串外部）
-    let no_trailing_comma = remove_trailing_commas(without_fence);
-    if let Ok(v) = serde_json::from_str(&no_trailing_comma) {
-        return Ok(v);
-    }
-
-    serde_json::from_str(raw)
-}
-
-/// 在 JSON 字符串字面量内部转义未转义的换行符。
-///
-/// 使用轻量级状态机：遇到 `"` 切换 in_string 状态；
-/// 在字符串内部将实际 `\r\n`/`\n`/`\r` 替换为 `\\n`。
-fn escape_newlines_in_json(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut in_string = false;
-    let mut escape = false;
-    let mut chars = s.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if escape {
-            result.push(c);
-            escape = false;
-            continue;
-        }
-        if c == '\\' {
-            result.push(c);
-            escape = true;
-            continue;
-        }
-        if c == '"' {
-            in_string = !in_string;
-            result.push(c);
-            continue;
-        }
-        if in_string && (c == '\n' || c == '\r' || c == '\t') {
-            match c {
-                '\n' | '\r' => {
-                    // 统一转换成 \\n
-                    result.push_str("\\n");
-                    // 跳过 \\r 后的 \\n，避免生成 \\n\\n
-                    if c == '\r' && chars.peek() == Some(&'\n') {
-                        chars.next();
-                    }
-                }
-                '\t' => result.push_str("\\t"),
-                _ => unreachable!(),
-            }
-            continue;
-        }
-        result.push(c);
-    }
-
-    result
-}
-
-/// 移除 JSON 中的尾随逗号（仅在字符串外部）。
-///
-/// 使用状态机跟踪是否在字符串内部，避免误修改字符串值中的逗号。
-/// 例如 `{"cmd": "echo foo,}"}` 不会被破坏。
-fn remove_trailing_commas(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut in_string = false;
-    let mut escape = false;
-    let chars: Vec<char> = s.chars().collect();
-    let len = chars.len();
-
-    for i in 0..len {
-        let c = chars[i];
-        if escape {
-            result.push(c);
-            escape = false;
-            continue;
-        }
-        if c == '\\' && in_string {
-            result.push(c);
-            escape = true;
-            continue;
-        }
-        if c == '"' {
-            in_string = !in_string;
-            result.push(c);
-            continue;
-        }
-        // 仅在字符串外部移除尾随逗号
-        if !in_string && c == ',' {
-            // 检查下一个非空白字符是否是 } 或 ]
-            let mut j = i + 1;
-            while j < len && chars[j].is_whitespace() {
-                j += 1;
-            }
-            if j < len && (chars[j] == '}' || chars[j] == ']') {
-                continue; // 跳过这个逗号
-            }
-        }
-        result.push(c);
-    }
-
-    result
 }
 
 /// 解析 OpenAI SSE (Server-Sent Events) 流式响应。
@@ -532,57 +386,5 @@ line2"}"#;
         let args = serde_json::Value::String(raw.to_string());
         let parsed = parse_arguments(args).unwrap();
         assert_eq!(parsed.as_str().unwrap(), "not json at all");
-    }
-
-    #[test]
-    fn escape_newlines_in_json_only_escapes_inside_strings() {
-        let input = "{\n  \"a\": \"b\nc\",\n  \"d\": 1\n}";
-        let escaped = escape_newlines_in_json(input);
-        // 字符串外部的换行保持原样，字符串内部的换行被转义
-        assert_eq!(escaped, "{\n  \"a\": \"b\\nc\",\n  \"d\": 1\n}");
-    }
-
-    #[test]
-    fn remove_trailing_commas_basic() {
-        let input = r#"{"a": 1,}"#;
-        let result = remove_trailing_commas(input);
-        assert_eq!(result, r#"{"a": 1}"#);
-    }
-
-    #[test]
-    fn remove_trailing_commas_in_array() {
-        let input = r#"[1, 2,]"#;
-        let result = remove_trailing_commas(input);
-        assert_eq!(result, r#"[1, 2]"#);
-    }
-
-    #[test]
-    fn remove_trailing_commas_preserves_string_content() {
-        // 字符串中的逗号不应被移除
-        let input = r#"{"cmd": "echo foo,bar",}"#;
-        let result = remove_trailing_commas(input);
-        assert_eq!(result, r#"{"cmd": "echo foo,bar"}"#);
-    }
-
-    #[test]
-    fn remove_trailing_commas_no_change_when_valid() {
-        let input = r#"{"a": 1, "b": [1, 2, 3]}"#;
-        let result = remove_trailing_commas(input);
-        assert_eq!(result, input);
-    }
-
-    #[test]
-    fn remove_trailing_commas_nested() {
-        let input = r#"{"a": {"b": 1,},"c": [1, 2,],}"#;
-        let result = remove_trailing_commas(input);
-        assert_eq!(result, r#"{"a": {"b": 1},"c": [1, 2]}"#);
-    }
-
-    #[test]
-    fn escape_newlines_in_json_handles_tabs() {
-        let input = "{\n  \"a\": \"b\tc\",\n  \"d\": 1\n}";
-        let escaped = escape_newlines_in_json(input);
-        // 字符串内部的 tab 被转义为 \\t
-        assert_eq!(escaped, "{\n  \"a\": \"b\\tc\",\n  \"d\": 1\n}");
     }
 }

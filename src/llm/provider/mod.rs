@@ -75,4 +75,4 @@ mod ollama;
 pub use anthropic::AnthropicProvider;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
-pub(crate) use common::{parse_arguments, try_parse_json_args};
+pub(crate) use common::parse_arguments;

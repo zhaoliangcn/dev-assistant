@@ -232,6 +232,10 @@ pub fn handle_slash(
         return Some(handle_list_scheduled_command());
     }
 
+    if input.starts_with("/skill") {
+        return Some(handle_skill_command(input, working_dir));
+    }
+
     None
 }
 
@@ -998,4 +1002,248 @@ pub fn render_agent_messages(agent: &Agent, verbose: bool) -> Result<(), AppErro
 
     ui::render_blocks(&blocks, &md)?;
     Ok(())
+}
+
+/// 处理 `/skill` slash 命令：安装/列表/移除技能。
+///
+/// 语法：
+///   /skill add <source> [--skill <name>] [--global]
+///   /skill list [--global]
+///   /skill remove <name> [--global]
+///   /skill update [--global]
+fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
+    use crate::skills::installer::{install_skill, list_skills, read_skill_meta, remove_skill, InstallScope};
+
+    let md = MarkdownRenderer::new();
+    let parts: Vec<&str> = input.split_whitespace().collect();
+
+    if parts.len() < 2 {
+        let _ = ui::render_block(
+            &ui::MessageBlock::System {
+                content: "📚 技能命令用法：\n\
+                    `/skill add <source> [--skill <name>] [--global]`  — 安装技能\n\
+                    `/skill list [--global]`  — 列出已安装技能\n\
+                    `/skill remove <name> [--global]`  — 移除技能\n\
+                    `/skill update [--global]`  — 更新技能\n\n\
+                    source 格式：\n\
+                    `owner/repo`  — Git 仓库（展开为 GitHub URL）\n\
+                    `https://github.com/...`  — 完整 Git URL\n\
+                    `./local-path`  — 本地目录".to_string(),
+            },
+            &md,
+        );
+        return SlashOutcome::Continue;
+    }
+
+    match parts[1] {
+        "add" => {
+            if parts.len() < 2 {
+                let _ = ui::render_block(
+                    &ui::MessageBlock::Error {
+                        content: "❌ 缺少源参数。用法：/skill add <source> [--skill <name>] [--global]".to_string(),
+                    },
+                    &md,
+                );
+                return SlashOutcome::Continue;
+            }
+
+            let source = parts[2];
+            let is_global = parts.contains(&"--global");
+            let skill_filters: Vec<String> = parts.iter()
+                .skip(3)
+                .filter(|p| **p != "--global")
+                .map(|p| p.to_string())
+                .collect();
+
+            let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
+
+            // skill add 命令在同步上下文中执行，但 install_skill 是 async
+            // 使用 tokio Handle 直接在当前运行时执行
+            let working_dir = working_dir.to_path_buf();
+            let source = source.to_string();
+            let skill_filters = skill_filters.clone();
+            let scope = scope.clone();
+            let result = std::thread::spawn(move || {
+                tokio::runtime::Handle::current().block_on(async {
+                    install_skill(&source, scope, &working_dir, Some(&skill_filters)).await
+                })
+            }).join().unwrap();
+
+            match result {
+                Ok(ref skills) => {
+                    let names: Vec<String> = skills.iter().map(|s| s.meta.name.clone()).collect();
+                    let mut content = format!(
+                        "✅ 已安装 {} 个技能（{} 范围）：\n",
+                        names.len(), scope
+                    );
+                    for skill in skills {
+                        content.push_str(&format!(
+                            "  • **{}**: {}\n",
+                            skill.meta.name, skill.meta.description
+                        ));
+                    }
+                    let _ = ui::render_block(&ui::MessageBlock::ToolResult {
+                        tool_name: "技能".to_string(),
+                        success: true,
+                        content,
+                    }, &md);
+                }
+                Err(e) => {
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::Error {
+                            content: format!("❌ 安装失败: {}", e),
+                        },
+                        &md,
+                    );
+                }
+            }
+        }
+
+        "list" => {
+            let is_global = parts.contains(&"--global");
+            let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
+
+            match list_skills(scope, working_dir) {
+                Ok(skills) => {
+                    if skills.is_empty() {
+                        let _ = ui::render_block(
+                            &ui::MessageBlock::System {
+                                content: format!("📚 {} 范围内暂无技能", scope),
+                            },
+                            &md,
+                        );
+                    } else {
+                        let mut content = format!("📚 已安装技能（{} 范围，共 {} 个）：\n\n", scope, skills.len());
+                        for skill in &skills {
+                            let when = skill
+                                .meta
+                                .when_to_use
+                                .as_ref()
+                                .map(|w| format!(" (触发: {})", w))
+                                .unwrap_or_default();
+                            let version = skill
+                                .meta
+                                .version
+                                .as_ref()
+                                .map(|v| format!(" (版本: {})", v))
+                                .unwrap_or_default();
+                            let source = skill
+                                .source_path
+                                .parent()
+                                .and_then(read_skill_meta)
+                                .map(|m| match m.git_url {
+                                    Some(url) => format!(" (来源: git {})", url),
+                                    None => m
+                                        .source_path
+                                        .map(|p| format!(" (来源: local {})", p))
+                                        .unwrap_or_default(),
+                                })
+                                .unwrap_or_default();
+                            content.push_str(&format!(
+                                "  • **{}**: {}{}{}{}",
+                                skill.meta.name,
+                                skill.meta.description,
+                                when,
+                                version,
+                                source
+                            ));
+                            content.push('\n');
+                        }
+                        let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
+                    }
+                }
+                Err(e) => {
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::Error {
+                            content: format!("❌ 查询失败: {}", e),
+                        },
+                        &md,
+                    );
+                }
+            }
+        }
+
+        "remove" => {
+            if parts.len() < 3 {
+                let _ = ui::render_block(
+                    &ui::MessageBlock::Error {
+                        content: "❌ 缺少技能名称。用法：/skill remove <name> [--global]".to_string(),
+                    },
+                    &md,
+                );
+                return SlashOutcome::Continue;
+            }
+
+            let name = parts[2];
+            let is_global = parts.iter().any(|p| *p == "--global");
+            let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
+
+            match remove_skill(name, scope, working_dir) {
+                Ok(()) => {
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::ToolResult {
+                            tool_name: "技能".to_string(),
+                            success: true,
+                            content: format!("✅ 已移除技能: {}", name),
+                        },
+                        &md,
+                    );
+                }
+                Err(e) => {
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::Error {
+                            content: format!("❌ 移除失败: {}", e),
+                        },
+                        &md,
+                    );
+                }
+            }
+        }
+
+        "update" => {
+            let is_global = parts.contains(&"--global");
+            let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
+
+            match crate::skills::installer::update_skills(scope, working_dir) {
+                Ok(updated) => {
+                    if updated.is_empty() {
+                        let _ = ui::render_block(
+                            &ui::MessageBlock::System {
+                                content: format!("✅ {} 范围内无需要更新的技能", scope),
+                            },
+                            &md,
+                        );
+                    } else {
+                        let _ = ui::render_block(
+                            &ui::MessageBlock::ToolResult {
+                                tool_name: "技能".to_string(),
+                                success: true,
+                                content: format!("✅ 已更新 {} 个技能: {}", updated.len(), updated.join(", ")),
+                            },
+                            &md,
+                        );
+                    }
+                }
+                Err(e) => {
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::Error {
+                            content: format!("❌ 更新失败: {}", e),
+                        },
+                        &md,
+                    );
+                }
+            }
+        }
+
+        _ => {
+            let _ = ui::render_block(
+                &ui::MessageBlock::Error {
+                    content: format!("❌ 未知 skill 子命令: {}", parts[1]),
+                },
+                &md,
+            );
+        }
+    }
+
+    SlashOutcome::Continue
 }

@@ -1,0 +1,23 @@
+{
+  "file_path": "src/web",
+  "analysis_type": "Structure",
+  "summary": "Web 界面模块完整分析，包括后端架构、前端组件、路由、WebSocket 通信等",
+  "details": {
+    "module_structure": {
+      "src/web/handlers/": "REST API 和 WebSocket 处理器",
+      "src/web/mod.rs": "Web 服务入口，serve() 函数启动 axum 服务，定义 AppState 和 WebConfig",
+      "src/web/router.rs": "axum Router 定义，路由集中管理",
+      "src/web/static/": "CSS 和 JS 静态资源",
+      "src/web/templates/": "minijinja 模板（base.html, index.html, files.html）",
+      "src/web/ws/": "WebSocket 事件类型和会话管理"
+    },
+    "tech_stack": "axum + minijinja + Alpine.js + HTMX + Pico CSS + highlight.js",
+    "total_files": 14
+  },
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785547060,
+    "nanos_since_epoch": 185061000
+  },
+  "batch_number": 1
+}

@@ -12,7 +12,7 @@ use crate::prompt::build_system_prompt;
 use crate::scheduler::engine::{Scheduler, SchedulerConfig};
 use crate::security::SecurityPolicy;
 use crate::session::SessionLogger;
-use crate::skills::{default_skills_dir, discover_skills, Skill};
+use crate::skills::{discover_all_skills, Skill};
 use crate::tools::{async_tool::AsyncToolRegistry, ToolRegistry};
 use crate::ui::{self, CliMessageOutput, MarkdownRenderer};
 use crate::utils::message_output::MessageOutput;
@@ -111,9 +111,8 @@ impl App {
         );
         let llm_client = Arc::new(LlmClient::from_configs(provider_configs)?);
 
-        // 发现项目技能
-        let skills_dir = default_skills_dir(&config.working_dir);
-        let discovered_skills = discover_skills(&skills_dir).unwrap_or_default();
+        // 发现全局 + 项目技能
+        let discovered_skills = discover_all_skills(&config.working_dir).unwrap_or_default();
 
         // 构建 system prompt
         let tool_schemas = tools.get_tool_schemas();

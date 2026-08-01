@@ -7,7 +7,7 @@ use tracing::debug;
 use tracing::warn;
 
 use super::super::models::*;
-use super::{parse_arguments, LlmProvider};
+use super::LlmProvider;
 use crate::utils::error::AppError;
 
 /// Anthropic Claude provider

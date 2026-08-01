@@ -98,6 +98,8 @@ mod tests {
             name: name.to_string(),
             description: "test".to_string(),
             when_to_use: None,
+            version: None,
+            author: None,
             metadata: HashMap::new(),
         };
         let keywords = Skill::compute_keywords(&meta);

@@ -31,11 +31,54 @@ mod web;
 
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tracing_subscriber::fmt;
 
 use crate::app::{App, AppConfig};
 use crate::utils::error::AppError;
+use crate::skills::installer::{
+    install_skill, list_skills, read_skill_meta, remove_skill, update_skills, InstallScope,
+};
+
+#[derive(Subcommand, Debug)]
+enum SkillCommand {
+    /// 安装技能
+    ///
+    /// 源格式：
+    ///   owner/repo          — Git 仓库（自动展开为 GitHub URL）
+    ///   https://...         — 完整 Git URL
+    ///   ./local-path        — 本地目录
+    Add {
+        /// 技能来源（Git 仓库或本地目录路径）
+        source: String,
+        /// 指定要安装的技能名称（可多次指定）
+        #[arg(long)]
+        skill: Option<Vec<String>>,
+        /// 安装到全局目录（~/.dev-assistant/skills/）
+        #[arg(short, long)]
+        global: bool,
+    },
+    /// 列出已安装技能
+    List {
+        /// 列出全局技能
+        #[arg(short, long)]
+        global: bool,
+    },
+    /// 移除已安装技能
+    Remove {
+        /// 技能名称
+        name: String,
+        /// 移除全局技能
+        #[arg(short, long)]
+        global: bool,
+    },
+    /// 更新技能（仅更新 Git 来源的技能）
+    Update {
+        /// 更新全局技能
+        #[arg(short, long)]
+        global: bool,
+    },
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "dev-assistant", version, about = "Rust native AI programming assistant")]
@@ -91,6 +134,10 @@ struct Cli {
     /// Web 服务绑定主机地址（默认 127.0.0.1）
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
+
+    /// 技能管理子命令
+    #[command(subcommand)]
+    skill: Option<SkillCommand>,
 }
 
 impl Cli {
@@ -154,7 +201,7 @@ fn main() -> Result<(), AppError> {
     let restart_args = cli.to_restart_args();
 
     let config = AppConfig {
-        working_dir,
+        working_dir: working_dir.clone(),
         verbose: cli.verbose,
         max_iterations: cli.max_iterations.unwrap_or(15),
         max_tokens: cli.max_tokens,
@@ -174,6 +221,79 @@ fn main() -> Result<(), AppError> {
         .enable_all()
         .build()
         .map_err(|e| AppError::Config(format!("Failed to build tokio runtime: {}", e)))?;
+
+    // 如果传入了 skill 子命令，执行后直接退出
+    if let Some(cmd) = cli.skill {
+        let scope = match cmd {
+            SkillCommand::Add { global, .. } => global.then_some(InstallScope::Global),
+            SkillCommand::List { global } => global.then_some(InstallScope::Global),
+            SkillCommand::Remove { global, .. } => global.then_some(InstallScope::Global),
+            SkillCommand::Update { global } => global.then_some(InstallScope::Global),
+        };
+
+        match cmd {
+            SkillCommand::Add { source, skill, .. } => {
+                let filters = skill.as_ref().map(|v| v.as_slice());
+                runtime.block_on(async {
+                    match install_skill(&source, scope.unwrap_or(InstallScope::Project), &working_dir, filters).await {
+                        Ok(skills) => {
+                            for skill in &skills {
+                                println!("✅ 已安装: {} — {}", skill.meta.name, skill.meta.description);
+                            }
+                            Ok(())
+                        }
+                        Err(e) => Err(AppError::Config(format!("安装失败: {}", e))),
+                    }
+                })?;
+            }
+            SkillCommand::List { .. } => {
+                let scope = scope.unwrap_or(InstallScope::Project);
+                for skill in list_skills(scope, &working_dir)? {
+                    let when = skill
+                        .meta
+                        .when_to_use
+                        .as_deref()
+                        .map(|w| format!(" (触发: {})", w))
+                        .unwrap_or_default();
+                    let version = skill
+                        .meta
+                        .version
+                        .as_deref()
+                        .map(|v| format!(" (版本: {})", v))
+                        .unwrap_or_default();
+                    let source = skill
+                        .source_path
+                        .parent()
+                        .and_then(read_skill_meta)
+                        .map(|m| match m.git_url {
+                            Some(url) => format!(" (来源: git {})", url),
+                            None => m
+                                .source_path
+                                .map(|p| format!(" (来源: local {})", p))
+                                .unwrap_or_default(),
+                        })
+                        .unwrap_or_default();
+                    println!(
+                        "  • {}:{}{}{}{}",
+                        skill.meta.name, skill.meta.description, when, version, source
+                    );
+                }
+            }
+            SkillCommand::Remove { name, .. } => {
+                remove_skill(&name, scope.unwrap_or(InstallScope::Project), &working_dir)?;
+                println!("✅ 已移除: {}", name);
+            }
+            SkillCommand::Update { .. } => {
+                let updated = update_skills(scope.unwrap_or(InstallScope::Project), &working_dir)?;
+                if updated.is_empty() {
+                    println!("✅ 无需更新");
+                } else {
+                    println!("✅ 已更新: {}", updated.join(", "));
+                }
+            }
+        }
+        return Ok(());
+    }
 
     runtime.block_on(async {
         if cli.web {

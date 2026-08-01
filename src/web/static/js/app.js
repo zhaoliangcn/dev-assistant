@@ -161,7 +161,7 @@ function chatApp() {
                 this.activeSessionId = id;
                 this.messages = this.eventsToMessages(data.events || []);
                 this.pendingStatus = null;
-                this.$nextTick(() => this.scrollToBottom(true));
+                this.scrollToBottomLater();
             } catch (e) {
                 console.error('加载会话详情失败:', e);
             }
@@ -332,23 +332,20 @@ function chatApp() {
                 content: content,
                 time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
             }, extra || {})];
-            this.$nextTick(() => this.scrollToBottom(false));
+            this.scrollToBottomLater();
         },
 
-        // B21: 消息更新后自动滚动到底部。
-        // 用户明确要求始终自动滚到底部，因此不再做"距底部阈值"抑制。
-        // 仅对"非底部用户滚动"保留轻微保护：若用户上翻超过一屏，
-        // 新消息不强行打断其阅读；否则跟随到底部。
-        scrollToBottom(force) {
-            const el = this.$refs.list;
-            if (!el) return;
-            if (!force) {
-                // 用户上翻超过一屏时视为正在阅读历史，不打扰；
-                // 否则（含流式过程中）始终跟随到底部
-                const reading = el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight;
-                if (reading) return;
-            }
-            el.scrollTop = el.scrollHeight;
+        // B25: 始终聚焦助手输出——消息更新后滚动到底部。
+        // 在 $nextTick（DOM 补丁完成）后再包一层 requestAnimationFrame，
+        // 确保浏览器已 reflow，scrollHeight 为最新值，滚动必然到位。
+        scrollToBottomLater() {
+            this.$nextTick(() => {
+                requestAnimationFrame(() => {
+                    const el = this.$refs.list;
+                    if (!el) return;
+                    el.scrollTop = el.scrollHeight;
+                });
+            });
         },
 
         handleServerEvent(msg) {
@@ -425,8 +422,8 @@ function chatApp() {
                     } else {
                         this.messages[idx] = updated;
                     }
-                    // 流式跟随：用户若停留在底部则实时滚动
-                    this.$nextTick(() => this.scrollToBottom(false));
+                    // 流式跟随：始终聚焦助手输出，滚动到底部
+                    this.scrollToBottomLater();
                     return;
                 }
                 // 找不到进行中的 assistant 消息则按完整消息追加
@@ -453,8 +450,8 @@ function chatApp() {
             this.addMessage('user', text);
             this.input = '';
             this.busy = true;
-            // 用户主动发送：强制滚动到底部
-            this.$nextTick(() => this.scrollToBottom(true));
+            // 用户主动发送：滚动到底部
+            this.scrollToBottomLater();
 
             if (wsInstance && wsInstance.readyState === WebSocket.OPEN) {
                 wsInstance.send(JSON.stringify({

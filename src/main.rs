@@ -182,7 +182,7 @@ fn main() -> Result<(), AppError> {
                 port: cli.port,
                 working_dir: PathBuf::from(&cli.project),
                 verbose: cli.verbose,
-                max_iterations: cli.max_iterations.unwrap_or(8),
+                max_iterations: cli.max_iterations.unwrap_or(15),
                 max_tokens: cli.max_tokens,
                 provider: cli.provider.clone(),
                 model: cli.model.clone(),

@@ -335,14 +335,19 @@ function chatApp() {
             this.$nextTick(() => this.scrollToBottom(false));
         },
 
-        // W5: 消息更新后自动滚动到底部。
-        // 用户上翻阅读历史（距底部超过阈值）时不打扰；force=true 强制滚动
-        // （用于用户主动发送消息的场景）。
+        // B21: 消息更新后自动滚动到底部。
+        // 用户明确要求始终自动滚到底部，因此不再做"距底部阈值"抑制。
+        // 仅对"非底部用户滚动"保留轻微保护：若用户上翻超过一屏，
+        // 新消息不强行打断其阅读；否则跟随到底部。
         scrollToBottom(force) {
             const el = this.$refs.list;
             if (!el) return;
-            const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-            if (!force && !nearBottom) return;
+            if (!force) {
+                // 用户上翻超过一屏时视为正在阅读历史，不打扰；
+                // 否则（含流式过程中）始终跟随到底部
+                const reading = el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight;
+                if (reading) return;
+            }
             el.scrollTop = el.scrollHeight;
         },
 

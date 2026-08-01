@@ -24,17 +24,30 @@ pub struct SystemStatus {
     pub uptime: String,
 }
 
+/// 服务启动时刻（首次请求时初始化，用于 uptime 统计）。
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
 /// 获取系统状态。
 pub async fn get_status(
     State(state): State<Arc<AppState>>,
 ) -> Json<SystemStatus> {
+    let started = *STARTED.get_or_init(std::time::Instant::now);
+    let elapsed = started.elapsed();
+    let uptime = if elapsed.as_secs() >= 3600 {
+        format!("{}h{:02}m", elapsed.as_secs() / 3600, (elapsed.as_secs() % 3600) / 60)
+    } else if elapsed.as_secs() >= 60 {
+        format!("{}m{:02}s", elapsed.as_secs() / 60, elapsed.as_secs() % 60)
+    } else {
+        format!("{}s", elapsed.as_secs())
+    };
+
     Json(SystemStatus {
         version: env!("CARGO_PKG_VERSION").to_string(),
         project_dir: state.working_dir.display().to_string(),
         mode: "web".to_string(),
-        active_model: "default".to_string(),
+        active_model: state.llm.active_model().to_string(),
         online: true,
-        uptime: format!("{}s", 0),
+        uptime,
     })
 }
 

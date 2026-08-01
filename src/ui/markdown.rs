@@ -374,12 +374,18 @@ impl MarkdownRenderer {
     /// - 其余行 → 普通
     fn render_diff_block(&self, output: &mut String, code: &str) {
         let added_fg = self.theme.diff_added_fg;
-        let added_bg = self.theme.diff_added_bg;
         let deleted_fg = self.theme.diff_deleted_fg;
-        let deleted_bg = self.theme.diff_deleted_bg;
         let hunk = self.theme.diff_hunk_fg;
         let dim = self.theme.muted_fg;
         let reset = crate::ui::theme::RESET;
+
+        // 半透明模式：用与终端背景混色的玻璃背景替代实心背景；
+        // 未启用时回退到主题默认实心背景。
+        let tint = crate::ui::theme::diff_tint_rgb(self.theme.mode);
+        let added_bg = crate::ui::translucent::glass_background(tint.added, crate::ui::translucent::GLASS_ALPHA)
+            .unwrap_or_else(|| self.theme.diff_added_bg.to_string());
+        let deleted_bg = crate::ui::translucent::glass_background(tint.deleted, crate::ui::translucent::GLASS_ALPHA)
+            .unwrap_or_else(|| self.theme.diff_deleted_bg.to_string());
 
         for line in LinesWithEndings::from(code) {
             let line = line.strip_suffix('\n').unwrap_or(line);
@@ -401,13 +407,13 @@ impl MarkdownRenderer {
                 match first {
                     '+' => {
                         output.push_str(added_fg);
-                        output.push_str(added_bg);
+                        output.push_str(&added_bg);
                         output.push_str(line);
                         output.push_str(reset);
                     }
                     '-' => {
                         output.push_str(deleted_fg);
-                        output.push_str(deleted_bg);
+                        output.push_str(&deleted_bg);
                         output.push_str(line);
                         output.push_str(reset);
                     }

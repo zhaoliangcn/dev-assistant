@@ -123,6 +123,12 @@ struct Cli {
     #[arg(long)]
     background: bool,
 
+    /// 半透明界面模式：查询终端背景色，diff 等色块做 alpha 混色（玻璃拟态）。
+    /// 注意：终端窗口本身的透明度由终端模拟器（iTerm2/kitty/Alacritty 等）控制，
+    /// 本参数仅优化 CLI 界面自身的渲染观感。
+    #[arg(long)]
+    translucent: bool,
+
     /// Web 模式：启动 Web 界面服务
     #[arg(long)]
     web: bool,
@@ -155,6 +161,9 @@ impl Cli {
         }
         if self.verbose {
             args.push("--verbose".to_string());
+        }
+        if self.translucent {
+            args.push("--translucent".to_string());
         }
         if let Some(ref model) = self.model {
             args.push("--model".to_string());
@@ -311,6 +320,11 @@ fn main() -> Result<(), AppError> {
             crate::web::serve(web_config).await
         } else {
             let mut app = App::build(config)?;
+            // 半透明界面模式：查询终端背景色，供 UI 做 alpha 混色。
+            // 需在 REPL 读取 stdin 之前调用（OSC 11 回复占用短暂 stdin）。
+            if cli.translucent {
+                crate::ui::translucent::init();
+            }
             app.run().await
         }
     })

@@ -17,7 +17,7 @@ use rustyline::{Editor, Helper, Context};
 
 /// 可补全的 Slash 命令列表（含 SlashCommand 枚举 + REPL 扩展命令）。
 const SLASH_COMMANDS: &[&str] = &[
-    "/help", "/history", "/clear", "/expand", "/grep", "/search",
+    "/help", "/history", "/clear", "/expand", "/grep", "/search", "/diff",
     "/exit", "/quit", "/verbose", "/quiet",
     "/model", "/status", "/pipeline", "/background",
     "/schedule", "/unschedule", "/scheduled", "/tasks",
@@ -175,6 +175,8 @@ pub enum SlashCommand {
     Expand,
     /// /grep — 搜索文件内容（支持正则）
     Grep,
+    /// /diff — 查看工作区改动（git diff）
+    Diff,
     /// /model — 查看/切换 LLM 模型
     Model,
 }
@@ -191,6 +193,7 @@ impl SlashCommand {
             "quiet" => Some(Self::Quiet),
             "expand" => Some(Self::Expand),
             "grep" | "search" => Some(Self::Grep),
+            "diff" => Some(Self::Diff),
             "model" => Some(Self::Model),
             _ => None,
         }
@@ -251,6 +254,11 @@ impl SlashCommand {
                 println!("🔍 /grep 命令正在搜索文件内容...");
                 SlashAction::Continue
             }
+            SlashCommand::Diff => {
+                // /diff 由调用方在 REPL 循环中处理（需要访问工作目录运行 git diff）
+                println!("📝 /diff 命令正在查看工作区改动...");
+                SlashAction::Continue
+            }
             SlashCommand::Model => {
                 // /model 由调用方在 REPL 循环中处理（需要访问 LLM 客户端）
                 println!("📦 /model 命令正在切换模型...");
@@ -267,6 +275,7 @@ impl SlashCommand {
         println!("  /expand    - 展开上一段被折叠的内容");
         println!("  /grep      - 搜索文件内容（支持正则，用法: /grep <模式> [路径]）");
         println!("  /search    - 同 /grep");
+        println!("  /diff      - 查看工作区改动（git diff，用法: /diff [路径...]）");
         println!("  /exit      - 退出程序");
         println!("  /quit      - 退出程序（同 /exit）");
         println!("  /verbose   - 切换到详细模式（显示所有消息）");
@@ -397,5 +406,29 @@ mod tests {
     #[test]
     fn test_grep_execute_returns_continue() {
         assert_eq!(SlashCommand::Grep.execute(), SlashAction::Continue);
+    }
+
+    #[test]
+    fn test_diff_parsed() {
+        let (cmd, args) = SlashCommand::parse("/diff src/main.rs").unwrap();
+        assert_eq!(cmd, SlashCommand::Diff);
+        assert_eq!(args, vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn test_diff_no_args_parsed() {
+        let (cmd, args) = SlashCommand::parse("/diff").unwrap();
+        assert_eq!(cmd, SlashCommand::Diff);
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_diff_from_str() {
+        assert_eq!(SlashCommand::from_str("diff"), Some(SlashCommand::Diff));
+    }
+
+    #[test]
+    fn test_diff_execute_returns_continue() {
+        assert_eq!(SlashCommand::Diff.execute(), SlashAction::Continue);
     }
 }

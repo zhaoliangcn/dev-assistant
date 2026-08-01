@@ -427,6 +427,38 @@ impl App {
                         continue;
                     }
 
+                    // /diff 特殊处理：查看工作区改动（git diff）
+                    if matches!(cmd, ui::input::SlashCommand::Diff) {
+                        match run_diff(&working_dir, &args) {
+                            Ok(Some(diff_content)) => {
+                                let file_path = if args.is_empty() {
+                                    "工作区".to_string()
+                                } else {
+                                    args.join(" ")
+                                };
+                                let block = ui::MessageBlock::Diff {
+                                    file_path,
+                                    diff_content,
+                                    summary: Some("git diff".to_string()),
+                                };
+                                ui::render_block(&block, &markdown_renderer)?;
+                            }
+                            Ok(None) => {
+                                let block = ui::MessageBlock::System {
+                                    content: "ℹ️ 工作区没有未提交的改动".to_string(),
+                                };
+                                ui::render_block(&block, &markdown_renderer)?;
+                            }
+                            Err(e) => {
+                                let block = ui::MessageBlock::Error {
+                                    content: format!("❌ git diff 失败: {}", e),
+                                };
+                                ui::render_block(&block, &markdown_renderer)?;
+                            }
+                        }
+                        continue;
+                    }
+
                     // /model 特殊处理：查看/切换 LLM 模型（交互式）
                     if matches!(cmd, ui::input::SlashCommand::Model) {
                         // 收集为自有 String，释放对 self.agent 的借用，便于后续可变借用
@@ -745,4 +777,40 @@ fn run_grep(working_dir: &std::path::Path, pattern: &str) -> Result<Vec<String>,
     }
 
     Ok(results)
+}
+
+// ── /diff 命令 ───────────────────────────────────────────────────────
+
+/// 运行 `git diff` 查看工作区改动，返回 unified diff 文本。
+///
+/// 无参数时查看全部改动；可指定一个或多个路径限制范围。
+/// 返回 `Ok(None)` 表示工作区没有未提交的改动。
+fn run_diff(working_dir: &std::path::Path, paths: &[String]) -> Result<Option<String>, AppError> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("diff").current_dir(working_dir);
+    for p in paths {
+        cmd.arg(p);
+    }
+    let output = cmd.output().map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            e.kind(),
+            format!("git diff 执行失败: {}", e),
+        ))
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Config(format!(
+            "git diff 执行失败: {}",
+            stderr.trim()
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let text = stdout.trim().to_string();
+    if text.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(text))
+    }
 }

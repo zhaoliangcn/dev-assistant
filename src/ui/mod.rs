@@ -4,6 +4,7 @@ pub mod markdown;
 pub mod output_impls;
 pub mod style;
 pub mod theme;
+pub mod translucent;
 pub use blocks::MessageBlock;
 pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};

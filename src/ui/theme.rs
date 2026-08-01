@@ -210,6 +210,30 @@ impl Theme {
     }
 }
 
+/// diff 行背景的 RGB 色调（用于半透明混色）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiffTint {
+    /// 新增行色调（绿）
+    pub added: (u8, u8, u8),
+    /// 删除行色调（红）
+    pub deleted: (u8, u8, u8),
+}
+
+/// 按主题模式返回 diff 背景的 RGB 色调，供半透明混色使用。
+#[must_use]
+pub const fn diff_tint_rgb(mode: ThemeMode) -> DiffTint {
+    match mode {
+        ThemeMode::Dark => DiffTint {
+            added: DARK_DIFF_ADDED_BG_RGB,
+            deleted: DARK_DIFF_DELETED_BG_RGB,
+        },
+        ThemeMode::Light => DiffTint {
+            added: LIGHT_DIFF_ADDED_BG_RGB,
+            deleted: LIGHT_DIFF_DELETED_BG_RGB,
+        },
+    }
+}
+
 /// 解析 `COLORFGBG`（参考 CodeWhale `palette/detect.rs::from_colorfgbg`）。
 ///
 /// 最后一个数字段是终端背景色，`>= 8` 视为亮色 profile。

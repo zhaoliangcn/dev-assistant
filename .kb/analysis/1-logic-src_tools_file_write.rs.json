@@ -1,0 +1,19 @@
+{
+  "file_path": "src/tools/file/write.rs",
+  "analysis_type": "Logic",
+  "summary": "edit_file 的 fuzzy_find 模糊匹配可能误替换代码",
+  "details": null,
+  "issues": [
+    {
+      "severity": "High",
+      "description": "fuzzy_find 的去掉缩进匹配逻辑（dedented match）可能匹配到非预期的代码区域，导致错误的替换",
+      "location": "src/tools/file/write.rs:105-145",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 277970000
+  },
+  "batch_number": 1
+}

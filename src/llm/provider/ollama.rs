@@ -173,6 +173,16 @@ impl LlmProvider for OllamaProvider {
                 };
 
                 if data["done"].as_bool().unwrap_or(false) {
+                    // 提取 usage 信息（Ollama 在最后 done=true 的行中返回）
+                    if let Some(prompt_count) = data.get("prompt_eval_count").and_then(|v| v.as_u64()) {
+                        let eval_count = data.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                        yield LlmStreamEvent::Usage(TokenUsage {
+                            prompt_tokens: prompt_count as usize,
+                            completion_tokens: eval_count as usize,
+                            total_tokens: (prompt_count + eval_count) as usize,
+                        });
+                    }
+
                     // 处理工具调用：Ollama 在 done=true 行也可能携带 tool_calls
                     if let Some(tcs) = data["message"]["tool_calls"].as_array() {
                         if !tcs.is_empty() {

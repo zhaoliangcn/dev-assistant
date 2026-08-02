@@ -52,6 +52,43 @@ document.addEventListener('alpine:init', () => {
         },
     });
 
+    window.Alpine.store('tokenUsage', {
+        prompt: 0,
+        completion: 0,
+        total: 0,
+
+        reset() {
+            this.prompt = 0;
+            this.completion = 0;
+            this.total = 0;
+        },
+
+        add(prompt, completion, total) {
+            this.prompt += prompt || 0;
+            this.completion += completion || 0;
+            this.total += total || 0;
+        },
+
+        // 格式化显示：小于 1000 显示原值，否则显示 K 单位
+        format(n) {
+            if (!n) return '0';
+            if (n < 1000) return String(n);
+            return (n / 1000).toFixed(1) + 'K';
+        },
+
+        label() {
+            if (!this.total) return '';
+            return '🔤 ' + this.format(this.total) + ' tokens';
+        },
+
+        detail() {
+            if (!this.total) return '';
+            return 'Prompt: ' + this.format(this.prompt) +
+                ' · Completion: ' + this.format(this.completion) +
+                ' · Total: ' + this.format(this.total);
+        },
+    });
+
     window.Alpine.store('theme', {
         theme: localStorage.getItem('dev-assistant-theme') || 'auto',
         systemDark: false,
@@ -137,6 +174,8 @@ function chatApp() {
         renameTitle: '',
         // 状态条：thinking/status 事件显示在此（可替换，不进入消息列表）
         pendingStatus: null,
+        // Token 消耗累计
+        tokenUsage: { prompt: 0, completion: 0, total: 0 },
 
         init() {
             this.connectWS();
@@ -453,6 +492,19 @@ function chatApp() {
                     this.pendingStatus = null;
                     this.busy = false;
                     this.addMessage('error', msg.content);
+                    break;
+                case 'token_usage':
+                    // 累计 token 消耗（同步到全局 store 以便 header 显示）
+                    this.tokenUsage.prompt += msg.prompt_tokens || 0;
+                    this.tokenUsage.completion += msg.completion_tokens || 0;
+                    this.tokenUsage.total += msg.total_tokens || 0;
+                    if (window.Alpine) {
+                        window.Alpine.store('tokenUsage').add(
+                            msg.prompt_tokens || 0,
+                            msg.completion_tokens || 0,
+                            msg.total_tokens || 0
+                        );
+                    }
                     break;
                 case 'done':
                     this.pendingStatus = null;

@@ -290,6 +290,23 @@ where
                     }
                 };
 
+                // 提取 token 用量（OpenAI 在最后一个带 usage 的 chunk 中返回）
+                // 即使 choices 为空，usage 也可能存在
+                if let Some(usage) = data.get("usage") {
+                    if !usage.is_null() {
+                        let prompt_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0) as usize;
+                        let completion_tokens = usage["completion_tokens"].as_u64().unwrap_or(0) as usize;
+                        let total_tokens = usage["total_tokens"].as_u64().unwrap_or(0) as usize;
+                        if total_tokens > 0 {
+                            yield LlmStreamEvent::Usage(TokenUsage {
+                                prompt_tokens,
+                                completion_tokens,
+                                total_tokens,
+                            });
+                        }
+                    }
+                }
+
                 // 提取 delta 内容
                 if let Some(delta) = data["choices"].as_array()
                     .and_then(|arr| arr.first())

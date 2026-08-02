@@ -3,7 +3,7 @@
 use tracing::debug;
 
 use super::io::{read_file_content, write_file_content};
-use crate::tools::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
+use crate::tools::{common, ToolArgs, ToolContext, ToolDefinition, ToolResult};
 use crate::utils::error::AppError;
 
 pub fn write_file_tool() -> ToolDefinition {
@@ -64,7 +64,7 @@ fn write_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResu
         .as_str()
         .ok_or_else(|| AppError::Llm("content is required".to_string()))?;
 
-    let full_path = context.working_dir.join(file_path);
+    let full_path = common::resolve_model_path(&context.working_dir, file_path);
     debug!(file = %file_path, path = %full_path.display(), content_len = content.len(), "write_file");
     match write_file_content(&full_path, content) {
         Ok(_) => {}
@@ -154,7 +154,7 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
         .as_str()
         .ok_or_else(|| AppError::Llm("new_content is required".to_string()))?;
 
-    let full_path = context.working_dir.join(file_path);
+    let full_path = common::resolve_model_path(&context.working_dir, file_path);
     debug!(file = %file_path, path = %full_path.display(), "edit_file");
     let content = match read_file_content(&full_path) {
         Ok(c) => c,

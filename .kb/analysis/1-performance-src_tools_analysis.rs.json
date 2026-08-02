@@ -1,0 +1,19 @@
+{
+  "file_path": "src/tools/analysis.rs",
+  "analysis_type": "Performance",
+  "summary": "analysis.rs 无文件数量上限保护",
+  "details": null,
+  "issues": [
+    {
+      "severity": "High",
+      "description": "find_files 函数没有最大文件数量限制，在大型仓库中可能导致 OOM",
+      "location": "src/tools/analysis.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 277215000
+  },
+  "batch_number": 1
+}

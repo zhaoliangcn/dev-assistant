@@ -1,0 +1,25 @@
+{
+  "file_path": "src/tools/",
+  "analysis_type": "Design",
+  "summary": "同步/异步工具框架并存，功能重叠，安全评估逻辑重复",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "ToolRegistry（同步）和 AsyncToolRegistry（异步）存在大量功能重叠，安全评估逻辑在两边重复实现",
+      "location": "src/tools/mod.rs + src/tools/async_tool.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "High",
+      "description": "同步 file tools 未使用 resolve_model_path，而异步 file tools 使用了，行为不一致",
+      "location": "src/tools/file/write.rs vs src/tools/file/async_write.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 277599000
+  },
+  "batch_number": 1
+}

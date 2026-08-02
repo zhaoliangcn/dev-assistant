@@ -1,0 +1,12 @@
+{
+  "file_path": "src/",
+  "analysis_type": "Structure",
+  "summary": "dev-assistant-rs 项目整体架构分析完成。项目包含 90+ 个 Rust 源文件，分为 agent、config、llm、orchestrator、persist、scheduler、security、session、skills、tools、ui、utils、web 等模块。架构清晰，模块职责分明。",
+  "details": null,
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785662757,
+    "nanos_since_epoch": 341899000
+  },
+  "batch_number": 1
+}

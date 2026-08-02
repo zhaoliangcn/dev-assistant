@@ -1,0 +1,19 @@
+{
+  "file_path": "src/scheduler/store.rs",
+  "analysis_type": "Performance",
+  "summary": "ScheduledTaskStore 每次更新状态都全量重写文件",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "update_status 和 update_task_after_execution 每次更新都调用 rewrite_all() 全量重写所有任务到文件，在任务数量大时性能差",
+      "location": "src/scheduler/store.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 279767000
+  },
+  "batch_number": 1
+}

@@ -1,0 +1,37 @@
+{
+  "file_path": "src/",
+  "analysis_type": "Design",
+  "summary": "部分文件体积过大，应拆分",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "src/agent/mod.rs 1302 行，包含太多职责（Agent 主循环、子代理管理、pipeline 等），应拆分",
+      "location": "src/agent/mod.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "Medium",
+      "description": "src/repl.rs 1249 行，slash 命令处理逻辑过于集中",
+      "location": "src/repl.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "Low",
+      "description": "src/tools/kb.rs 896 行，KB 工具逻辑复杂",
+      "location": "src/tools/kb.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "Low",
+      "description": "src/app.rs 822 行，应用构建逻辑较重",
+      "location": "src/app.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 278764000
+  },
+  "batch_number": 1
+}

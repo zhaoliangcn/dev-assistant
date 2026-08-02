@@ -2,12 +2,14 @@ pub mod blocks;
 pub mod input;
 pub mod markdown;
 pub mod output_impls;
+pub mod realtime_output;
 pub mod style;
 pub mod theme;
 pub mod translucent;
 pub use blocks::MessageBlock;
 pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};
+pub use realtime_output::RealtimeOutput;
 
 use std::io::{self, Write};
 use std::time::Instant;

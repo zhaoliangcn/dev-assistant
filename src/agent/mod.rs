@@ -262,6 +262,9 @@ impl Agent {
                     // 收集工具调用
                     tool_calls.push(tc);
                 }
+                Ok(LlmStreamEvent::Usage(usage)) => {
+                    output.report_token_usage(usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
+                }
                 Ok(LlmStreamEvent::Done) => {
                     // 最终渲染（移除闪烁光标）
                     output.streaming_assistant(&assistant_content, true);
@@ -742,7 +745,8 @@ impl Agent {
                 }
             };
 
-            let mut sub_output = crate::ui::UIMessageOutput::new(verbose);
+            let stage_type_name = stage.agent_type.to_str();
+            let mut sub_output = crate::ui::RealtimeOutput::new(verbose, self.depth + 1, stage_type_name);
             let result = Box::pin(subagent.run(stage_task, &mut sub_output)).await;
 
             // 收集子代理输出消息到主 Agent 的显示缓冲区
@@ -1056,7 +1060,7 @@ impl Agent {
             context: context.to_string(),
             max_iterations: sub_max_iterations,
             max_tokens: sub_max_tokens,
-            agent_type,
+            agent_type: agent_type.clone(),
         }) {
             Ok(agent) => agent,
             Err(e) => {
@@ -1071,7 +1075,7 @@ impl Agent {
             }
         };
 
-        let mut sub_output = crate::ui::UIMessageOutput::new(false);
+        let mut sub_output = crate::ui::RealtimeOutput::new(false, child_depth, agent_type_str);
         let result = Box::pin(subagent.run(task.to_string(), &mut sub_output)).await;
 
         match result {

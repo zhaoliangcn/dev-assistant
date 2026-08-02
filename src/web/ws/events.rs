@@ -84,6 +84,14 @@ pub enum ServerEvent {
     SessionReady {
         session_id: String,
     },
+    /// Token 用量信息（累计 prompt/completion/total tokens）
+    TokenUsage {
+        prompt_tokens: usize,
+        completion_tokens: usize,
+        total_tokens: usize,
+        #[serde(default)]
+        id: String,
+    },
 }
 
 impl ServerEvent {
@@ -150,6 +158,16 @@ impl ServerEvent {
     pub fn session_ready(session_id: impl Into<String>) -> Self {
         Self::SessionReady {
             session_id: session_id.into(),
+        }
+    }
+
+    /// 创建一个 Token 用量事件
+    pub fn token_usage(prompt_tokens: usize, completion_tokens: usize, total_tokens: usize) -> Self {
+        Self::TokenUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            id: uuid_v4(),
         }
     }
 }

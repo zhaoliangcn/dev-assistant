@@ -63,6 +63,9 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         format!("{} {}", command, extra_args.join(" "))
     };
 
+    // Max output byte limit: 10MB total (stdout + stderr) to prevent OOM.
+    const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+
     // Spawn with piped output
     let mut cmd = Command::new(command);
     cmd.args(&extra_args)
@@ -86,7 +89,7 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         }
     }
 
-    let child = cmd.spawn().map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         AppError::Llm(format!(
             "Command execution failed for '{}': {}. \
              Note: exec_command no longer supports shell syntax (pipes, redirects, etc.). \
@@ -104,22 +107,47 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
     #[cfg(unix)]
     let pgid_created = unsafe { libc::setpgid(pid as i32, pid as i32) == 0 };
 
-    // Use wait_with_output() in a separate thread for timeout support.
-    // wait_with_output() internally reads stdout/stderr pipes to completion,
-    // avoiding the deadlock that would occur if we only waited on the child.
+    // Read stdout/stderr with a byte limit to prevent OOM from large output.
+    // Uses separate threads to read pipes concurrently, avoiding deadlock.
+    use std::io::Read;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
     let (tx, rx) = mpsc::channel();
 
+    let stdout_reader = std::thread::spawn(move || {
+        let mut buf = Vec::with_capacity(4096);
+        if let Some(reader) = stdout {
+            let mut limited = reader.take(MAX_OUTPUT_BYTES as u64);
+            let _ = limited.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let stderr_reader = std::thread::spawn(move || {
+        let mut buf = Vec::with_capacity(4096);
+        if let Some(reader) = stderr {
+            let mut limited = reader.take(MAX_OUTPUT_BYTES as u64);
+            let _ = limited.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    // Wait for the process to finish (with timeout via detached thread).
     let _waiter = std::thread::spawn(move || {
-        let output = child.wait_with_output();
-        tx.send(output).ok();
+        let status = child.wait();
+        tx.send(status).ok();
     });
 
     match rx.recv_timeout(Duration::from_secs(timeout)) {
-        Ok(Ok(output)) => {
-            // Process completed within timeout — we have all output
-            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            let status = output.status;
+        Ok(Ok(status)) => {
+            // Process completed within timeout — collect output from reader threads
+            let stdout_bytes = stdout_reader.join().unwrap_or_default();
+            let stderr_bytes = stderr_reader.join().unwrap_or_default();
+            let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
+            let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+            let stdout_truncated = stdout_bytes.len() >= MAX_OUTPUT_BYTES;
+            let stderr_truncated = stderr_bytes.len() >= MAX_OUTPUT_BYTES;
 
             let mut content = format!(
                 "[exec_command] {} (exit code: {})",
@@ -130,17 +158,23 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
             if !stdout.is_empty() {
                 content.push_str("\n\n--- stdout ---\n");
                 content.push_str(&stdout);
+                if stdout_truncated {
+                    content.push_str("\n... (stdout truncated, exceeded 10MB limit)");
+                }
             }
             if !stderr.is_empty() {
                 content.push_str("\n\n--- stderr ---\n");
                 content.push_str(&stderr);
+                if stderr_truncated {
+                    content.push_str("\n... (stderr truncated, exceeded 10MB limit)");
+                }
             }
 
-            // If stdout was large, add a summary
-            const MAX_OUTPUT_LEN: usize = 50000;
-            if content.len() > MAX_OUTPUT_LEN {
-                let truncated = content.len() - MAX_OUTPUT_LEN;
-                content.truncate(MAX_OUTPUT_LEN);
+            // Also cap the final content string to 50KB for LLM context
+            const MAX_CONTENT_LEN: usize = 50000;
+            if content.len() > MAX_CONTENT_LEN {
+                let truncated = content.len() - MAX_CONTENT_LEN;
+                content.truncate(MAX_CONTENT_LEN);
                 content.push_str(&format!(
                     "\n\n... (output truncated, {} more bytes)",
                     truncated

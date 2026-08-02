@@ -97,6 +97,14 @@ pub enum LlmResponse {
     Error(String),
 }
 
+/// Token 用量统计。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct TokenUsage {
+    pub prompt_tokens: usize,
+    pub completion_tokens: usize,
+    pub total_tokens: usize,
+}
+
 /// 流式响应事件。
 ///
 /// 用于 `LlmProvider::chat_stream()` 和 `LlmClient::call_streaming()` 的流式接口。
@@ -107,6 +115,8 @@ pub enum LlmStreamEvent {
     Chunk(String),
     /// 单个工具调用增量（首批 chunk 中就包含完整的 tool_calls 信息）。
     ToolCallDelta(ToolCall),
+    /// Token 用量信息（来自流式响应的最后一块）。
+    Usage(TokenUsage),
     /// 流结束。
     Done,
 }

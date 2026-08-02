@@ -1,0 +1,25 @@
+{
+  "file_path": "src/tools/cache.rs",
+  "analysis_type": "Security",
+  "summary": "ReadCache::read_async 使用写锁代替读锁，与设计文档冲突",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Critical",
+      "description": "read_async 方法使用 cache.write().unwrap() 而非 cache.read().unwrap() 进行缓存检查，导致不必要的写锁竞争",
+      "location": "src/tools/cache.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "High",
+      "description": "缓存 TTL 基于 accessed_at 而非 created_at，导致热数据永不失效",
+      "location": "src/tools/cache.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 276389000
+  },
+  "batch_number": 1
+}

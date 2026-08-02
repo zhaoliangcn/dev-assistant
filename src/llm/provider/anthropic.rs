@@ -406,7 +406,19 @@ fn parse_anthropic_sse_stream(
                     }
                     "message_delta" => {
                         // message_delta 事件，包含最后的 delta
-                        // 可能包含 usage 信息等
+                        // 提取 usage 信息（Anthropic 在 message_delta 中返回 usage）
+                        if let Some(usage) = data.get("usage") {
+                            let input_tokens = usage["input_tokens"].as_u64().unwrap_or(0) as usize;
+                            let output_tokens = usage["output_tokens"].as_u64().unwrap_or(0) as usize;
+                            let total = input_tokens + output_tokens;
+                            if total > 0 {
+                                yield LlmStreamEvent::Usage(TokenUsage {
+                                    prompt_tokens: input_tokens,
+                                    completion_tokens: output_tokens,
+                                    total_tokens: total,
+                                });
+                            }
+                        }
                     }
                     "message_stop" => {
                         // message_stop 事件，消息结束

@@ -21,6 +21,8 @@ use crate::utils::error::AppError;
 /// 应用配置：由 CLI 参数 + 环境变量组装。
 pub struct AppConfig {
     pub working_dir: PathBuf,
+    /// 模型配置文件路径（--config 指定，None 时按默认查找顺序）
+    pub config: Option<PathBuf>,
     pub verbose: bool,
     pub max_iterations: usize,
     pub max_tokens: usize,
@@ -63,8 +65,8 @@ impl App {
             )));
         }
 
-        // 加载模型配置（TOML 优先，fallback 到环境变量）
-        let mut provider_configs = load_models(&config.working_dir)?;
+        // 加载模型配置（--config 指定路径 → 可执行目录 TOML → 环境变量）
+        let mut provider_configs = load_models(config.config.as_deref())?;
 
         // CLI 参数覆盖：--model 和 --provider
         if let Some(ref model) = config.model {
@@ -256,10 +258,14 @@ impl App {
         output.info(&format!("模型: {}", self.agent.active_model()));
 
         let result = self.agent.run(message.to_string(), &mut output).await?;
-        if result.success {
-            output.success(&result.message);
-        } else {
-            output.error(&result.message);
+        // 最终结果若已通过流式输出（verbose 下 streaming final）打印过则不再重复输出，
+        // 避免同一条助手消息以「信息」和「成功」两种标签出现两次。
+        if !output.already_streamed(&result.message) {
+            if result.success {
+                output.success(&result.message);
+            } else {
+                output.error(&result.message);
+            }
         }
         Ok(())
     }

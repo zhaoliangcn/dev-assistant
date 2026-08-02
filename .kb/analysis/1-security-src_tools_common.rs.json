@@ -1,0 +1,25 @@
+{
+  "file_path": "src/tools/common.rs",
+  "analysis_type": "Security",
+  "summary": "sanitize_model_path_arg 存在路径解析缺陷：trim_matches 在非引号包裹时也会移除引号字符，可能导致路径损坏",
+  "details": null,
+  "issues": [
+    {
+      "severity": "Critical",
+      "description": "sanitize_model_path_arg 函数中，trim_matches(['\"', \"'\"]) 无论输入是否被引号包裹都会执行，非引号路径中的引号字符会被错误移除。例如路径 'foo'bar' 会变成 'foobar'",
+      "location": "src/tools/common.rs:83-93",
+      "suggestion": null
+    },
+    {
+      "severity": "High",
+      "description": "write_file 和 edit_file 未使用 resolve_model_path 处理路径，而是直接用 working_dir.join()，导致 ~ 扩展和引号清理功能缺失",
+      "location": "src/tools/file/write.rs:75",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 274203000
+  },
+  "batch_number": 1
+}

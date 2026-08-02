@@ -91,6 +91,10 @@ struct Cli {
     #[arg(long, default_value = ".")]
     project: String,
 
+    /// 模型配置文件路径（.dev-assistant-models.toml，指定后不再按默认顺序查找）
+    #[arg(long)]
+    config: Option<PathBuf>,
+
     /// 覆盖默认 provider（openai / anthropic / ollama 等）
     #[arg(long, default_value = "openai")]
     provider: String,
@@ -156,6 +160,10 @@ impl Cli {
             "--project".to_string(),
             self.project.clone(),
         ];
+        if let Some(ref config) = self.config {
+            args.push("--config".to_string());
+            args.push(config.display().to_string());
+        }
         if self.no_approval {
             args.push("--no-approval".to_string());
         }
@@ -211,6 +219,7 @@ fn main() -> Result<(), AppError> {
 
     let config = AppConfig {
         working_dir: working_dir.clone(),
+        config: cli.config.clone(),
         verbose: cli.verbose,
         max_iterations: cli.max_iterations.unwrap_or(15),
         max_tokens: cli.max_tokens,
@@ -310,6 +319,7 @@ fn main() -> Result<(), AppError> {
                 host: cli.host,
                 port: cli.port,
                 working_dir: PathBuf::from(&cli.project),
+                config: cli.config.clone(),
                 verbose: cli.verbose,
                 max_iterations: cli.max_iterations.unwrap_or(15),
                 max_tokens: cli.max_tokens,

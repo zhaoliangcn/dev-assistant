@@ -1,0 +1,25 @@
+{
+  "file_path": "src/tools/task_tools.rs",
+  "analysis_type": "Design",
+  "summary": "全局 GLOBAL_TASK_MANAGER 导致测试间状态污染",
+  "details": null,
+  "issues": [
+    {
+      "severity": "High",
+      "description": "使用 once_cell::sync::Lazy 创建的全局 GLOBAL_TASK_MANAGER 在测试间无法重置，导致状态污染",
+      "location": "src/tools/task_tools.rs",
+      "suggestion": null
+    },
+    {
+      "severity": "High",
+      "description": "scheduler/tools_handlers.rs 中的 GLOBAL_SCHEDULER 同样存在全局状态问题",
+      "location": "src/scheduler/tools_handlers.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 276837000
+  },
+  "batch_number": 1
+}

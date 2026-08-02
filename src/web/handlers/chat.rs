@@ -316,4 +316,15 @@ impl MessageOutput for WebMessageOutput {
         }
         let _ = is_final;
     }
+
+    /// 将 Token 用量信息转发为 `token_usage` 事件。
+    ///
+    /// 每次 Agent 收到 `LlmStreamEvent::Usage` 时调用此方法，
+    /// 将累计用量发送到前端展示。
+    fn report_token_usage(&mut self, prompt_tokens: usize, completion_tokens: usize, total_tokens: usize) {
+        let event = ServerEvent::token_usage(prompt_tokens, completion_tokens, total_tokens);
+        if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event) {
+            tracing::warn!("WebSocket token_usage 事件发送失败: {}", e);
+        }
+    }
 }

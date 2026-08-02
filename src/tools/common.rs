@@ -94,10 +94,10 @@ pub fn sanitize_model_path_arg(input: &str) -> &str {
     let trimmed = input.trim();
     let quote_wrapped =
         trimmed.len() >= 2 && trimmed.starts_with(['"', '\'']) && trimmed.ends_with(['"', '\'']);
-    let unquoted = trimmed.trim_matches(['"', '\'']).trim();
     if !quote_wrapped {
-        return unquoted;
+        return trimmed;
     }
+    let unquoted = trimmed.trim_matches(['"', '\'']).trim();
     let mut result = unquoted;
     while let Some(stripped) = result
         .strip_suffix("\\n")

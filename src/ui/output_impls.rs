@@ -14,6 +14,8 @@ pub struct UIMessageOutput {
     buffer: Vec<(MessageLevel, String)>,
     /// 上一次流式渲染的助手内容，用于跳过重复渲染
     last_streamed_content: String,
+    /// 上一次流式显示占用的终端行数（含自动换行），用于完整清除残留
+    last_streamed_lines: usize,
     /// 流式完成后的待渲染助手内容，由主循环统一渲染避免重复
     pending_assistant_content: Option<String>,
 }
@@ -24,6 +26,7 @@ impl UIMessageOutput {
             verbose,
             buffer: Vec::new(),
             last_streamed_content: String::new(),
+            last_streamed_lines: 0,
             pending_assistant_content: None,
         }
     }
@@ -64,44 +67,65 @@ impl MessageOutput for UIMessageOutput {
         }
     }
 
+    /// 报告 Token 用量：在终端 info 级别输出一行统计。
+    fn report_token_usage(&mut self, prompt_tokens: usize, completion_tokens: usize, total_tokens: usize) {
+        self.emit(
+            MessageLevel::Info,
+            &format!("🔤 Token 消耗: prompt={} · completion={} · total={}", prompt_tokens, completion_tokens, total_tokens),
+        );
+    }
+
     /// 流式输出助手消息，直接渲染到终端。
     ///
-    /// 每次调用时，使用 ANSI 控制序列覆盖当前行，显示累积的助手内容。
+    /// 每次调用时，先清除上一次显示占用的**全部**终端行（含宽度换行产生的多行），
+    /// 再写入累积的助手内容，避免长内容换行后残留旧行造成重复渲染。
     /// 完成后（is_final=true），输出完整内容并移除闪烁光标。
     fn streaming_assistant(&mut self, content: &str, is_final: bool) {
         use std::io::Write;
         use unicode_width::UnicodeWidthStr;
 
         let mut stdout = std::io::stdout();
+        let term_width = crate::ui::get_terminal_width().unwrap_or(80);
+        // 前缀宽度按纯文本计算（不含 ANSI 色），避免换行行数误判
+        let plain_prefix = "🤖 助手: ";
+        // 换行符在流式显示中以字面 \n 呈现，因此显示占用行数只取决于宽度换行。
+        // 末尾还有 " ▊" 闪烁光标，计入宽度。
+        let visual_len = plain_prefix.width() + content.replace('\n', "\\n").width() + 2;
+        let wrap_lines = visual_len.saturating_sub(1) / term_width;
+        let total_lines = wrap_lines + 1;
+
         if is_final {
-            // 清除可能因终端自动换行产生的残留行，再输出最终内容
-            let term_width = crate::ui::get_terminal_width().unwrap_or(80);
-            // 前缀宽度按纯文本计算（不含 ANSI 色），避免换行行数误判
-            let plain_prefix = "🤖 助手: ";
-            let visual_len = plain_prefix.width() + content.width();
-            let wrap_lines = visual_len.saturating_sub(1) / term_width;
-            let explicit_lines = content.matches('\n').count();
-            let total_lines = wrap_lines + explicit_lines;
-            for _ in 0..total_lines {
+            // 清除上一次流式显示占用的所有行（含自动换行的残留行），再输出最终内容
+            for _ in 0..self.last_streamed_lines.saturating_sub(1) {
                 let _ = write!(stdout, "\r\x1b[2K\x1b[A");
             }
-            // 清除最后一行（流式内容所在行）
+            // 清除第一行（流式内容所在行）
             let _ = write!(stdout, "\r\x1b[2K");
             // 存入待渲染缓冲区，由主循环统一以 Assistant 块渲染，
             // 避免与后续的 drain/render_block 重复
-            self.pending_assistant_content = Some(content.to_string());
+            if !content.is_empty() {
+                self.pending_assistant_content = Some(content.to_string());
+            }
             self.last_streamed_content.clear();
+            self.last_streamed_lines = 0;
         } else {
             // 内容未变时跳过重复渲染，避免内容包含换行时产生多行残留
             if content == self.last_streamed_content {
                 return;
             }
+            // 先清除上一次显示占用的所有行，再写入新内容
+            for _ in 0..self.last_streamed_lines.saturating_sub(1) {
+                let _ = write!(stdout, "\r\x1b[2K\x1b[A");
+            }
+            let _ = write!(stdout, "\r\x1b[2K");
+
             self.last_streamed_content = content.to_string();
+            self.last_streamed_lines = total_lines;
             // 将换行替换为可见表示，防止 \r 无法清除多行残留
             let display = format!("{} \x1b[5m▊\x1b[0m", content.replace('\n', "\\n"));
             let theme = crate::ui::theme::active_theme();
             let prefix = format!("{}🤖 助手:{} ", theme.tool_fg, crate::ui::theme::RESET);
-            let _ = write!(stdout, "\r\x1b[2K{}{}", prefix, display);
+            let _ = write!(stdout, "{}{}", prefix, display);
             let _ = stdout.flush();
         }
     }
@@ -115,11 +139,23 @@ impl MessageOutput for UIMessageOutput {
 /// 消息直接写入 stdout，带有级别标签。
 pub struct CliMessageOutput {
     verbose: bool,
+    /// 最后一次流式 final 且实际打印过的内容，供 `run_once` 去重，
+    /// 避免最终结果被 streaming(final) 与 success() 重复输出。
+    last_printed_stream: Option<String>,
 }
 
 impl CliMessageOutput {
     pub fn new(verbose: bool) -> Self {
-        Self { verbose }
+        Self {
+            verbose,
+            last_printed_stream: None,
+        }
+    }
+
+    /// 判断 `msg` 是否已通过流式输出打印过。
+    /// 仅在 verbose 模式下 Info 级别实际输出时记录，非 verbose 下视为未输出。
+    pub fn already_streamed(&self, msg: &str) -> bool {
+        self.last_printed_stream.as_deref() == Some(msg)
     }
 }
 
@@ -132,6 +168,21 @@ impl MessageOutput for CliMessageOutput {
 
         let prefix = level.label();
         println!("{} {}", prefix, msg);
+    }
+
+    /// 流式输出：最终内容以 Info 级别输出一次并记录，供 `run_once` 去重。
+    /// 非 final 块不输出（CLI 模式不做逐帧刷新，最终内容由 final 块统一输出）。
+    fn streaming_assistant(&mut self, content: &str, is_final: bool) {
+        if is_final && !content.is_empty() {
+            if self.verbose {
+                let prefix = MessageLevel::Info.label();
+                println!("{} {}", prefix, content);
+                self.last_printed_stream = Some(content.to_string());
+            } else {
+                // 非 verbose 下 Info 会被 emit 过滤，视为未输出
+                self.last_printed_stream = None;
+            }
+        }
     }
 }
 

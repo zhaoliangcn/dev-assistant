@@ -1,0 +1,19 @@
+{
+  "file_path": "src/web/handlers/files.rs",
+  "analysis_type": "Security",
+  "summary": "Web 文件处理器未复用 SecurityPolicy 进行路径校验",
+  "details": null,
+  "issues": [
+    {
+      "severity": "High",
+      "description": "get_file_content 和 save_file 直接使用 std::fs::read_to_string 和 std::fs::write，未经过 SecurityPolicy 的路径验证，可能导致路径遍历",
+      "location": "src/web/handlers/files.rs",
+      "suggestion": null
+    }
+  ],
+  "timestamp": {
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 279130000
+  },
+  "batch_number": 1
+}

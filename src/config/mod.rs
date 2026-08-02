@@ -7,30 +7,52 @@ use crate::utils::error::AppError;
 
 const MODELS_FILE: &str = ".dev-assistant-models.toml";
 
+/// 模型配置文件查找目录：可执行文件所在目录（跟随安装位置）。
+fn models_config_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+/// 从指定 TOML 文件加载模型配置，并解析 `${VAR}` 环境变量占位符。
+fn load_models_file(toml_path: &Path) -> Result<Vec<ProviderConfig>, AppError> {
+    let content = std::fs::read_to_string(toml_path)
+        .map_err(|e| AppError::Config(format!("读取 {} 失败: {}", toml_path.display(), e)))?;
+    let mut models: ModelsConfig = toml::from_str(&content)
+        .map_err(|e| AppError::Config(format!("解析 {} 失败: {}", toml_path.display(), e)))?;
+    // 解析 ${VAR} 占位符
+    for m in &mut models.models {
+        m.resolve_env_vars();
+    }
+    if models.models.is_empty() {
+        return Err(AppError::Config(format!(
+            "{} 中未定义任何模型",
+            toml_path.display()
+        )));
+    }
+    Ok(models.models)
+}
+
 /// 加载所有模型配置。
-/// 优先读取 TOML 文件，若不存在则 fallback 到环境变量。
-pub fn load_models(project_dir: &Path) -> Result<Vec<ProviderConfig>, AppError> {
-    // 尝试加载 TOML 文件
-    let toml_path = project_dir.join(MODELS_FILE);
-    if toml_path.exists() {
-        let content = std::fs::read_to_string(&toml_path)
-            .map_err(|e| AppError::Config(format!("读取 {} 失败: {}", MODELS_FILE, e)))?;
-        let mut models: ModelsConfig = toml::from_str(&content)
-            .map_err(|e| AppError::Config(format!("解析 {} 失败: {}", MODELS_FILE, e)))?;
-        // 解析 ${VAR} 占位符
-        for m in &mut models.models {
-            m.resolve_env_vars();
-        }
-        if models.models.is_empty() {
-            return Err(AppError::Config(format!(
-                "{} 中未定义任何模型",
-                MODELS_FILE
-            )));
-        }
-        return Ok(models.models);
+///
+/// 查找顺序：
+/// 1. `--config` 显式指定的路径（若指定则必须存在）
+/// 2. 可执行文件所在目录下的 `.dev-assistant-models.toml`
+/// 3. 回退到环境变量加载单模型
+pub fn load_models(explicit_path: Option<&Path>) -> Result<Vec<ProviderConfig>, AppError> {
+    // 1. 显式 --config 路径
+    if let Some(path) = explicit_path {
+        return load_models_file(path);
     }
 
-    // Fallback: 从环境变量加载单模型
+    // 2. 可执行文件所在目录的默认文件
+    let toml_path = models_config_dir().join(MODELS_FILE);
+    if toml_path.exists() {
+        return load_models_file(&toml_path);
+    }
+
+    // 3. Fallback: 从环境变量加载单模型
     let provider = env::var("LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
     let api_url = env::var("LLM_API_URL").map_err(|_| AppError::Env("LLM_API_URL".to_string()))?;
     let api_key = env::var("LLM_API_KEY").map_err(|_| AppError::Env("LLM_API_KEY".to_string()))?;

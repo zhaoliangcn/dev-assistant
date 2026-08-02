@@ -75,6 +75,8 @@ pub struct WebConfig {
     pub port: u16,
     /// 工作目录
     pub working_dir: PathBuf,
+    /// 模型配置文件路径（--config 指定，None 时按默认查找顺序）
+    pub config: Option<PathBuf>,
     /// 是否启用详细日志
     pub verbose: bool,
     /// 最大迭代次数
@@ -95,6 +97,7 @@ impl Default for WebConfig {
             host: "127.0.0.1".to_string(),
             port: 8080,
             working_dir: PathBuf::from("."),
+            config: None,
             verbose: false,
             max_iterations: 8,
             max_tokens: 8192,
@@ -126,7 +129,7 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
     }
 
     // ── 加载模型配置 ──
-    let mut provider_configs = load_models(&config.working_dir)?;
+    let mut provider_configs = load_models(config.config.as_deref())?;
     if let Some(ref model) = config.model {
         if let Some(first) = provider_configs.first_mut() {
             first.model = model.clone();

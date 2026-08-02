@@ -1,12 +1,19 @@
 {
   "file_path": "src/tools/resources.rs",
   "analysis_type": "Design",
-  "summary": "类型安全资源容器，使用TypeId作为Key。支持Cwd、DisplayCwd、RespectGitignore、GitignoreFilter等预定义资源类型。",
+  "summary": "Resources 容器使用 TypeId 擦除类型，失去编译时类型安全",
   "details": null,
-  "issues": [],
+  "issues": [
+    {
+      "severity": "Low",
+      "description": "Resources 使用 HashMap<TypeId, Box<dyn Any>> 进行类型擦除，get() 返回 Option<&T> 在类型不匹配时静默返回 None，不如泛型参数或依赖注入框架安全",
+      "location": "src/tools/resources.rs",
+      "suggestion": null
+    }
+  ],
   "timestamp": {
-    "secs_since_epoch": 1785057754,
-    "nanos_since_epoch": 870128000
+    "secs_since_epoch": 1785662444,
+    "nanos_since_epoch": 280085000
   },
   "batch_number": 1
 }

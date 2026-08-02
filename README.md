@@ -48,8 +48,13 @@ cp .env.example .env
 # LLM_MODEL=gpt-4o
 
 # 3. （可选）多模型配置
-cp .dev-assistant-models_example.toml .dev-assistant-models.toml
-# 编辑 .dev-assistant-models.toml，配置多个模型的 API Key
+# 复制示例到可执行文件所在目录（如 target/release/）：
+cp .dev-assistant-models_example.toml target/release/.dev-assistant-models.toml
+# 编辑 target/release/.dev-assistant-models.toml，配置多个模型的 API Key
+# （程序从可执行文件所在目录查找该文件，未找到时回退到环境变量）
+
+# 4. （可选）用 --config 指定模型配置文件位置（任意路径，优先级最高）
+cargo run --release -- --config /path/to/.dev-assistant-models.toml
 ```
 
 ### 运行

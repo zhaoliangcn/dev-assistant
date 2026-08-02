@@ -38,4 +38,12 @@ pub trait MessageOutput: Send + Sync {
             self.emit(MessageLevel::Info, content);
         }
     }
+
+    /// 报告 Token 用量信息（由 Agent step() 在收到 Usage 事件时调用）。
+    ///
+    /// 默认实现不作任何处理；各实现者可按需展示（如 Web UI 显示累计用量，
+    /// CLI 模式打印一行统计）。
+    fn report_token_usage(&mut self, _prompt_tokens: usize, _completion_tokens: usize, _total_tokens: usize) {
+        // 默认空实现
+    }
 }

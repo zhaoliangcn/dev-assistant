@@ -33,8 +33,44 @@ body {
 
 header {
     border-bottom: 1px solid var(--pico-muted-border-color);
-    padding: 0.5rem 1rem;
+    padding: 0.15rem 0.75rem;
     flex-shrink: 0;
+}
+
+header nav {
+    min-height: 0;
+}
+
+header nav ul {
+    gap: 0.25rem;
+}
+
+header nav ul li {
+    padding: 0;
+}
+
+header nav ul li strong {
+    font-size: 0.85em;
+}
+
+header nav ul li button,
+header nav ul li a[role="button"] {
+    padding: 0.1rem 0.4rem;
+    font-size: 0.78em;
+}
+
+header nav ul li select {
+    padding: 0.1rem 0.4rem;
+    font-size: 0.78em;
+    max-width: 120px;
+}
+
+header .status-indicator {
+    font-size: 0.78em;
+}
+
+header .token-usage {
+    font-size: 0.7em !important;
 }
 
 main {

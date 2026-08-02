@@ -18,6 +18,10 @@ pub struct UIMessageOutput {
     last_streamed_lines: usize,
     /// 流式完成后的待渲染助手内容，由主循环统一渲染避免重复
     pending_assistant_content: Option<String>,
+    /// 累计的 Token 消耗数据（prompt, completion, total）。
+    /// 由 `report_token_usage` 累计，不 emit 到 buffer，
+    /// 调用方在 `process_user_message` 末尾单独渲染，避免与交互消息混在一起。
+    token_usage: Option<(usize, usize, usize)>,
 }
 
 impl UIMessageOutput {
@@ -28,6 +32,7 @@ impl UIMessageOutput {
             last_streamed_content: String::new(),
             last_streamed_lines: 0,
             pending_assistant_content: None,
+            token_usage: None,
         }
     }
 
@@ -39,6 +44,12 @@ impl UIMessageOutput {
     /// 取出流式完成后累积的助手内容（消费式）。
     pub fn take_pending_assistant(&mut self) -> Option<String> {
         self.pending_assistant_content.take()
+    }
+
+    /// 取出累计的 Token 消耗数据（消费式）。
+    /// 由调用方在流程末尾单独渲染，避免与交互消息混在一起。
+    pub fn take_token_usage(&mut self) -> Option<(usize, usize, usize)> {
+        self.token_usage.take()
     }
 
     /// 获取最后一条消息的内容（不消费缓冲区）。
@@ -67,12 +78,13 @@ impl MessageOutput for UIMessageOutput {
         }
     }
 
-    /// 报告 Token 用量：在终端 info 级别输出一行统计。
+    /// 报告 Token 用量：累计到 `token_usage` 字段，不 emit 到 buffer，
+    /// 由调用方在 `process_user_message` 末尾单独渲染，避免与交互消息混在一起。
     fn report_token_usage(&mut self, prompt_tokens: usize, completion_tokens: usize, total_tokens: usize) {
-        self.emit(
-            MessageLevel::Info,
-            &format!("🔤 Token 消耗: prompt={} · completion={} · total={}", prompt_tokens, completion_tokens, total_tokens),
-        );
+        self.token_usage = Some(match self.token_usage {
+            Some((p, c, t)) => (p + prompt_tokens, c + completion_tokens, t + total_tokens),
+            None => (prompt_tokens, completion_tokens, total_tokens),
+        });
     }
 
     /// 流式输出助手消息，直接渲染到终端。

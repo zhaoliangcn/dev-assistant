@@ -906,6 +906,14 @@ pub async fn process_user_message(
         ui::render_block(&result_block, markdown_renderer)?;
     }
 
+    // 渲染累计的 Token 消耗统计：独立于交互消息流，统一在末尾展示
+    if let Some((prompt, completion, total)) = output.take_token_usage() {
+        let msg = format!("🔤 Token 消耗: prompt={} · completion={} · total={}", prompt, completion, total);
+        session_log.log_status("用量", &msg);
+        let theme = crate::ui::theme::active_theme();
+        println!("{}{}{}", theme.muted_fg, msg, crate::ui::theme::RESET);
+    }
+
     // 持久化：记录最终助手消息（如果 step 循环中尚未记录）
     agent.record_assistant_message_to_store(&result.message);
 

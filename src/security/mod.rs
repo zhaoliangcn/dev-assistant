@@ -65,6 +65,13 @@ fn is_child_of(path: &Path, parent: &Path) -> bool {
 /// non-existent paths rather than potentially following a broken symlink chain.
 /// This eliminates the TOCTOU race condition where a symlink could be created
 /// between the `exists()` check and the `symlink_metadata()` call.
+///
+/// # 修复说明
+///
+/// 修复了 `current == base` 的字符串比较缺陷：
+/// 1. `base` 是已 `canonicalize` 的路径，而 `current` 是未解析的原始路径
+/// 2. 改用 `is_child_of` 进行路径前缀比较，配合 `canonicalize` 解析 `current`
+/// 3. 确保即使路径包含 symlink 组件也能正确检测到
 fn contains_symlink(target: &Path, base: &Path) -> bool {
     // Check if base itself is a symlink first
     if let Ok(metadata) = base.symlink_metadata() {
@@ -83,7 +90,13 @@ fn contains_symlink(target: &Path, base: &Path) -> bool {
     // 2. Non-existent paths are handled gracefully (Err returned, loop continues)
     let mut current = target;
     loop {
-        if current == base {
+        // SECURITY FIX: `base` is canonicalized, but `current` is from the
+        // un-resolved normalized path.  Use `is_child_of` (which handles
+        // path-prefix semantics) instead of `==` (string comparison).
+        // Also try to canonicalize `current` to resolve any symlinks before
+        // comparing with the canonicalized `base`.
+        let current_canonical = current.canonicalize().unwrap_or_else(|_| current.to_path_buf());
+        if is_child_of(&current_canonical, base) {
             return false;
         }
 

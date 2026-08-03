@@ -1,12 +1,23 @@
 {
   "file_path": "src/app.rs",
   "analysis_type": "Structure",
-  "summary": "应用协调层。组装Agent、ToolRegistry、LlmClient、SecurityPolicy、Resources等组件。支持交互模式和非交互模式。",
-  "details": null,
+  "summary": "App 协调层：组件组装工厂，负责创建 ToolRegistry、Agent、Scheduler、SecurityPolicy、AsyncToolRegistry 等核心组件，启动三种运行模式（交互/一次性/后台）",
+  "details": {
+    "components": [
+      "AppConfig",
+      "App",
+      "SecurityPolicy",
+      "ToolRegistry",
+      "Agent",
+      "Scheduler",
+      "AsyncToolRegistry"
+    ],
+    "lines": 822
+  },
   "issues": [],
   "timestamp": {
-    "secs_since_epoch": 1785057754,
-    "nanos_since_epoch": 876490000
+    "secs_since_epoch": 1785769259,
+    "nanos_since_epoch": 110587000
   },
   "batch_number": 1
 }

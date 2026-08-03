@@ -232,8 +232,8 @@ pub fn render_progress_bar(
 pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
     let mut stdout = io::stdout();
 
-    // 移动到行首并清除当前行
-    write!(stdout, "\x1b[1G\x1b[K")?;
+    // 使用 \r 回到行首并清除整行，与流式输出策略一致
+    write!(stdout, "\r\x1b[2K")?;
 
     match status_line {
         Some(status) => {

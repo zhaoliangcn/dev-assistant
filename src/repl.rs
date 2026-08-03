@@ -78,7 +78,7 @@ fn merge_consecutive_blocks(blocks: &[ui::MessageBlock]) -> Vec<ui::MessageBlock
 
     result
 }
-///
+
 /// 优先通过前导 emoji 判断，避免字符串误匹配。
 fn classify_info_message(msg: &str) -> ui::MessageBlock {
     // 按 emoji 前缀精确判断
@@ -145,10 +145,10 @@ pub enum ReplAction {
     Quit,
 }
 
-/// 处理应用级 slash 命令（`/model`、`/status`、`/background`）。
+/// 处理应用级 slash 命令（`/status`、`/background`、`/schedule` 等）。
 ///
-/// 返回 `None` 表示输入不是本层能处理的命令，调用方应按普通消息处理。
-/// 注意：`/exit`、`/quit`、`/clear`、`/help` 等通用命令由 `input::SlashCommand` 处理。
+/// 注意：`/model` 命令已在 `app.rs` 中处理，此处不再重复。
+/// `/exit`、`/quit`、`/clear`、`/help` 等通用命令由 `input::SlashCommand` 处理。
 ///
 /// 所有命令的输出直接通过 `ui::render_block` 渲染到终端，避免存入 `DisplayBuffer`
 /// 后被 `reset_display_for_new_turn()` 清空。
@@ -157,10 +157,6 @@ pub fn handle_slash(
     agent: &mut Agent,
     working_dir: &Path,
 ) -> Option<SlashOutcome> {
-    if input.starts_with("/model") {
-        return Some(handle_model_command(input, agent, working_dir));
-    }
-
     if input == "/status" {
         return Some(handle_status_command(agent));
     }
@@ -186,56 +182,6 @@ pub fn handle_slash(
     }
 
     None
-}
-
-fn handle_model_command(
-    input: &str,
-    agent: &mut Agent,
-    working_dir: &Path,
-) -> SlashOutcome {
-    let md = MarkdownRenderer::new();
-    let parts: Vec<&str> = input.split_whitespace().collect();
-
-    if parts.len() == 1 {
-        // 列出所有模型，标记当前活跃模型
-        let active = agent.active_model().to_string();
-        let models: Vec<String> = agent.list_models().into_iter().map(|s| s.to_string()).collect();
-        let mut content = "📋 可用模型:\n".to_string();
-        for m in &models {
-            let marker = if m.as_str() == active.as_str() { "→" } else { " " };
-            content.push_str(&format!("{} {}\n", marker, m));
-        }
-        let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
-        return SlashOutcome::Continue;
-    }
-
-    // 切换模型
-    let model_name = parts[1];
-    match agent.switch_model(model_name) {
-        Ok(()) => {
-            agent.set_active_model(model_name.to_string());
-            let _ = ui::render_block(
-                &ui::MessageBlock::ToolResult {
-                    tool_name: "模型".to_string(),
-                    success: true,
-                    content: format!("✅ 切换到模型: {}", model_name),
-                },
-                &md,
-            );
-            // 立即保存状态
-            let state_path = working_dir.join(STATE_FILE);
-            let _ = agent.save_state(&state_path);
-        }
-        Err(e) => {
-            let _ = ui::render_block(
-                &ui::MessageBlock::Error {
-                    content: format!("❌ 切换失败: {}", e),
-                },
-                &md,
-            );
-        }
-    }
-    SlashOutcome::Continue
 }
 
 fn handle_status_command(_agent: &mut Agent) -> SlashOutcome {
@@ -563,6 +509,56 @@ fn handle_list_scheduled_command() -> SlashOutcome {
     SlashOutcome::Continue
 }
 
+// ── 消息渲染辅助函数 ────────────────────────────────────────────────
+
+/// 将消息级别和内容转换为 MessageBlock（统一逻辑，避免重复）。
+fn message_to_block(level: MessageLevel, msg: String) -> ui::MessageBlock {
+    match level {
+        MessageLevel::Error => {
+            ui::MessageBlock::Error { content: msg }
+        }
+        MessageLevel::Warning => {
+            ui::MessageBlock::System { content: format!("⚠️ {}", msg) }
+        }
+        MessageLevel::Info => {
+            let b = classify_info_message(&msg);
+            if matches!(b, ui::MessageBlock::Thinking { .. }) {
+                // Thinking 块需要特殊处理（合并），调用方需检查
+                b
+            } else {
+                b
+            }
+        }
+        MessageLevel::Debug => {
+            ui::MessageBlock::System { content: format!("🐛 {}", msg) }
+        }
+        MessageLevel::Success => {
+            ui::MessageBlock::ToolResult {
+                tool_name: "操作".to_string(),
+                success: true,
+                content: msg,
+            }
+        }
+    }
+}
+
+/// 渲染一批消息块（处理连续合并）。
+fn render_block_batch(
+    blocks: &[ui::MessageBlock],
+    markdown_renderer: &MarkdownRenderer,
+) -> io::Result<()> {
+    if blocks.is_empty() {
+        return Ok(());
+    }
+    let merged_blocks = merge_consecutive_blocks(blocks);
+    for merged in merged_blocks {
+        ui::render_block(&merged, markdown_renderer)?;
+    }
+    Ok(())
+}
+
+// ── 主循环 ─────────────────────────────────────────────────────────
+
 /// 处理一次用户消息：清空展示缓冲区、运行 agent step 循环、刷新 UI。
 ///
 /// 从 [`crate::app::App`] 外提的交互逻辑，让 App 仅保留组件组装职责。
@@ -604,12 +600,8 @@ pub async fn process_user_message(
             flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
             let block = ui::MessageBlock::Assistant {
                 content: assistant_content,
-                
             };
-            let merged_blocks = merge_consecutive_blocks(&[block]);
-            for merged in merged_blocks {
-                ui::render_block(&merged, markdown_renderer)?;
-            }
+            render_block_batch(&[block], markdown_renderer)?;
         }
 
         // Drain buffered messages and render blocks
@@ -619,78 +611,43 @@ pub async fn process_user_message(
             agent.add_display_message(level, &msg);
 
             // 根据消息级别渲染不同类型的块
-            let block = match level {
-                MessageLevel::Error => {
-                    // 先刷新待处理的 Thinking 块
-                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                    ui::MessageBlock::Error { content: msg }
-                }
-                MessageLevel::Warning => {
-                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                    ui::MessageBlock::System { content: format!("⚠️ {}", msg) }
-                }
-                MessageLevel::Info => {
-                    let b = classify_info_message(&msg);
-                    if matches!(b, ui::MessageBlock::Thinking { .. }) {
-                        // 连续 Thinking 块：合并
-                        pending_thinking = Some(msg);
-                        thinking_count += 1;
-                        continue; // 跳过渲染，等非 Thinking 块或 flush
-                    } else {
-                        flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                        b
-                    }
-                }
-                MessageLevel::Debug => {
-                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                    ui::MessageBlock::System { content: format!("🐛 {}", msg) }
-                }
-                MessageLevel::Success => {
-                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                    ui::MessageBlock::ToolResult {
-                        tool_name: "操作".to_string(),
-                        success: true,
-                        content: msg,
-                    }
-                }
-        };
-
-        // 检查是否是连续相同类型的消息（50ms 内）
-        let block_type = block.block_type();
-        let now = std::time::Instant::now();
-
-        match &last_block_type {
-            Some((last_type, last_time)) if *last_type == block_type && now.duration_since(*last_time).as_millis() < 50 => {
-                // 相同类型，50ms 内：加入当前批次
-                current_type_blocks.push(block);
+            let block = message_to_block(level, msg);
+            
+            // Thinking 块需要合并处理
+            if matches!(block, ui::MessageBlock::Thinking { .. }) {
+                pending_thinking = Some(block.content().to_string());
+                thinking_count += 1;
+                continue;
             }
-            _ => {
-                // 不同类型或超过 50ms：先渲染上一批次
-                if !current_type_blocks.is_empty() {
-                    let merged_blocks = merge_consecutive_blocks(&current_type_blocks);
-                    for merged in merged_blocks {
-                        ui::render_block(&merged, markdown_renderer)?;
-                    }
+            
+            flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+
+            // 检查是否是连续相同类型的消息（50ms 内）
+            let block_type = block.block_type();
+            let now = std::time::Instant::now();
+
+            match &last_block_type {
+                Some((last_type, last_time)) if *last_type == block_type && now.duration_since(*last_time).as_millis() < 50 => {
+                    // 相同类型，50ms 内：加入当前批次
+                    current_type_blocks.push(block);
                 }
-                // 开始新批次
-                current_type_blocks.clear();
-                current_type_blocks.push(block);
-                last_block_type = Some((block_type, now));
+                _ => {
+                    // 不同类型或超过 50ms：先渲染上一批次
+                    render_block_batch(&current_type_blocks, markdown_renderer)?;
+                    // 开始新批次
+                    current_type_blocks.clear();
+                    current_type_blocks.push(block);
+                    last_block_type = Some((block_type, now));
+                }
             }
-        }
         }
 
         // 刷新本轮剩余的待处理 Thinking 块
         flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
 
         // 渲染剩余批次
-        if !current_type_blocks.is_empty() {
-            let merged_blocks = merge_consecutive_blocks(&current_type_blocks);
-            for merged in merged_blocks {
-                ui::render_block(&merged, markdown_renderer)?;
-            }
-            current_type_blocks.clear();
-        }
+        render_block_batch(&current_type_blocks, markdown_renderer)?;
+        current_type_blocks.clear();
 
         // 刷新本轮剩余的待处理 Thinking 块
         flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
@@ -730,39 +687,16 @@ pub async fn process_user_message(
         agent.add_display_message(level, &msg);
 
         // 渲染到终端（与主循环使用相同的分类逻辑）
-        let block = match level {
-            MessageLevel::Error => {
-                flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                ui::MessageBlock::Error { content: msg }
-            }
-            MessageLevel::Warning => {
-                flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                ui::MessageBlock::System { content: format!("⚠️ {}", msg) }
-            }
-            MessageLevel::Info => {
-                let b = classify_info_message(&msg);
-                if matches!(b, ui::MessageBlock::Thinking { .. }) {
-                    pending_thinking = Some(msg);
-                    thinking_count += 1;
-                    continue;
-                } else {
-                    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                    b
-                }
-            }
-            MessageLevel::Debug => {
-                flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                ui::MessageBlock::System { content: format!("🐛 {}", msg) }
-            }
-            MessageLevel::Success => {
-                flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-                ui::MessageBlock::ToolResult {
-                    tool_name: "操作".to_string(),
-                    success: true,
-                    content: msg,
-                }
-            }
-        };
+        let block = message_to_block(level, msg);
+        
+        // Thinking 块需要合并处理
+        if matches!(block, ui::MessageBlock::Thinking { .. }) {
+            pending_thinking = Some(block.content().to_string());
+            thinking_count += 1;
+            continue;
+        }
+        
+        flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
 
         // 检查是否是连续相同类型的消息（50ms 内）
         let block_type = block.block_type();
@@ -775,12 +709,7 @@ pub async fn process_user_message(
             }
             _ => {
                 // 不同类型或超过 50ms：先渲染上一批次
-                if !current_type_blocks.is_empty() {
-                    let merged_blocks = merge_consecutive_blocks(&current_type_blocks);
-                    for merged in merged_blocks {
-                        ui::render_block(&merged, markdown_renderer)?;
-                    }
-                }
+                render_block_batch(&current_type_blocks, markdown_renderer)?;
                 // 开始新批次
                 current_type_blocks.clear();
                 current_type_blocks.push(block);
@@ -792,13 +721,8 @@ pub async fn process_user_message(
     flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
 
     // 渲染剩余批次
-    if !current_type_blocks.is_empty() {
-        let merged_blocks = merge_consecutive_blocks(&current_type_blocks);
-        for merged in merged_blocks {
-            ui::render_block(&merged, markdown_renderer)?;
-        }
-        current_type_blocks.clear();
-    }
+    render_block_batch(&current_type_blocks, markdown_renderer)?;
+    current_type_blocks.clear();
 
     // 处理用户中断的情况：回到输入提示，不处理结果
     let result = match result {
@@ -837,7 +761,6 @@ pub async fn process_user_message(
     if let Some(ref content) = last_assistant {
         let block = ui::MessageBlock::Assistant {
             content: content.clone(),
-            
         };
         ui::render_block(&block, markdown_renderer)?;
     }
@@ -850,7 +773,6 @@ pub async fn process_user_message(
     {
         let result_block = ui::MessageBlock::Assistant {
             content: result.message.clone(),
-            
         };
         ui::render_block(&result_block, markdown_renderer)?;
     }
@@ -994,7 +916,7 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
 
     match parts[1] {
         "add" => {
-            if parts.len() < 2 {
+            if parts.len() < 3 {
                 let _ = ui::render_block(
                     &ui::MessageBlock::Error {
                         content: "❌ 缺少源参数。用法：/skill add <source> [--skill <name>] [--global]".to_string(),
@@ -1203,4 +1125,128 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
     }
 
     SlashOutcome::Continue
+}
+
+// ── /grep 和 /diff 命令 ─────────────────────────────────────────────
+
+/// 在项目目录中搜索文本，返回带高亮的匹配行列表。
+///
+/// 每行格式：`文件路径:行号: 匹配内容`（匹配词用黄色反色高亮）
+fn run_grep(working_dir: &std::path::Path, pattern: &str) -> Result<Vec<String>, AppError> {
+    use std::io::BufRead;
+
+    if pattern.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let regex = regex::Regex::new(pattern).map_err(|e| {
+        AppError::Config(format!("无效的正则表达式 '{}': {}", pattern, e))
+    })?;
+
+    let mut results: Vec<String> = Vec::new();
+    let max_results = 50; // 最多显示 50 条结果
+    let max_file_size: u64 = 1024 * 1024; // 跳过大于 1MB 的文件
+
+    // 递归遍历 .rs 和 .md 以及 Cargo.toml 等文本文件
+    let entries = walkdir::WalkDir::new(working_dir)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            // 跳过 .git, target, node_modules 等目录
+            if e.file_type().is_dir() {
+                return name != ".git" && name != "target" && name != "node_modules"
+                    && name != ".kb" && name != ".mimocode";
+            }
+            true
+        })
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file()
+                && e.path().extension().is_some_and(|ext| {
+                    matches!(ext.to_str(), Some("rs" | "md" | "toml" | "json" | "yaml" | "yml" | "sh" | "txt"))
+                })
+        });
+
+    for entry in entries {
+        if results.len() >= max_results {
+            break;
+        }
+
+        let path = entry.path();
+        // 跳过过大文件
+        if let Ok(meta) = std::fs::metadata(path) {
+            if meta.len() > max_file_size {
+                continue;
+            }
+        }
+
+        // 计算相对路径
+        let rel_path = path.strip_prefix(working_dir)
+            .unwrap_or(path);
+
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let reader = std::io::BufReader::new(file);
+
+        for (line_num, line_result) in reader.lines().enumerate() {
+            if results.len() >= max_results {
+                break;
+            }
+            let line = match line_result {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+
+            if regex.is_match(&line) {
+                // 高亮显示匹配词：黄色反色
+                let highlighted = regex.replace_all(&line, |caps: &regex::Captures| {
+                    format!("\x1b[7;33m{}\x1b[0m", &caps[0])
+                });
+                results.push(format!(
+                    "\x1b[2m{}:{}\x1b[0m: {}",
+                    rel_path.display(),
+                    line_num + 1,
+                    highlighted
+                ));
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// 运行 `git diff` 查看工作区改动，返回 unified diff 文本。
+///
+/// 无参数时查看全部改动；可指定一个或多个路径限制范围。
+/// 返回 `Ok(None)` 表示工作区没有未提交的改动。
+fn run_diff(working_dir: &std::path::Path, paths: &[String]) -> Result<Option<String>, AppError> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("diff").current_dir(working_dir);
+    for p in paths {
+        cmd.arg(p);
+    }
+    let output = cmd.output().map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            e.kind(),
+            format!("git diff 执行失败: {}", e),
+        ))
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Config(format!(
+            "git diff 执行失败: {}",
+            stderr.trim()
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let text = stdout.trim().to_string();
+    if text.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(text))
+    }
 }

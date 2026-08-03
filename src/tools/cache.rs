@@ -19,6 +19,7 @@ fn now_timestamp() -> Timestamp {
 struct CacheEntry {
     content: String,
     mtime: Timestamp,
+    created_at: Timestamp,
     accessed_at: Timestamp,
     #[allow(dead_code)] // reserved for future cache size tracking
     size: usize,
@@ -26,10 +27,12 @@ struct CacheEntry {
 
 impl CacheEntry {
     fn new(content: String, mtime: Timestamp, size: usize) -> Self {
+        let now = now_timestamp();
         Self {
             content,
             mtime,
-            accessed_at: now_timestamp(),
+            created_at: now,
+            accessed_at: now,
             size,
         }
     }
@@ -110,7 +113,7 @@ impl ReadCache {
             let cache = self.cache.read().unwrap();
             cache.get(&path_buf).map(|entry| {
                 let now = now_timestamp();
-                let expired = (now - entry.accessed_at) > self.config.ttl_seconds;
+                let expired = (now - entry.created_at) > self.config.ttl_seconds;
                 (entry.content.clone(), entry.mtime, expired)
             })
         };
@@ -186,7 +189,7 @@ impl ReadCache {
             let cache = self.cache.read().unwrap();
             cache.get(&path_buf).map(|entry| {
                 let now = now_timestamp();
-                let expired = (now - entry.accessed_at) > self.config.ttl_seconds;
+                let expired = (now - entry.created_at) > self.config.ttl_seconds;
                 (entry.content.clone(), entry.mtime, expired)
             })
         };
@@ -355,7 +358,7 @@ impl ReadCache {
         
         // 首先移除过期的条目
         cache.retain(|_, entry| {
-            (now - entry.accessed_at) <= self.config.ttl_seconds
+            (now - entry.created_at) <= self.config.ttl_seconds
         });
 
         // 如果仍然超过限制，移除最久未使用的条目

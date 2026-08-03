@@ -1,7 +1,34 @@
 {
   "version": 1,
-  "updated": "2026-08-01T01:15:21.367039+00:00",
+  "updated": "2026-08-03T12:58:41.461566+00:00",
   "entries": {
+    "ADR-002-pipeline-command-design": {
+      "path": "decisions/ADR-002-pipeline-command-design.md",
+      "type": "decision",
+      "title": "流水线 (/pipeline) 命令设计与实现",
+      "tags": [
+        "pipeline",
+        "slash-command",
+        "subagent",
+        "workflow"
+      ],
+      "status": "accepted",
+      "author": "dev-assistant",
+      "created": "2026-07-26",
+      "updated": "2026-07-26T07:11:41.868542+00:00"
+    },
+    "ADR-scheduler-architecture": {
+      "path": "decisions/ADR-scheduler-architecture.md",
+      "type": "decision",
+      "title": "定时任务模块架构设计",
+      "tags": [
+        "scheduler",
+        "architecture",
+        "design"
+      ],
+      "status": "draft",
+      "updated": "2026-07-30T02:56:03.537432+00:00"
+    },
     "ADR-003-scheduled-task-implementation": {
       "path": "decisions/ADR-003-scheduled-task-implementation.md",
       "type": "decision",
@@ -16,6 +43,32 @@
       "author": "architect",
       "created": "2026-07-26",
       "updated": "2026-07-30T02:20:36.051024+00:00"
+    },
+    "ADR-003-web-ui-architecture": {
+      "path": "decisions/ADR-003-web-ui-architecture.md",
+      "type": "decision",
+      "title": "Web 界面架构设计方案",
+      "tags": [
+        "web-ui",
+        "architecture",
+        "design"
+      ],
+      "status": "draft",
+      "updated": "2026-07-28T11:59:53.137839+00:00"
+    },
+    "review-tools-2024": {
+      "path": "reviews/tools-code-review-2024.md",
+      "type": "review",
+      "title": "src/tools/ 目录代码审查报告",
+      "tags": [
+        "code-review",
+        "security",
+        "quality"
+      ],
+      "status": "completed",
+      "author": "code-reviewer",
+      "created": "2024-01-01",
+      "updated": "2026-07-29T01:26:41.526001+00:00"
     },
     "ADR-004-scheduled-task-detailed-architecture": {
       "path": "decisions/ADR-004-scheduled-task-detailed-architecture.md",
@@ -33,50 +86,6 @@
       "created": "2026-07-26",
       "updated": "2026-07-30T02:36:35.541189+00:00"
     },
-    "pipeline-analysis": {
-      "path": "summaries/pipeline-analysis.md",
-      "type": "summary",
-      "title": "Pipeline 功能分析报告",
-      "tags": [
-        "pipeline",
-        "analysis",
-        "feature",
-        "dev-assistant-rs"
-      ],
-      "status": "completed",
-      "author": "dev-assistant",
-      "created": "2026-08-01",
-      "updated": "2026-08-01T01:04:38.358788+00:00"
-    },
-    "ADR-002-pipeline-command-design": {
-      "path": "decisions/ADR-002-pipeline-command-design.md",
-      "type": "decision",
-      "title": "流水线 (/pipeline) 命令设计与实现",
-      "tags": [
-        "pipeline",
-        "slash-command",
-        "subagent",
-        "workflow"
-      ],
-      "status": "accepted",
-      "author": "dev-assistant",
-      "created": "2026-07-26",
-      "updated": "2026-07-26T07:11:41.868542+00:00"
-    },
-    "review-tools-2024": {
-      "path": "reviews/tools-code-review-2024.md",
-      "type": "review",
-      "title": "src/tools/ 目录代码审查报告",
-      "tags": [
-        "code-review",
-        "security",
-        "quality"
-      ],
-      "status": "completed",
-      "author": "code-reviewer",
-      "created": "2024-01-01",
-      "updated": "2026-07-29T01:26:41.526001+00:00"
-    },
     "critical-issues": {
       "path": "review/critical-issues.md",
       "type": "issue",
@@ -89,6 +98,18 @@
       ],
       "status": "draft",
       "updated": "2026-07-29T01:31:08.745691+00:00"
+    },
+    "ADR-001-scheduled-task-architecture": {
+      "path": "decisions/ADR-001-scheduled-task-architecture.md",
+      "type": "decision",
+      "title": "ADR-001-scheduled-task-architecture",
+      "tags": [
+        "scheduled-task",
+        "architecture",
+        "design"
+      ],
+      "status": "accepted",
+      "updated": "2026-07-30T02:09:34.554211+00:00"
     },
     "scheduler-improvement-plan": {
       "path": "decisions/scheduler-improvement-plan.md",
@@ -103,30 +124,6 @@
       "created": "2026-08-01",
       "updated": "2026-08-01T01:15:21.367039+00:00"
     },
-    "ADR-003-web-ui-architecture": {
-      "path": "decisions/ADR-003-web-ui-architecture.md",
-      "type": "decision",
-      "title": "Web 界面架构设计方案",
-      "tags": [
-        "web-ui",
-        "architecture",
-        "design"
-      ],
-      "status": "draft",
-      "updated": "2026-07-28T11:59:53.137839+00:00"
-    },
-    "ADR-scheduler-architecture": {
-      "path": "decisions/ADR-scheduler-architecture.md",
-      "type": "decision",
-      "title": "定时任务模块架构设计",
-      "tags": [
-        "scheduler",
-        "architecture",
-        "design"
-      ],
-      "status": "draft",
-      "updated": "2026-07-30T02:56:03.537432+00:00"
-    },
     "architecture-analysis": {
       "path": "summaries/architecture-analysis.md",
       "type": "summary",
@@ -139,17 +136,33 @@
       "status": "completed",
       "updated": "2026-07-26T08:28:00.143228+00:00"
     },
-    "ADR-001-scheduled-task-architecture": {
-      "path": "decisions/ADR-001-scheduled-task-architecture.md",
-      "type": "decision",
-      "title": "ADR-001-scheduled-task-architecture",
+    "review-report": {
+      "path": ".kb/pipeline/review-report.md",
+      "type": "review",
+      "title": "review-report",
       "tags": [
-        "scheduled-task",
-        "architecture",
-        "design"
+        "code-review",
+        "security",
+        "quality",
+        "architecture"
       ],
-      "status": "accepted",
-      "updated": "2026-07-30T02:09:34.554211+00:00"
+      "status": "completed",
+      "updated": "2026-08-03T12:58:41.461566+00:00"
+    },
+    "pipeline-analysis": {
+      "path": "summaries/pipeline-analysis.md",
+      "type": "summary",
+      "title": "Pipeline 功能分析报告",
+      "tags": [
+        "pipeline",
+        "analysis",
+        "feature",
+        "dev-assistant-rs"
+      ],
+      "status": "completed",
+      "author": "dev-assistant",
+      "created": "2026-08-01",
+      "updated": "2026-08-01T01:04:38.358788+00:00"
     }
   }
 }

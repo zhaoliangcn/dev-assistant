@@ -98,8 +98,7 @@ impl MessageOutput for UIMessageOutput {
 
         let mut stdout = std::io::stdout();
         let term_width = crate::ui::get_terminal_width().unwrap_or(80);
-        // 流式显示时将换行符替换为可见的 "\\n"（2 字符），避免 \r 清除失效；
-        // 同时正确计算终端占用行数，处理自动换行和空行。
+        // 流式显示保留实际换行符，正确计算终端占用行数
         let total_lines = self.calc_streaming_lines(content, term_width);
 
         if is_final {
@@ -129,11 +128,22 @@ impl MessageOutput for UIMessageOutput {
 
             self.last_streamed_content = content.to_string();
             self.last_streamed_lines = total_lines;
-            // 将换行替换为可见表示，防止 \r 无法清除多行残留
-            let display = format!("{} \x1b[5m▊\x1b[0m", content.replace('\n', "\\n"));
+
+            // 渲染：第一行带前缀，后续行缩进对齐前缀宽度
             let theme = crate::ui::theme::active_theme();
             let prefix = format!("{}🤖 助手:{} ", theme.tool_fg, crate::ui::theme::RESET);
-            let _ = write!(stdout, "{}{}", prefix, display);
+            let indent = " ".repeat(prefix.width());
+            
+            for (i, line) in content.lines().enumerate() {
+                if i == 0 {
+                    let _ = write!(stdout, "{}{}", prefix, line);
+                } else {
+                    let _ = write!(stdout, "\n{}", indent);
+                    let _ = write!(stdout, "{}", line);
+                }
+            }
+            // 添加闪烁光标
+            let _ = write!(stdout, " ▊");
             let _ = stdout.flush();
         }
     }

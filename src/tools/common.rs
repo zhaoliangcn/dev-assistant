@@ -97,7 +97,18 @@ pub fn sanitize_model_path_arg(input: &str) -> &str {
     if !quote_wrapped {
         return trimmed;
     }
-    let unquoted = trimmed.trim_matches(['"', '\'']).trim();
+    // 使用 strip_prefix/strip_suffix 确保只移除成对引号
+    let first_char = trimmed.chars().next().unwrap();
+    let last_char = trimmed.chars().last().unwrap();
+    let unquoted = if first_char == last_char {
+        trimmed
+            .strip_prefix(first_char)
+            .and_then(|s| s.strip_suffix(first_char))
+            .unwrap_or(trimmed)
+            .trim()
+    } else {
+        trimmed
+    };
     let mut result = unquoted;
     while let Some(stripped) = result
         .strip_suffix("\\n")

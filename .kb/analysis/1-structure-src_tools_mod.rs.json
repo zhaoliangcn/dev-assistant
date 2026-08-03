@@ -1,14 +1,27 @@
 {
   "file_path": "src/tools/mod.rs",
   "analysis_type": "Structure",
-  "summary": "工具系统核心，约424行。定义ToolRegistry/ToolDefinition/ToolArgs/ToolContext/ToolResult等核心类型。注册了20+内置工具。",
+  "summary": "ToolRegistry 工具注册中心：28 个工具注册、安全评估（Critical/High/Medium/Low 四级）、审批管理、重试机制",
   "details": {
-    "message": "工具注册中心，维护工具定义的HashMap。支持内置工具注册、安全评估、审批管理、重试管理、资源注入。"
+    "subagent_restricted_tools": [
+      "read_file",
+      "batch_read_files",
+      "write_file",
+      "edit_file",
+      "glob",
+      "list_directory",
+      "file_exists",
+      "exec_command",
+      "kb_store",
+      "kb_query",
+      "finish"
+    ],
+    "tools": 28
   },
   "issues": [],
   "timestamp": {
-    "secs_since_epoch": 1785057710,
-    "nanos_since_epoch": 169145000
+    "secs_since_epoch": 1785769259,
+    "nanos_since_epoch": 113039000
   },
   "batch_number": 1
 }

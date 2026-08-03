@@ -1,12 +1,19 @@
 {
   "file_path": "src/main.rs",
   "analysis_type": "Structure",
-  "summary": "CLI入口。使用clap解析参数，支持--message/--project/--provider/--model/--no-approval/--verbose/--max-iterations/--max-tokens/--resume/--background等选项。",
+  "summary": "CLI入口：解析命令行参数，组装AppConfig，dispatch到三种运行模式（交互/一次性/后台/Web）",
   "details": null,
-  "issues": [],
+  "issues": [
+    {
+      "severity": "Medium",
+      "description": "tokio::runtime::Builder::new_current_thread() 在 Web 模式下可能不够用，web 服务需要多线程处理并发请求",
+      "location": "src/main.rs:330",
+      "suggestion": null
+    }
+  ],
   "timestamp": {
-    "secs_since_epoch": 1785057754,
-    "nanos_since_epoch": 876784000
+    "secs_since_epoch": 1785769242,
+    "nanos_since_epoch": 242802000
   },
   "batch_number": 1
 }

@@ -1,0 +1,23 @@
+{
+  "file_path": "src/scheduler/",
+  "analysis_type": "Structure",
+  "summary": "定时任务调度系统：时间轮（3600 槽·1秒精度·1小时覆盖）+ JSONL 持久化 + Agent/Command 两种执行模式 + 4 个 Agent 工具",
+  "details": {
+    "files": 8,
+    "modes": [
+      "agent",
+      "command"
+    ],
+    "schedules": [
+      "cron",
+      "interval",
+      "once"
+    ]
+  },
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785769259,
+    "nanos_since_epoch": 113551000
+  },
+  "batch_number": 1
+}

@@ -1,0 +1,15 @@
+{
+  "file_path": "src/orchestrator/",
+  "analysis_type": "Structure",
+  "summary": "任务编排器：依赖图 + 检查点管理 + 并行执行（最多 4 并发），支持崩溃恢复",
+  "details": {
+    "files": 3,
+    "max_concurrent": 4
+  },
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785769259,
+    "nanos_since_epoch": 114069000
+  },
+  "batch_number": 1
+}

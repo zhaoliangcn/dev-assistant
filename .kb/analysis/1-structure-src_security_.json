@@ -1,0 +1,20 @@
+{
+  "file_path": "src/security/",
+  "analysis_type": "Structure",
+  "summary": "安全策略：路径验证（防止穿越/符号链接 TOCTOU）、命令危险检测（rm -rf/sudo）、危险文件列表、审批管理",
+  "details": {
+    "danger_levels": [
+      "Critical",
+      "High",
+      "Medium",
+      "Low"
+    ],
+    "files": 2
+  },
+  "issues": [],
+  "timestamp": {
+    "secs_since_epoch": 1785769259,
+    "nanos_since_epoch": 114518000
+  },
+  "batch_number": 1
+}

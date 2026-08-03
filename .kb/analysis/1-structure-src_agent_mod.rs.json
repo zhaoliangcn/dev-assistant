@@ -1,14 +1,22 @@
 {
   "file_path": "src/agent/mod.rs",
   "analysis_type": "Structure",
-  "summary": "Agent核心，约1003行。提供start_turn/step/run主循环、子代理创建、流水线执行、技能激活、工具调用处理、上下文压缩、状态持久化等功能。",
+  "summary": "Agent 核心逻辑：step 循环（LLM 调用→工具调用→结果处理→上下文压缩）、子代理管理、Pipeline 6 阶段流水线执行",
   "details": {
-    "message": "Agent核心模块，包含ContextManager(上下文管理)、ConversationHistory(对话历史)、DisplayBuffer(展示缓冲区)、ContextCompressor(上下文压缩)、AgentIdentity(代理身份)、TokenCounter(token计数)"
+    "key_methods": [
+      "step",
+      "run",
+      "start_turn",
+      "process_tool_calls",
+      "run_pipeline",
+      "new_subagent"
+    ],
+    "lines": 1319
   },
   "issues": [],
   "timestamp": {
-    "secs_since_epoch": 1785057710,
-    "nanos_since_epoch": 168383000
+    "secs_since_epoch": 1785769259,
+    "nanos_since_epoch": 112424000
   },
   "batch_number": 1
 }

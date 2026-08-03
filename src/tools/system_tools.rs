@@ -1,5 +1,7 @@
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
@@ -63,8 +65,9 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         format!("{} {}", command, extra_args.join(" "))
     };
 
-    // Max output byte limit: 10MB total (stdout + stderr) to prevent OOM.
-    const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+    // Max output byte limit: 10MB total (stdout + stderr combined) to prevent OOM.
+    const MAX_TOTAL_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+    let remaining = Arc::new(AtomicUsize::new(MAX_TOTAL_OUTPUT_BYTES));
 
     // Spawn with piped output
     let mut cmd = Command::new(command);
@@ -115,20 +118,26 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
 
     let (tx, rx) = mpsc::channel();
 
+    let remaining_clone = Arc::clone(&remaining);
     let stdout_reader = std::thread::spawn(move || {
         let mut buf = Vec::with_capacity(4096);
         if let Some(reader) = stdout {
-            let mut limited = reader.take(MAX_OUTPUT_BYTES as u64);
+            let limit = remaining_clone.load(Ordering::Acquire);
+            let mut limited = reader.take(limit as u64);
             let _ = limited.read_to_end(&mut buf);
+            remaining_clone.fetch_sub(buf.len(), Ordering::Release);
         }
         buf
     });
 
+    let remaining_clone = Arc::clone(&remaining);
     let stderr_reader = std::thread::spawn(move || {
         let mut buf = Vec::with_capacity(4096);
         if let Some(reader) = stderr {
-            let mut limited = reader.take(MAX_OUTPUT_BYTES as u64);
+            let limit = remaining_clone.load(Ordering::Acquire);
+            let mut limited = reader.take(limit as u64);
             let _ = limited.read_to_end(&mut buf);
+            remaining_clone.fetch_sub(buf.len(), Ordering::Release);
         }
         buf
     });
@@ -146,8 +155,8 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
             let stderr_bytes = stderr_reader.join().unwrap_or_default();
             let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
             let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
-            let stdout_truncated = stdout_bytes.len() >= MAX_OUTPUT_BYTES;
-            let stderr_truncated = stderr_bytes.len() >= MAX_OUTPUT_BYTES;
+            let stdout_truncated = stdout_bytes.len() >= MAX_TOTAL_OUTPUT_BYTES;
+            let stderr_truncated = stderr_bytes.len() >= MAX_TOTAL_OUTPUT_BYTES;
 
             let mut content = format!(
                 "[exec_command] {} (exit code: {})",

@@ -309,7 +309,7 @@ impl ToolRegistry {
     /// - `spawn_subagent`（防止无限递归）
     /// - `restart`（重启整个进程）
     ///
-    /// 子 Agent 拥有基本的文件操作工具和 `finish`。
+    /// 子 Agent 拥有基本的文件操作工具、KB 工具和 `finish`。
     pub fn new_subagent_registry(&self) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
@@ -320,23 +320,24 @@ impl ToolRegistry {
             resources: self.resources.clone(),
             schema_tokens: AtomicUsize::new(0),
         };
-        // 子 Agent 只能使用文件工具、系统工具和 finish
+        // 子 Agent 拥有文件工具、KB 工具和 finish
         registry.register_tools_by_names(&[
             "read_file", "batch_read_files", "write_file", "edit_file",
-            "glob", "list_directory", "file_exists", "exec_command", "finish",
+            "glob", "list_directory", "file_exists", "exec_command",
+            "kb_store", "kb_query", "finish",
         ]);
         registry
     }
 
     /// 根据 Agent 身份创建受限工具注册中心。
     ///
-    /// 不同身份的 Agent 拥有不同的工具集：
-    /// - Architect: read_file, write_file, glob, kb_store, kb_query, finish
-    /// - Implementer: read_file, write_file, edit_file, exec_command, glob, kb_query, finish
-    /// - Reviewer: read_file, batch_read_files, glob, kb_store, kb_query, finish
-    /// - Tester: read_file, write_file, edit_file, exec_command, glob, kb_store, kb_query, finish
-    /// - Debugger: read_file, write_file, edit_file, exec_command, glob, kb_store, kb_query, finish
-    /// - General: 所有基础工具
+    /// 不同身份的 Agent 拥有不同的工具集（由 `AgentIdentity::default_tools()` 定义）：
+    /// - Architect: 文件工具 + kb_store/kb_query + exec_command + finish
+    /// - Implementer: 文件工具 + 编辑工具 + kb_store/kb_query + exec_command + finish
+    /// - Reviewer: 读取工具 + exec_command + kb_store/kb_query + finish（不含写/编辑工具）
+    /// - Tester: 完整工具集 + kb_store/kb_query + finish
+    /// - Debugger: 完整工具集 + kb_store/kb_query + finish
+    /// - General: 完整工具集 + kb_store/kb_query + finish
     pub fn new_subagent_registry_with_identity(&self, identity: &AgentIdentity) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),

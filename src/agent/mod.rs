@@ -201,7 +201,7 @@ impl Agent {
     pub fn start_turn(&mut self, user_message: String, output: &mut dyn MessageOutput) {
         // 技能激活：检查用户消息是否匹配某个技能
         let matched_skill = self.match_skill(&user_message);
-        if let Some(skill) = matched_skill {
+        let final_message = if let Some(skill) = matched_skill {
             output.info(&format!("激活技能: {}", skill.meta.name));
             let skill_name = skill.meta.name.clone();
             let skill_desc = skill.meta.description.clone();
@@ -210,25 +210,26 @@ impl Agent {
                 crate::utils::message_level::MessageLevel::Info,
                 &format!("[技能] 已激活: {} — {}", skill_name, skill_desc),
             );
-            let skill_instructions = format!(
-                "【技能激活: {}】\n{}\n\n请严格按照上述技能流程执行任务。",
-                skill_name,
-                skill_body
+
+            // 将技能指令与用户消息合并为一条 User 消息，
+            // 避免以 System 角色注入与主系统提示词冲突。
+            let combined = format!(
+                "【技能激活: {}】\n{}\n\n---\n用户请求：\n{}",
+                skill_name, skill_body, user_message
             );
-            self.context.add_message(
-                crate::agent::context::Role::System,
-                skill_instructions,
-                None,
-                None,
-            );
+
             // 持久化：记录技能激活消息
             if let Some(ref mut store) = self.session_store {
                 store.record_system_message(&format!("技能激活: {} — {}", skill_name, skill_desc));
             }
-        }
+
+            combined
+        } else {
+            user_message.clone()
+        };
 
         self.context
-            .add_message(crate::agent::context::Role::User, user_message.clone(), None, None);
+            .add_message(crate::agent::context::Role::User, final_message, None, None);
 
         // 持久化：记录用户消息
         if let Some(ref mut store) = self.session_store {
@@ -471,16 +472,15 @@ impl Agent {
         self.depth
     }
 
-    /// 构建 stage 模板的 finish 警告后缀。
+    /// 构建 stage 模板的 finish 提示后缀。
     ///
-    /// 所有 6 个阶段共享相同的"必须调用 finish 工具终止本阶段"警告格式，
+    /// 所有 6 个阶段共享相同的"完成工作后调用 finish 工具终止本阶段"提示格式，
     /// 仅输出描述和示例摘要不同。提取为辅助函数减少重复。
     fn finish_warning(output_desc: &str, example_summary: &str) -> String {
         format!(
-            "⚠️ 完成上述工作后，必须调用 `finish` 工具终止本阶段，\n\
+            "✅ 完成所有上述工作后，请调用 `finish` 工具终止本阶段，\n\
              并将{}摘要作为 `summary` 参数传入，例如：\n\
-             finish(summary=\"{}\")。\n\
-             切勿仅输出文本而不调用 `finish`，否则阶段会因迭代上限而失败。",
+             `finish(summary=\"{}\")`。",
             output_desc, example_summary
         )
     }
@@ -522,18 +522,14 @@ impl Agent {
                 name: "🏗 架构设计".to_string(),
                 agent_type: AgentIdentity::Architect,
                 task_template: format!(
-                    "请为以下任务设计架构方案。\n\n\
-                     需求：\n\
-                     {}\n\n\
-                     请输出：\n\
-                     1. 模块结构和职责划分\n\
-                     2. 接口定义（输入/输出）\n\
-                     3. 数据流设计\n\
-                     4. 关键设计决策和理由\n\n\
-                     请使用 kb_store 记录架构决策到 pipeline/stage-0-architecture/ 目录下。\n\n\
-                     {}",
-                    task,
-                    Self::finish_warning("架构设计", "架构设计完成：模块划分、接口定义、数据流、决策理由")
+                    "这是流水线第一阶段：架构设计。\n\n\
+                     原始需求：\n\
+                     {task_ref}\n\n\
+                     {{context}}\n\n\
+                     请使用 kb_store 将架构决策保存到 pipeline/stage-0-architecture/ 目录下。\n\n\
+                     {finish}",
+                    task_ref = task,
+                    finish = Self::finish_warning("架构设计", "架构设计完成：模块划分、接口定义、数据流、决策理由")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[0]),
             },
@@ -541,20 +537,16 @@ impl Agent {
                 name: "💻 代码实现".to_string(),
                 agent_type: AgentIdentity::Implementer,
                 task_template: format!(
-                    "请按照架构设计实现代码。\n\n\
-                     任务：\n\
-                     {}\n\n\
+                    "这是流水线第二阶段：代码实现。\n\n\
+                     原始需求：\n\
+                     {task_ref}\n\n\
                      上一阶段输出（架构设计）：\n\
                      {{context}}\n\n\
-                     请输出：\n\
-                     1. 完整的代码实现\n\
-                     2. 单元测试\n\
-                     3. 确保代码编译通过\n\n\
-                     注意：严格遵循架构设计，不擅自修改接口定义。\n\n\
-                     请使用 kb_store 记录修改的文件列表到 pipeline/stage-1-implementation/ 目录下。\n\n\
-                     {}",
-                    task,
-                    Self::finish_warning("代码实现", "代码实现完成：新增文件、关键接口、测试覆盖")
+                     注意：严格遵循架构设计，不擅自修改接口定义。\n\
+                     请使用 kb_store 将修改的文件列表保存到 pipeline/stage-1-implementation/ 目录下。\n\n\
+                     {finish}",
+                    task_ref = task,
+                    finish = Self::finish_warning("代码实现", "代码实现完成：新增文件、关键接口、测试覆盖")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[1]),
             },
@@ -562,19 +554,15 @@ impl Agent {
                 name: "🧪 测试验证".to_string(),
                 agent_type: AgentIdentity::Tester,
                 task_template: format!(
-                    "请测试代码实现。\n\n\
-                     任务：\n\
-                     {}\n\n\
+                    "这是流水线第三阶段：测试验证。\n\n\
+                     原始需求：\n\
+                     {task_ref}\n\n\
                      上一阶段输出（代码实现）：\n\
                      {{context}}\n\n\
-                     请：\n\
-                     1. 编写全面的测试用例\n\
-                     2. 运行测试并收集结果\n\
-                     3. 报告测试覆盖率和问题\n\n\
-                     请使用 kb_store 记录测试结果到 pipeline/stage-2-testing/ 目录下。\n\n\
-                     {}",
-                    task,
-                    Self::finish_warning("测试报告", "测试完成：N 个测试用例，M 个通过，K 个失败")
+                     请使用 kb_store 将测试结果保存到 pipeline/stage-2-testing/ 目录下。\n\n\
+                     {finish}",
+                    task_ref = task,
+                    finish = Self::finish_warning("测试报告", "测试完成：N 个测试用例，M 个通过，K 个失败")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[2]),
             },
@@ -582,22 +570,15 @@ impl Agent {
                 name: "🔍 代码审查".to_string(),
                 agent_type: AgentIdentity::Reviewer,
                 task_template: format!(
-                    "请审查代码实现。\n\n\
-                     任务：\n\
-                     {}\n\n\
+                    "这是流水线第四阶段：代码审查。\n\n\
+                     原始需求：\n\
+                     {task_ref}\n\n\
                      上一阶段输出（测试结果和代码实现）：\n\
                      {{context}}\n\n\
-                     请检查：\n\
-                     1. 代码质量和可读性\n\
-                     2. 安全性（路径遍历、命令注入等）\n\
-                     3. 性能问题\n\
-                     4. 是否符合架构设计规范\n\
-                     5. 错误处理是否完善\n\n\
-                     请使用 kb_store 记录审查结果到 pipeline/stage-3-review/ 目录下。\n\n\
-                     请输出问题清单（含严重程度）和改进建议。\n\n\
-                     {}",
-                    task,
-                    Self::finish_warning("审查报告", "审查完成：发现 N 个问题，其中严重 X 个，建议 Y 项")
+                     请使用 kb_store 将审查结果保存到 pipeline/stage-3-review/ 目录下。\n\n\
+                     {finish}",
+                    task_ref = task,
+                    finish = Self::finish_warning("审查报告", "审查完成：发现 N 个问题，其中严重 X 个，建议 Y 项")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[3]),
             },
@@ -605,20 +586,16 @@ impl Agent {
                 name: "🔧 问题修复".to_string(),
                 agent_type: AgentIdentity::Debugger,
                 task_template: format!(
-                    "请根据审查结果修复代码问题。\n\n\
-                     任务：\n\
-                     {}\n\n\
+                    "这是流水线第五阶段：问题修复。\n\n\
+                     原始需求：\n\
+                     {task_ref}\n\n\
                      上一阶段输出（审查报告）：\n\
                      {{context}}\n\n\
-                     请：\n\
-                     1. 修复所有发现的问题\n\
-                     2. 确保代码编译通过\n\
-                     3. 验证修复效果\n\n\
-                     注意：只修复审查中提出的问题，不要引入新的功能变更。\n\n\
-                     请使用 kb_store 记录修复记录到 pipeline/stage-4-debug/ 目录下。\n\n\
-                     {}",
-                    task,
-                    Self::finish_warning("修复", "修复完成：处理 N 个问题，编译通过")
+                     注意：只修复审查中提出的问题，不要引入新的功能变更。\n\
+                     请使用 kb_store 将修复记录保存到 pipeline/stage-4-debug/ 目录下。\n\n\
+                     {finish}",
+                    task_ref = task,
+                    finish = Self::finish_warning("修复", "修复完成：处理 N 个问题，编译通过")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[4]),
             },
@@ -626,20 +603,21 @@ impl Agent {
                 name: "📋 进度记录".to_string(),
                 agent_type: AgentIdentity::General,
                 task_template: format!(
-                    "请记录任务完成进度。\n\n\
-                     任务：\n\
-                     {}\n\n\
+                    "这是流水线最终阶段：进度记录。\n\n\
+                     原始需求：\n\
+                     {task_ref}\n\n\
                      已完成的工作：\n\
                      {{context}}\n\n\
-                     请使用 kb_store 工具记录到 pipeline/stage-5-recording/ 目录下：\n\
+                     请使用 kb_store 记录到 pipeline/stage-5-recording/ 目录下：\n\
                      1. 完成的功能列表\n\
                      2. 修改的文件清单\n\
                      3. 测试结果概要\n\
                      4. 未解决的问题（如果有）\n\n\
-                     然后使用 git add 和 git commit 提交代码变更。\n\n\
-                     {}",
-                    task,
-                    Self::finish_warning("进度记录", "进度已记录：功能列表、文件清单、测试结果")
+                     如果代码有变更，尝试使用 `exec_command` 执行 git add 和 git commit 提交代码变更。\n\
+                     如果 git 操作不可用，记录到 KB 即可。\n\n\
+                     {finish}",
+                    task_ref = task,
+                    finish = Self::finish_warning("进度记录", "进度已记录：功能列表、文件清单、测试结果")
                 ),
                 max_iterations: alloc(STAGE_WEIGHTS[5]),
             }];
@@ -1120,11 +1098,47 @@ impl Agent {
     }
 
     /// 匹配用户消息与已注册技能。使用预计算的关键词索引进行快速匹配。
+    ///
+    /// 改进：
+    /// - 使用正则表达式进行单词边界匹配，避免子串误激活
+    /// - 检测否定模式（如"不要"、"不需要"、"取消"、"stop"）避免反向触发
     fn match_skill(&self, message: &str) -> Option<&Skill> {
         let msg_lower = message.to_lowercase();
 
+        // 否定模式：如果消息中包含这些词，降低匹配优先级
+        // 检查关键词周围是否有否定词
+        fn has_negation_nearby(msg: &str, keyword_pos: usize) -> bool {
+            let start = keyword_pos.saturating_sub(20);
+            let end = (keyword_pos + 20).min(msg.len());
+            let context = &msg[start..end];
+            let negations = ["不", "不要", "不需要", "取消", "跳过", "忽略", "no", "don't", "not", "skip", "stop", "不需要", "不用"];
+            negations.iter().any(|n| context.contains(n))
+        }
+
         self.skills.iter().find(|skill| {
-            skill.keywords.iter().any(|kw| msg_lower.contains(kw.as_str()))
+            skill.keywords.iter().any(|kw| {
+                let kw_lower = kw.to_lowercase();
+                // 查找关键词在消息中的位置
+                if let Some(pos) = msg_lower.find(&kw_lower) {
+                    // 检查关键词周围是否有否定词
+                    if has_negation_nearby(&msg_lower, pos) {
+                        return false; // 否定模式，不激活
+                    }
+                    // 对于英文关键词，检查单词边界
+                    if kw_lower.bytes().all(|b| b.is_ascii_alphabetic() || b == b' ' || b == b'-') {
+                        // 确保关键词前后不是字母数字（单词边界）
+                        let before = pos.checked_sub(1).map(|i| msg_lower.as_bytes()[i]).unwrap_or(b' ');
+                        let after = msg_lower.as_bytes().get(pos + kw_lower.len()).copied().unwrap_or(b' ');
+                        let is_word_boundary = !before.is_ascii_alphanumeric() && !after.is_ascii_alphanumeric();
+                        is_word_boundary
+                    } else {
+                        // 中文关键词直接匹配
+                        true
+                    }
+                } else {
+                    false
+                }
+            })
         })
     }
 

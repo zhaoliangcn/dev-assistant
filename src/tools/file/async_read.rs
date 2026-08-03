@@ -2,13 +2,97 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use std::path::Path;
 use tracing::debug;
 
+use std::sync::Arc;
+
 use super::async_io::read_file_content;
-use super::read_shared::{DEFAULT_READ_LIMIT, generate_code_summary, resolve_glob_patterns};
+use super::read_shared::{
+    generate_code_summary, generate_read_info, resolve_glob_patterns, DEFAULT_READ_LIMIT,
+};
 use crate::tools::async_tool::{AsyncTool, ToolArgs, ToolContext, ToolResult};
+use crate::tools::cache::ReadCache;
 use crate::tools::common;
 use crate::utils::error::AppError;
+
+/// 将 IO 读取错误映射为工具友好错误信息，成功时返回文件内容。
+fn map_read_result(
+    result: Result<String, std::io::Error>,
+    tool_name: &str,
+    file_path: &str,
+) -> Result<String, ToolResult> {
+    match result {
+        Ok(c) => Ok(c),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(ToolResult {
+            success: false,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+            content: format!(
+                "[{}] ❌ File not found: {}\n\
+                 Please check the file path. You may need to use glob to find the correct file name.",
+                tool_name, file_path
+            ),
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(ToolResult {
+            success: false,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+            content: format!(
+                "[{}] ❌ Permission denied: {}\n\
+                 The file exists but you don't have read access.",
+                tool_name, file_path
+            ),
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => Err(ToolResult {
+            success: false,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+            content: format!(
+                "[{}] ❌ Binary/non-UTF-8 file: {}\n\
+                 This file contains binary or non-text data and cannot be displayed.\n\
+                 Use exec_command with `file {}` or `xxd {}` to inspect it.",
+                tool_name, file_path, file_path, file_path
+            ),
+        }),
+        Err(e) => Err(ToolResult {
+            success: false,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+            content: format!("[{}] ❌ IO error: {}: {}", tool_name, file_path, e),
+        }),
+    }
+}
+
+/// 通过缓存（若有）异步读取文件内容，所有错误映射为 ToolResult。
+async fn read_file_with_cache(
+    full_path: &Path,
+    file_path: &str,
+    tool_name: &str,
+    cache: Option<&Arc<ReadCache>>,
+) -> Result<String, ToolResult> {
+    if let Some(cache) = cache {
+        if let Some(cached) = cache.read_async(full_path).await {
+            debug!("Cache hit for {}", file_path);
+            return Ok(cached);
+        }
+        let content = match read_file_content(full_path).await {
+            Ok(c) => c,
+            Err(e) => return map_read_result(Err(e), tool_name, file_path),
+        };
+        cache.write_async(full_path, &content).await;
+        Ok(content)
+    } else {
+        match read_file_content(full_path).await {
+            Ok(c) => Ok(c),
+            Err(e) => map_read_result(Err(e), tool_name, file_path),
+        }
+    }
+}
 
 /// 异步读取文件工具
 pub struct AsyncReadFileTool;
@@ -38,7 +122,7 @@ impl AsyncTool for AsyncReadFileTool {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of lines to read. Default: 200"
+                    "description": "Maximum number of lines to read. Default: 500"
                 }
             },
             "required": ["file_path"]
@@ -58,105 +142,12 @@ impl AsyncTool for AsyncReadFileTool {
             .map_err(AppError::Llm)?;
 
         let full_path = common::resolve_model_path(&context.working_dir, file_path);
-        
-        // 检查缓存（异步）
-        let content = if let Some(cache) = &context.cache {
-            if let Some(cached) = cache.read_async(&full_path).await {
-                debug!("Cache hit for {}", file_path);
-                cached
-            } else {
-                let content = match read_file_content(&full_path).await {
-                    Ok(c) => c,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        return Ok(ToolResult {
-                            success: false,
-                            security_evaluation: None,
-                            restart_requested: false,
-                error_category: None,
-                            content: format!(
-                                "[async_read_file] ❌ File not found: {}\n\
-                                 Please check the file path. You may need to use glob to find the correct file name.",
-                                file_path
-                            ),
-                        });
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                        return Ok(ToolResult {
-                            success: false,
-                            security_evaluation: None,
-                            restart_requested: false,
-                error_category: None,
-                            content: format!(
-                                "[async_read_file] ❌ Permission denied: {}\n\
-                                 The file exists but you don't have read access.",
-                                file_path
-                            ),
-                        });
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                        return Ok(ToolResult {
-                            success: false,
-                            security_evaluation: None,
-                            restart_requested: false,
-                error_category: None,
-                            content: format!(
-                                "[async_read_file] ❌ Binary/non-UTF-8 file: {}\n\
-                                 This file contains binary or non-text data and cannot be displayed.\n\
-                                 Use exec_command with `file {}` or `xxd {}` to inspect it.",
-                                file_path, file_path, file_path
-                            ),
-                        });
-                    }
-                    Err(e) => return Err(AppError::Io(e)),
-                };
-                cache.write_async(&full_path, &content).await;
-                content
-            }
-        } else {
-            match read_file_content(&full_path).await {
-                Ok(c) => c,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    return Ok(ToolResult {
-                        success: false,
-                        security_evaluation: None,
-                        restart_requested: false,
-                error_category: None,
-                        content: format!(
-                            "[async_read_file] ❌ File not found: {}\n\
-                             Please check the file path. You may need to use glob to find the correct file name.",
-                            file_path
-                        ),
-                    });
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                    return Ok(ToolResult {
-                        success: false,
-                        security_evaluation: None,
-                        restart_requested: false,
-                error_category: None,
-                        content: format!(
-                            "[async_read_file] ❌ Permission denied: {}\n\
-                             The file exists but you don't have read access.",
-                            file_path
-                        ),
-                    });
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                    return Ok(ToolResult {
-                        success: false,
-                        security_evaluation: None,
-                        restart_requested: false,
-                error_category: None,
-                        content: format!(
-                            "[async_read_file] ❌ Binary/non-UTF-8 file: {}\n\
-                             This file contains binary or non-text data and cannot be displayed.\n\
-                             Use exec_command with `file {}` or `xxd {}` to inspect it.",
-                            file_path, file_path, file_path
-                        ),
-                    });
-                }
-                Err(e) => return Err(AppError::Io(e)),
-            }
+
+        let content = match read_file_with_cache(&full_path, file_path, "async_read_file", context.cache.as_ref())
+            .await
+        {
+            Ok(c) => c,
+            Err(tool_result) => return Ok(tool_result),
         };
 
         let lines: Vec<&str> = content.lines().collect();
@@ -168,29 +159,13 @@ impl AsyncTool for AsyncReadFileTool {
         let displayed = lines[start..end].join("\n");
         let displayed_len = displayed.chars().count();
 
-        let mut info = format!(
-            "[async_read_file] {} (lines {}-{} of {}, {} chars, {} KB)",
-            file_path,
-            start + 1,
-            end,
-            total_lines,
-            displayed_len,
-            (displayed_len as f64 / 1024.0).round()
-        );
-
-        if offset > 1 || end < total_lines {
-            info.push_str(&format!(
-                "\nShowing {}/{} lines. Use offset/limit to read other sections.",
-                end - start,
-                total_lines
-            ));
-        }
+        let info = generate_read_info(file_path, start, end, total_lines, displayed_len);
 
         Ok(ToolResult {
             success: true,
             security_evaluation: None,
             restart_requested: false,
-                error_category: None,
+            error_category: None,
             content: format!("{}\n\n{}", info, displayed),
         })
     }
@@ -255,8 +230,9 @@ impl AsyncTool for AsyncBatchReadFilesTool {
             });
         }
 
-        let max_chars_per_file = common::get_lenient_usize(&args.arguments["max_chars_per_file"], "max_chars_per_file", 3000)
-            .map_err(AppError::Llm)?;
+        let max_chars_per_file =
+            common::get_lenient_usize(&args.arguments["max_chars_per_file"], "max_chars_per_file", 3000)
+                .map_err(AppError::Llm)?;
 
         let summarize = args.arguments["summarize"].as_bool().unwrap_or(true);
 
@@ -274,36 +250,20 @@ impl AsyncTool for AsyncBatchReadFilesTool {
             }
 
             let full_path = context.working_dir.join(&file_path);
-            
-            let content = if let Some(cache) = &context.cache {
-                if let Some(cached) = cache.read_async(&full_path).await {
-                    cached
-                } else {
-                    let content = match read_file_content(&full_path).await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            fail_count += 1;
-                            result.push_str(&format!(
-                                "\n[async_batch_read_files] ❌ Failed to read {}: {}\n",
-                                file_path, e
-                            ));
-                            continue;
-                        }
-                    };
-                    cache.write_async(&full_path, &content).await;
-                    content
-                }
-            } else {
-                match read_file_content(&full_path).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        fail_count += 1;
-                        result.push_str(&format!(
-                            "\n[async_batch_read_files] ❌ Failed to read {}: {}\n",
-                            file_path, e
-                        ));
-                        continue;
-                    }
+
+            let content = match read_file_with_cache(
+                &full_path,
+                &file_path,
+                "async_batch_read_files",
+                context.cache.as_ref(),
+            )
+            .await
+            {
+                Ok(c) => c,
+                Err(tool_result) => {
+                    fail_count += 1;
+                    result.push_str(&format!("\n{}\n", tool_result.content));
+                    continue;
                 }
             };
 
@@ -344,7 +304,7 @@ impl AsyncTool for AsyncBatchReadFilesTool {
             success: success_count > 0,
             security_evaluation: None,
             restart_requested: false,
-                error_category: None,
+            error_category: None,
             content: format!("{}{}", header, result),
         })
     }
@@ -361,17 +321,23 @@ mod tests {
 
     #[tokio::test]
     async fn async_read_file_execution() {
-        let working_dir = PathBuf::from("/Users/macmima1234/code/dev-assistant-rs");
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let working_dir = manifest_dir.clone();
         let security = Arc::new(SecurityPolicy::new(&working_dir, false));
         let approval_manager = Arc::new(crate::security::approval::ApprovalManager::new());
         let mut registry = AsyncToolRegistry::new(working_dir, security, approval_manager);
-        
+
         registry.register_tool(Arc::new(AsyncReadFileTool));
-        
-        let result = registry.execute_approved("async_read_file", json!({
-            "file_path": "src/tools/file/async_read.rs"
-        })).await;
-        
+
+        let result = registry
+            .execute_approved(
+                "async_read_file",
+                json!({
+                    "file_path": "src/tools/file/async_read.rs"
+                }),
+            )
+            .await;
+
         assert!(result.is_ok());
         assert!(result.unwrap().success);
     }

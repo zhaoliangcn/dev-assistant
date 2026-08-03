@@ -6,7 +6,7 @@ use globset::Glob;
 use walkdir::WalkDir;
 
 /// 单次 read_file 默认读取的行数上限。
-pub const DEFAULT_READ_LIMIT: usize = 200;
+pub const DEFAULT_READ_LIMIT: usize = 500;
 
 /// 遍历目录时跳过的目录名（构建产物、VCS、依赖等）。
 pub const SKIP_DIRS: &[&str] = &[
@@ -25,20 +25,61 @@ pub fn generate_code_summary(content: &str, file_path: &str) -> String {
 
     let mut functions = Vec::new();
     let mut structs = Vec::new();
+    let mut enums = Vec::new();
+    let mut traits = Vec::new();
+    let mut impls = Vec::new();
     let mut imports = Vec::new();
     let mut comments = Vec::new();
 
+    // 去前导空格后识别定义，兼容缩进（如 impl 块内的 fn）
+    fn strip_leading(line: &str) -> &str {
+        line.trim_start()
+    }
+
     for (i, line) in lines.iter().enumerate() {
-        if line.starts_with("pub fn ") || line.starts_with("fn ") {
-            let func_name = line.split_whitespace().nth(1).unwrap_or("");
+        let trimmed = strip_leading(line);
+
+        // 函数定义（含缩进，如 impl 块内的 fn）
+        if trimmed.starts_with("pub fn ") || trimmed.starts_with("fn ") {
+            let func_name = trimmed.split_whitespace().nth(1).unwrap_or("");
             functions.push(format!("  - {} (line {})", func_name, i + 1));
-        } else if line.starts_with("pub struct ") || line.starts_with("struct ") {
-            let struct_name = line.split_whitespace().nth(1).unwrap_or("");
+        // 结构体定义
+        } else if trimmed.starts_with("pub struct ") || trimmed.starts_with("struct ") {
+            let struct_name = trimmed
+                .split_whitespace()
+                .nth(1)
+                .and_then(|s| s.split('<').next()) // 去掉泛型参数
+                .unwrap_or("");
             structs.push(format!("  - {} (line {})", struct_name, i + 1));
-        } else if line.starts_with("use ") {
-            imports.push(line.trim().to_string());
-        } else if (line.starts_with("//") || line.starts_with("/*")) && i < 10 {
-            comments.push(line.trim().to_string());
+        // 枚举定义
+        } else if trimmed.starts_with("pub enum ") || trimmed.starts_with("enum ") {
+            let enum_name = trimmed.split_whitespace().nth(1).unwrap_or("");
+            enums.push(format!("  - {} (line {})", enum_name, i + 1));
+        // trait 定义
+        } else if trimmed.starts_with("pub trait ") || trimmed.starts_with("trait ") {
+            let trait_name = trimmed.split_whitespace().nth(1).unwrap_or("");
+            traits.push(format!("  - {} (line {})", trait_name, i + 1));
+        // impl 块
+        } else if trimmed.starts_with("impl ") {
+            let impl_target = trimmed
+                .strip_prefix("impl")
+                .and_then(|s| {
+                    let s = s.trim().split_whitespace().next()?;
+                    // 去掉尾部 "for" 或 "{"
+                    Some(s.trim_end_matches(&['{', ' ']))
+                })
+                .unwrap_or("");
+            impls.push(format!("  - {} (line {})", impl_target, i + 1));
+        // 导入
+        } else if trimmed.starts_with("use ") {
+            imports.push(trimmed.to_string());
+        // 头部注释（仅前 20 行）
+        } else if i < 20
+            && (trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*"))
+        {
+            if !comments.contains(&trimmed.to_string()) {
+                comments.push(trimmed.to_string());
+            }
         }
     }
 
@@ -59,6 +100,27 @@ pub fn generate_code_summary(content: &str, file_path: &str) -> String {
         summary.push_str("\n结构体:\n");
         for s in &structs {
             summary.push_str(&format!("{}\n", s));
+        }
+    }
+
+    if !enums.is_empty() {
+        summary.push_str("\n枚举:\n");
+        for e in &enums {
+            summary.push_str(&format!("{}\n", e));
+        }
+    }
+
+    if !traits.is_empty() {
+        summary.push_str("\nTrait:\n");
+        for t in &traits {
+            summary.push_str(&format!("{}\n", t));
+        }
+    }
+
+    if !impls.is_empty() {
+        summary.push_str("\nImpl 块:\n");
+        for i in &impls {
+            summary.push_str(&format!("{}\n", i));
         }
     }
 
@@ -107,6 +169,8 @@ pub fn resolve_glob_patterns(patterns: &[String], working_dir: &Path) -> Vec<Str
                 .filter_map(|e| e.ok())
             {
                 let entry_path = entry.path();
+
+                // 跳过隐藏目录和构建产物目录
                 if entry_path.is_dir() {
                     if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
                         if SKIP_DIRS.contains(&name) || name.starts_with('.') {
@@ -115,8 +179,9 @@ pub fn resolve_glob_patterns(patterns: &[String], working_dir: &Path) -> Vec<Str
                     }
                 }
 
-                if glob_set.is_match(entry_path) {
-                    if let Ok(relative) = entry_path.strip_prefix(working_dir) {
+                // 转化为相对路径后再匹配 glob（WalkDir 返回的是绝对路径）
+                if let Ok(relative) = entry_path.strip_prefix(working_dir) {
+                    if glob_set.is_match(relative) {
                         files.push(relative.to_string_lossy().to_string());
                     }
                 }

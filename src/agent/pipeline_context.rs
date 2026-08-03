@@ -143,14 +143,18 @@ impl PipelineContext {
                 }
             }
             if !ctx.artifacts.is_empty() {
-                prompt.push_str("- 产物文件（可通过 kb_query 查阅）:\n");
+                prompt.push_str("- 产物文件（可使用 `kb_query` 查询具体内容）:\n");
                 for a in &ctx.artifacts {
                     prompt.push_str(&format!("  - `{}`\n", a));
                 }
             }
             prompt.push('\n');
         }
-        prompt.push_str("请使用 kb_store 将你的产出保存到对应的 stage 目录下。\n");
+        prompt.push_str(
+            "请先使用 `kb_query` 查询前一阶段的产物文件了解具体内容，\n\
+             再基于已有决策开始当前阶段的工作。\n\
+             完成后使用 `kb_store` 将你的产出保存到对应的 stage 目录下。\n",
+        );
         prompt
     }
 }

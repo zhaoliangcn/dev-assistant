@@ -23,7 +23,7 @@ pub fn read_file_tool() -> ToolDefinition {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of lines to read. Default: 200"
+                    "description": "Maximum number of lines to read. Default: 500"
                 }
             },
             "required": ["file_path"]
@@ -79,15 +79,15 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
 
     let full_path = common::resolve_model_path(&context.working_dir, file_path);
     
-    // 检查 gitignore
-    if let Some(reason) = common::check_gitignore(&full_path, &context.resources) {
-        return Ok(ToolResult {
-            success: false,
-            security_evaluation: None,
-            restart_requested: false,
-                error_category: None,
-            content: format!("[read_file] ❌ Gitignore ignored: {}", reason),
-        });
+// 检查 gitignore
+	    if let Some(reason) = common::check_gitignore(&full_path, &context.resources) {
+	        return Ok(ToolResult {
+	            success: false,
+	            security_evaluation: None,
+	            restart_requested: false,
+	            error_category: None,
+	            content: format!("[read_file] ❌ Gitignore ignored: {}", reason),
+	        });
     }
     
     let content = match read_file_content(&full_path) {
@@ -146,13 +146,13 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
 
     let info = generate_read_info(file_path, start, end, total_lines, displayed_len);
 
-    Ok(ToolResult {
-        success: true,
-        security_evaluation: None,
-        restart_requested: false,
-                error_category: None,
-        content: format!("{}\n\n{}", info, displayed),
-    })
+Ok(ToolResult {
+	        success: true,
+	        security_evaluation: None,
+	        restart_requested: false,
+	        error_category: None,
+	        content: format!("{}\n\n{}", info, displayed),
+	    })
 }
 
 fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, AppError> {
@@ -166,13 +166,13 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         .collect();
 
     if file_patterns.is_empty() {
-        return Ok(ToolResult {
-            success: false,
-            security_evaluation: None,
-            restart_requested: false,
-                error_category: None,
-            content: "[batch_read_files] ❌ No files specified".to_string(),
-        });
+return Ok(ToolResult {
+	            success: false,
+	            security_evaluation: None,
+	            restart_requested: false,
+	            error_category: None,
+	            content: "[batch_read_files] ❌ No files specified".to_string(),
+	        });
     }
 
     let max_chars_per_file = common::get_lenient_usize(&args.arguments["max_chars_per_file"], "max_chars_per_file", 3000)
@@ -249,13 +249,11 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         success_count + fail_count
     );
 
-    Ok(ToolResult {
-        success: success_count > 0,
-        security_evaluation: None,
-        restart_requested: false,
-                error_category: None,
-        content: format!("{}{}", header, result),
-    })
+Ok(ToolResult {
+	        success: success_count > 0,
+	        security_evaluation: None,
+	        restart_requested: false,
+	        error_category: None,
+	        content: format!("{}{}", header, result),
+	    })
 }
-
-

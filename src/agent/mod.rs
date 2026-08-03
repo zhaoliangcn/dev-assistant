@@ -59,6 +59,9 @@ pub struct AgentResult {
     pub success: bool,
     pub message: String,
     pub restart_requested: bool,
+    /// 是否为调用 `finish` 工具产生的结构化终止结果。
+    /// 用于调用方区分"finish 交付"与普通回复，避免依赖字符串前缀判断。
+    pub finished: bool,
 }
 
 /// Agent 单步执行的结果。主循环根据此类型决定是继续下一轮还是结束。
@@ -317,6 +320,7 @@ impl Agent {
                         success: true,
                         message: result.content.clone(),
                         restart_requested: result.restart_requested,
+                        finished: true,
                     }));
                 }
 
@@ -325,6 +329,7 @@ impl Agent {
                         success: true,
                         message: result.content.clone(),
                         restart_requested: true,
+                        finished: false,
                     }));
                 }
             }
@@ -378,6 +383,7 @@ impl Agent {
                     success: true,
                     message: assistant_content,
                     restart_requested: false,
+                    finished: false,
                 }));
             }
             Ok(AgentStep::Continue)
@@ -413,6 +419,7 @@ impl Agent {
             success: false,
             message,
             restart_requested: false,
+            finished: false,
         })
     }
 

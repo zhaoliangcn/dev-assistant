@@ -595,6 +595,10 @@ pub async fn process_user_message(
     let mut current_type_blocks: Vec<ui::MessageBlock> = Vec::new();
 
     let result = loop {
+        // 清空上一轮流式渲染留下的活跃流区域（含状态行），
+        // 避免其与后续 drain 状态块交错堆叠导致内容残留/覆盖。
+        output.clear_active_stream();
+
         // 渲染上一轮流式完成后的助手内容（避免与 drain/render_block 重复）
         if let Some(assistant_content) = output.take_pending_assistant() {
             flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
@@ -649,9 +653,6 @@ pub async fn process_user_message(
         render_block_batch(&current_type_blocks, markdown_renderer)?;
         current_type_blocks.clear();
 
-        // 刷新本轮剩余的待处理 Thinking 块
-        flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
-
         // 检测上一轮操作，生成上下文状态提示
         let status = derive_thinking_status(output.last_message());
         step_round += 1;
@@ -679,6 +680,10 @@ pub async fn process_user_message(
             }
         }
     };
+
+    // 循环退出（Done/错误/中断）时，清空可能仍活跃的流式区域，
+    // 避免残留的旧流式行与下方最终状态块交错堆叠。
+    output.clear_active_stream();
 
     // Flush remaining messages
     for (level, msg) in output.drain() {
@@ -736,11 +741,10 @@ pub async fn process_user_message(
         }
     };
 
-    // 判断结果是否来自 finish 工具调用。
-    // finish 工具的结果内容以 "[finish]" 开头，且已在 step() 中作为工具结果
-    // 添加到历史（tool role），并在 drain 阶段作为 ToolResult 块渲染。
-    // 此处不应再重复添加为 assistant 消息或重复渲染。
-    let is_finish_result = result.message.starts_with("[finish]");
+    // 判断结果是否来自 finish 工具调用（结构化标记，避免字符串前缀误判）。
+    // finish 的结果已由 step() 作为工具结果添加到历史（tool role），
+    // 并在 drain 阶段作为 ToolResult 块渲染，此处不应再重复添加或渲染。
+    let is_finish_result = result.finished;
 
     if !is_finish_result {
         // 非 finish 结果：添加到对话历史中以在末尾显示，
@@ -781,8 +785,8 @@ pub async fn process_user_message(
     if let Some((prompt, completion, total)) = output.take_token_usage() {
         let msg = format!("🔤 Token 消耗: prompt={} · completion={} · total={}", prompt, completion, total);
         session_log.log_status("用量", &msg);
-        let theme = crate::ui::theme::active_theme();
-        println!("{}{}{}", theme.muted_fg, msg, crate::ui::theme::RESET);
+        let block = ui::MessageBlock::System { content: msg };
+        ui::render_block(&block, markdown_renderer)?;
     }
 
     // 持久化：记录最终助手消息（如果 step 循环中尚未记录）
@@ -1127,126 +1131,4 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
     SlashOutcome::Continue
 }
 
-// ── /grep 和 /diff 命令 ─────────────────────────────────────────────
 
-/// 在项目目录中搜索文本，返回带高亮的匹配行列表。
-///
-/// 每行格式：`文件路径:行号: 匹配内容`（匹配词用黄色反色高亮）
-fn run_grep(working_dir: &std::path::Path, pattern: &str) -> Result<Vec<String>, AppError> {
-    use std::io::BufRead;
-
-    if pattern.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let regex = regex::Regex::new(pattern).map_err(|e| {
-        AppError::Config(format!("无效的正则表达式 '{}': {}", pattern, e))
-    })?;
-
-    let mut results: Vec<String> = Vec::new();
-    let max_results = 50; // 最多显示 50 条结果
-    let max_file_size: u64 = 1024 * 1024; // 跳过大于 1MB 的文件
-
-    // 递归遍历 .rs 和 .md 以及 Cargo.toml 等文本文件
-    let entries = walkdir::WalkDir::new(working_dir)
-        .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            // 跳过 .git, target, node_modules 等目录
-            if e.file_type().is_dir() {
-                return name != ".git" && name != "target" && name != "node_modules"
-                    && name != ".kb" && name != ".mimocode";
-            }
-            true
-        })
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().is_file()
-                && e.path().extension().is_some_and(|ext| {
-                    matches!(ext.to_str(), Some("rs" | "md" | "toml" | "json" | "yaml" | "yml" | "sh" | "txt"))
-                })
-        });
-
-    for entry in entries {
-        if results.len() >= max_results {
-            break;
-        }
-
-        let path = entry.path();
-        // 跳过过大文件
-        if let Ok(meta) = std::fs::metadata(path) {
-            if meta.len() > max_file_size {
-                continue;
-            }
-        }
-
-        // 计算相对路径
-        let rel_path = path.strip_prefix(working_dir)
-            .unwrap_or(path);
-
-        let file = match std::fs::File::open(path) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-        let reader = std::io::BufReader::new(file);
-
-        for (line_num, line_result) in reader.lines().enumerate() {
-            if results.len() >= max_results {
-                break;
-            }
-            let line = match line_result {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-
-            if regex.is_match(&line) {
-                // 高亮显示匹配词：黄色反色
-                let highlighted = regex.replace_all(&line, |caps: &regex::Captures| {
-                    format!("\x1b[7;33m{}\x1b[0m", &caps[0])
-                });
-                results.push(format!(
-                    "\x1b[2m{}:{}\x1b[0m: {}",
-                    rel_path.display(),
-                    line_num + 1,
-                    highlighted
-                ));
-            }
-        }
-    }
-
-    Ok(results)
-}
-
-/// 运行 `git diff` 查看工作区改动，返回 unified diff 文本。
-///
-/// 无参数时查看全部改动；可指定一个或多个路径限制范围。
-/// 返回 `Ok(None)` 表示工作区没有未提交的改动。
-fn run_diff(working_dir: &std::path::Path, paths: &[String]) -> Result<Option<String>, AppError> {
-    let mut cmd = std::process::Command::new("git");
-    cmd.arg("diff").current_dir(working_dir);
-    for p in paths {
-        cmd.arg(p);
-    }
-    let output = cmd.output().map_err(|e| {
-        AppError::Io(std::io::Error::new(
-            e.kind(),
-            format!("git diff 执行失败: {}", e),
-        ))
-    })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Config(format!(
-            "git diff 执行失败: {}",
-            stderr.trim()
-        )));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let text = stdout.trim().to_string();
-    if text.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(text))
-    }
-}

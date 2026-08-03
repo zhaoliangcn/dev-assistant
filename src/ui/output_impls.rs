@@ -2,6 +2,10 @@ use crate::utils::message_output::MessageOutput;
 use crate::utils::message_level::MessageLevel;
 use unicode_width::UnicodeWidthStr;
 
+/// 流式助手内容的前缀（可见文本，不含 ANSI 转义）。
+/// 用于计算续行缩进与可用宽度，避免把转义序列计入宽度导致错位。
+const ASSISTANT_STREAM_PREFIX: &str = "🤖 助手: ";
+
 // ---------------------------------------------------------------------------
 // 交互模式：消息暂存到缓冲区，run() 返回后再写入 ContextManager
 // ---------------------------------------------------------------------------
@@ -51,6 +55,27 @@ impl UIMessageOutput {
     /// 由调用方在流程末尾单独渲染，避免与交互消息混在一起。
     pub fn take_token_usage(&mut self) -> Option<(usize, usize, usize)> {
         self.token_usage.take()
+    }
+
+    /// 清除当前活跃的流式内容（含其占用的所有终端行），并重置流式状态。
+    ///
+    /// 流式帧之间一旦插入其他内容（如 drain 状态块、输入面板），旧的流式行
+    /// 与新增行会交错堆叠，导致清理行数错位、内容互相覆盖。调用方应在渲染
+    /// 其他内容前先清空活跃流区域，让流式内容始终位于屏幕最底部。
+    pub fn clear_active_stream(&mut self) {
+        use std::io::Write;
+
+        if self.last_streamed_lines == 0 {
+            return;
+        }
+        let mut stdout = std::io::stdout();
+        for _ in 0..self.last_streamed_lines.saturating_sub(1) {
+            let _ = write!(stdout, "\r\x1b[2K\x1b[A");
+        }
+        let _ = write!(stdout, "\r\x1b[2K");
+        let _ = stdout.flush();
+        self.last_streamed_content.clear();
+        self.last_streamed_lines = 0;
     }
 
     /// 获取最后一条消息的内容（不消费缓冲区）。
@@ -130,9 +155,10 @@ impl MessageOutput for UIMessageOutput {
             self.last_streamed_lines = total_lines;
 
             // 渲染：第一行带前缀，后续行缩进对齐前缀宽度
+            // 注意：前缀含 ANSI 转义，缩进宽度按可见文本计算，避免错位
             let theme = crate::ui::theme::active_theme();
             let prefix = format!("{}🤖 助手:{} ", theme.tool_fg, crate::ui::theme::RESET);
-            let indent = " ".repeat(prefix.width());
+            let indent = " ".repeat(ASSISTANT_STREAM_PREFIX.width());
             
             for (i, line) in content.lines().enumerate() {
                 if i == 0 {
@@ -156,8 +182,9 @@ impl MessageOutput for UIMessageOutput {
 impl UIMessageOutput {
     /// 计算流式内容在终端上显示时占用的总行数。
     ///
-    /// 流式显示将 `\n` 替换为可见的 `\\n`（2 字符，不换行），
-    /// 因此按视觉宽度计算自动换行行数；每个实际换行符额外占一行。
+    /// 流式渲染保留真实换行：第一行带前缀，后续行以相同宽度的空格缩进对齐，
+    /// 因此每一段内容的可用宽度均为 `term_width - 前缀宽度`；
+    /// 每段内按视觉宽度估算终端自动换行产生的行数，最后一行计入末尾光标。
     fn calc_streaming_lines(&self, content: &str, term_width: usize) -> usize {
         use unicode_width::UnicodeWidthChar;
 
@@ -165,46 +192,33 @@ impl UIMessageOutput {
             return 1; // 至少保留光标行
         }
 
-        let prefix_width = "🤖 助手: ".width(); // 9
+        let prefix_width = ASSISTANT_STREAM_PREFIX.width(); // 9
         let cursor_width = " ▊".width(); // 3 (space + ▊ emoji)
+        let available = term_width.saturating_sub(prefix_width);
 
-        // 按实际换行符分段，每段独立计算换行后占用的行数
-        let segments: Vec<&str> = content.split('\n').collect();
+        // 与渲染端一致：按实际换行符分段。content.lines() 会丢弃末尾空段，
+        // 避免对结尾换行符多计一行，与渲染循环完全对齐。
+        let lines: Vec<&str> = content.lines().collect();
         let mut total: usize = 0;
 
-        for (i, segment) in segments.iter().enumerate() {
-            // 每段内容中，\n 显示为 2 字符（反斜杠 + n）
-            let visual_width: usize = segment.chars()
+        for (i, line) in lines.iter().enumerate() {
+            let visual_width: usize = line.chars()
                 .map(|c| c.width().unwrap_or(0))
                 .sum();
 
-            // 第一段接在提示符后面，后续段从行首开始
-            let available = if i == 0 {
-                term_width.saturating_sub(prefix_width)
-            } else {
-                term_width
-            };
-
             if visual_width == 0 {
-                total += 1; // 空段（来自换行符）
+                total += 1; // 空行（来自连续换行符）
             } else {
                 total += (visual_width.saturating_sub(1) / available.max(1)) + 1;
             }
-        }
 
-        // 加上末尾光标宽度可能产生的额外换行
-        let last_segment_idx = segments.len() - 1;
-        let last_seg_width: usize = segments[last_segment_idx].chars()
-            .map(|c| c.width().unwrap_or(0))
-            .sum();
-        let last_available = if segments.len() == 1 {
-            term_width.saturating_sub(prefix_width)
-        } else {
-            term_width
-        };
-        let last_total_width = last_seg_width + cursor_width;
-        if last_total_width > last_available && last_available > 0 {
-            total += 1;
+            // 最后一行末尾追加闪烁光标，若超宽则额外换行
+            if i == lines.len() - 1 {
+                let last_total_width = visual_width + cursor_width;
+                if last_total_width > available && available > 0 {
+                    total += 1;
+                }
+            }
         }
 
         total.max(1)

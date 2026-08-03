@@ -167,6 +167,9 @@ impl Cli {
         if self.no_approval {
             args.push("--no-approval".to_string());
         }
+        if self.background {
+            args.push("--background".to_string());
+        }
         if self.verbose {
             args.push("--verbose".to_string());
         }
@@ -194,6 +197,13 @@ fn main() -> Result<(), AppError> {
     dotenv::dotenv().ok();
 
     let cli = Cli::parse();
+
+    // --max-tokens 基本校验：必须为正数，避免 0 或非法值直接透传
+    if cli.max_tokens == 0 {
+        return Err(AppError::Config(
+            "--max-tokens 必须大于 0".to_string(),
+        ));
+    }
 
     // Initialize tracing subscriber — logs go to stderr so they don't
     // interfere with the split-pane UI rendered on stdout.

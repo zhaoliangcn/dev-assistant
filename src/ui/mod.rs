@@ -11,7 +11,7 @@ pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};
 pub use realtime_output::RealtimeOutput;
 
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use unicode_width::UnicodeWidthStr;
 
 // ── 新 API：块级渲染 ──────────────────────────────────────────────────
@@ -64,6 +64,11 @@ pub fn render_blocks_to_string(
         } else {
             block.content()
         };
+
+        // 空内容块跳过渲染，避免输出孤立的 ╌ 分隔线
+        if content.is_empty() {
+            continue;
+        }
 
         // 消息分隔线
         let _ = writeln!(buf);
@@ -149,21 +154,33 @@ pub(crate) enum StatusType {
 
 impl From<&str> for StatusType {
     fn from(s: &str) -> Self {
-        // 优先匹配 emoji 前缀，避免文本误匹配
-        if s.starts_with("🔧") || s.contains("工具调用") || s.contains("执行工具") {
+        // 优先按 emoji 前缀精确分类，避免文本误匹配；
+        // 关键词回退时，具体词（分析/读取/搜索）优先于宽泛词（LLM/API），
+        // 避免 "LLM 分析中" 之类消息被误分类为 WaitingLLM。
+        if s.starts_with("🔧") {
             Self::ToolCall
-        } else if s.starts_with("🤖") || s.contains("等待 LLM") || s.contains("LLM 正在思考")
-            || s.contains("发送请求") || s.contains("LLM") || s.contains("API")
-        {
-            Self::WaitingLLM
-        } else if s.starts_with("🔍") || s.contains("分析") || s.contains("检查") {
+        } else if s.starts_with("🔍") {
             Self::Analyzing
-        } else if s.starts_with("📂") || s.contains("读取文件") || s.contains("搜索")
-            || s.contains("读取") || s.contains("search")
+        } else if s.starts_with("📂") {
+            Self::Reading
+        } else if s.starts_with("🤖") {
+            Self::WaitingLLM
+        } else if s.starts_with("✅") {
+            Self::Done
+        } else if s.contains("工具调用") || s.contains("执行工具") {
+            Self::ToolCall
+        } else if s.contains("分析") || s.contains("检查") {
+            Self::Analyzing
+        } else if s.contains("读取文件") || s.contains("读取") || s.contains("搜索")
+            || s.contains("search")
         {
             Self::Reading
-        } else if s.starts_with("✅") || s.contains("完成") || s.contains("处理完成")
-            || s.contains("done") || s.contains("成功") || s.contains("success")
+        } else if s.contains("等待 LLM") || s.contains("LLM 正在思考") || s.contains("发送请求")
+            || s.contains("LLM") || s.contains("API")
+        {
+            Self::WaitingLLM
+        } else if s.contains("完成") || s.contains("处理完成") || s.contains("done")
+            || s.contains("成功") || s.contains("success")
         {
             Self::Done
         } else {
@@ -281,6 +298,12 @@ fn enhance_status(status: &str) -> String {
 /// 初始化 UI（显示标题栏 + 快捷键提示）
 pub fn init_ui() -> io::Result<()> {
     let mut stdout = io::stdout();
+
+    // 非终端（管道/重定向输出）时不打印标题栏，避免污染日志/文件输出
+    if !stdout.is_terminal() {
+        return Ok(());
+    }
+
     let term_width = get_terminal_width().unwrap_or(80);
 
     writeln!(stdout, "{}", "═".repeat(term_width))?;

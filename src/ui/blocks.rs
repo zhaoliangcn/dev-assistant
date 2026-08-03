@@ -12,8 +12,6 @@ pub enum MessageBlock {
     /// 助手消息
     Assistant {
         content: String,
-        #[allow(dead_code)]
-        is_streaming: bool,
     },
     /// 思考状态
     Thinking {
@@ -100,6 +98,19 @@ impl MessageBlock {
         }
     }
 
+    /// 获取用于渲染的前缀字符串。
+    ///
+    /// Diff 块使用 [`Self::full_prefix`](Self::full_prefix)（含文件路径），
+    /// 其他块使用 [`Self::prefix`](Self::prefix)。
+    /// 封装前缀选择逻辑，避免调用方重复判断。
+    pub fn render_prefix(&self) -> String {
+        if matches!(self, MessageBlock::Diff { .. }) {
+            self.full_prefix()
+        } else {
+            self.prefix().to_string()
+        }
+    }
+
     /// 获取块的角色标签（用于 display_messages 兼容）
     #[allow(dead_code)]
     pub fn role_label(&self) -> &'static str {
@@ -115,6 +126,23 @@ impl MessageBlock {
             MessageBlock::Error { .. } => "错误",
             MessageBlock::Diff { .. } => "修改",
             MessageBlock::Divider => "分隔线",
+        }
+    }
+
+    /// 获取块的类型标签（用于节流判断和合并）。
+    ///
+    /// 统一在此定义，避免在 `ui::mod` 和 `repl` 中重复实现。
+    pub fn block_type(&self) -> &'static str {
+        match self {
+            MessageBlock::User { .. } => "user",
+            MessageBlock::Assistant { .. } => "assistant",
+            MessageBlock::Thinking { .. } => "thinking",
+            MessageBlock::ToolCall { .. } => "tool_call",
+            MessageBlock::ToolResult { success, .. } => if *success { "tool_success" } else { "tool_error" },
+            MessageBlock::System { .. } => "system",
+            MessageBlock::Error { .. } => "error",
+            MessageBlock::Diff { .. } => "diff",
+            MessageBlock::Divider => "divider",
         }
     }
 
@@ -262,6 +290,88 @@ impl MessageBlock {
                 | MessageBlock::Diff { .. }
         )
     }
+
+    /// 生成合并计数版本：保留原块类型，在内容中追加 `(×N)` 标记。
+    ///
+    /// 用于 [`merge_consecutive_blocks`] 合并连续相同类型块时，
+    /// 避免将所有类型统一降级为 `System`，从而保留原有的颜色和图标语义。
+    pub fn with_merge_count(&self, count: usize) -> Self {
+        if count <= 1 {
+            return self.clone();
+        }
+        match self {
+            MessageBlock::User { content } => {
+                let first_line = content.lines().next().unwrap_or("");
+                let truncated = if first_line.len() > 80 {
+                    format!("{}...", &first_line[..80])
+                } else {
+                    first_line.to_string()
+                };
+                MessageBlock::User {
+                    content: format!("{} (×{})", truncated, count),
+                }
+            }
+            MessageBlock::Assistant { content } => {
+                let first_line = content.lines().next().unwrap_or("");
+                let truncated = if first_line.len() > 80 {
+                    format!("{}...", &first_line[..80])
+                } else {
+                    first_line.to_string()
+                };
+                MessageBlock::Assistant {
+                    content: format!("{} (×{})", truncated, count),
+                }
+            }
+            MessageBlock::Thinking { content } => {
+                MessageBlock::Thinking {
+                    content: format!("{} (×{})", content, count),
+                }
+            }
+            MessageBlock::ToolCall { tool_name, args } => {
+                MessageBlock::ToolCall {
+                    tool_name: format!("{} (×{})", tool_name, count),
+                    args: args.clone(),
+                }
+            }
+            MessageBlock::ToolResult { tool_name, success, content } => {
+                MessageBlock::ToolResult {
+                    tool_name: format!("{} (×{})", tool_name, count),
+                    success: *success,
+                    content: format!("{} (×{})", content, count),
+                }
+            }
+            MessageBlock::System { content } => {
+                let first_line = content.lines().next().unwrap_or("");
+                let truncated = if first_line.len() > 80 {
+                    format!("{}...", &first_line[..80])
+                } else {
+                    first_line.to_string()
+                };
+                MessageBlock::System {
+                    content: format!("{} (×{})", truncated, count),
+                }
+            }
+            MessageBlock::Error { content } => {
+                let first_line = content.lines().next().unwrap_or("");
+                let truncated = if first_line.len() > 80 {
+                    format!("{}...", &first_line[..80])
+                } else {
+                    first_line.to_string()
+                };
+                MessageBlock::Error {
+                    content: format!("{} (×{})", truncated, count),
+                }
+            }
+            MessageBlock::Diff { file_path, diff_content, summary } => {
+                MessageBlock::Diff {
+                    file_path: format!("{} (×{})", file_path, count),
+                    diff_content: diff_content.clone(),
+                    summary: summary.clone(),
+                }
+            }
+            MessageBlock::Divider => MessageBlock::Divider,
+        }
+    }
 }
 
 /// 从 (role, content) 元组构造 MessageBlock。
@@ -273,7 +383,7 @@ impl From<(&str, &str)> for MessageBlock {
         if role.starts_with("▸ 你") || role == "你" || role == "👤 你" || role == "user" {
             MessageBlock::User { content: content.to_string() }
         } else if role.starts_with("◂ 助手") || role == "助手" || role == "🤖 助手" || role == "assistant" {
-            MessageBlock::Assistant { content: content.to_string(), is_streaming: false }
+            MessageBlock::Assistant { content: content.to_string() }
         } else if role.starts_with("💭") || role == "思考" || role == "thinking" {
             MessageBlock::Thinking { content: content.to_string() }
         } else if role.starts_with("▸ 成功") || role == "成功" || role == "✅ 结果" || role == "success" {
@@ -413,5 +523,34 @@ mod tests {
         let full = block.full_prefix();
         assert!(full.contains("src/main.rs"));
         assert!(full.contains("添加新功能"));
+    }
+
+    #[test]
+    fn test_render_prefix_diff() {
+        let block = MessageBlock::Diff {
+            file_path: "src/main.rs".into(),
+            diff_content: String::new(),
+            summary: Some("新功能".into()),
+        };
+        // Diff 块应返回含文件路径的完整前缀
+        assert_eq!(block.render_prefix(), "📝 修改 src/main.rs — 新功能");
+    }
+
+    #[test]
+    fn test_render_prefix_non_diff() {
+        let block = MessageBlock::User {
+            content: "hello".into(),
+        };
+        // 非 Diff 块应返回标准前缀
+        assert_eq!(block.render_prefix(), "👤 你");
+    }
+
+    #[test]
+    fn test_block_type() {
+        assert_eq!(MessageBlock::User { content: "x".into() }.block_type(), "user");
+        assert_eq!(MessageBlock::Assistant { content: "x".into() }.block_type(), "assistant");
+        assert_eq!(MessageBlock::ToolCall { tool_name: "bash".into(), args: serde_json::json!({}) }.block_type(), "tool_call");
+        assert_eq!(MessageBlock::ToolResult { tool_name: "".into(), success: true, content: "ok".into() }.block_type(), "tool_success");
+        assert_eq!(MessageBlock::Divider.block_type(), "divider");
     }
 }

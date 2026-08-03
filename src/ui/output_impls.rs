@@ -1,5 +1,6 @@
 use crate::utils::message_output::MessageOutput;
 use crate::utils::message_level::MessageLevel;
+use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
 // 交互模式：消息暂存到缓冲区，run() 返回后再写入 ContextManager
@@ -94,17 +95,12 @@ impl MessageOutput for UIMessageOutput {
     /// 完成后（is_final=true），输出完整内容并移除闪烁光标。
     fn streaming_assistant(&mut self, content: &str, is_final: bool) {
         use std::io::Write;
-        use unicode_width::UnicodeWidthStr;
 
         let mut stdout = std::io::stdout();
         let term_width = crate::ui::get_terminal_width().unwrap_or(80);
-        // 前缀宽度按纯文本计算（不含 ANSI 色），避免换行行数误判
-        let plain_prefix = "🤖 助手: ";
-        // 换行符在流式显示中以字面 \n 呈现，因此显示占用行数只取决于宽度换行。
-        // 末尾还有 " ▊" 闪烁光标，计入宽度。
-        let visual_len = plain_prefix.width() + content.replace('\n', "\\n").width() + 2;
-        let wrap_lines = visual_len.saturating_sub(1) / term_width;
-        let total_lines = wrap_lines + 1;
+        // 流式显示时将换行符替换为可见的 "\\n"（2 字符），避免 \r 清除失效；
+        // 同时正确计算终端占用行数，处理自动换行和空行。
+        let total_lines = self.calc_streaming_lines(content, term_width);
 
         if is_final {
             // 清除上一次流式显示占用的所有行（含自动换行的残留行），再输出最终内容
@@ -140,6 +136,68 @@ impl MessageOutput for UIMessageOutput {
             let _ = write!(stdout, "{}{}", prefix, display);
             let _ = stdout.flush();
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UIMessageOutput 自有方法（非 trait 方法）
+// ---------------------------------------------------------------------------
+
+impl UIMessageOutput {
+    /// 计算流式内容在终端上显示时占用的总行数。
+    ///
+    /// 流式显示将 `\n` 替换为可见的 `\\n`（2 字符，不换行），
+    /// 因此按视觉宽度计算自动换行行数；每个实际换行符额外占一行。
+    fn calc_streaming_lines(&self, content: &str, term_width: usize) -> usize {
+        use unicode_width::UnicodeWidthChar;
+
+        if content.is_empty() {
+            return 1; // 至少保留光标行
+        }
+
+        let prefix_width = "🤖 助手: ".width(); // 9
+        let cursor_width = " ▊".width(); // 3 (space + ▊ emoji)
+
+        // 按实际换行符分段，每段独立计算换行后占用的行数
+        let segments: Vec<&str> = content.split('\n').collect();
+        let mut total: usize = 0;
+
+        for (i, segment) in segments.iter().enumerate() {
+            // 每段内容中，\n 显示为 2 字符（反斜杠 + n）
+            let visual_width: usize = segment.chars()
+                .map(|c| c.width().unwrap_or(0))
+                .sum();
+
+            // 第一段接在提示符后面，后续段从行首开始
+            let available = if i == 0 {
+                term_width.saturating_sub(prefix_width)
+            } else {
+                term_width
+            };
+
+            if visual_width == 0 {
+                total += 1; // 空段（来自换行符）
+            } else {
+                total += (visual_width.saturating_sub(1) / available.max(1)) + 1;
+            }
+        }
+
+        // 加上末尾光标宽度可能产生的额外换行
+        let last_segment_idx = segments.len() - 1;
+        let last_seg_width: usize = segments[last_segment_idx].chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum();
+        let last_available = if segments.len() == 1 {
+            term_width.saturating_sub(prefix_width)
+        } else {
+            term_width
+        };
+        let last_total_width = last_seg_width + cursor_width;
+        if last_total_width > last_available && last_available > 0 {
+            total += 1;
+        }
+
+        total.max(1)
     }
 }
 

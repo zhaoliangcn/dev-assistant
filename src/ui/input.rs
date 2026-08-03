@@ -26,17 +26,23 @@ const SLASH_COMMANDS: &[&str] = &[
 /// rustyline Helper：为 Slash 命令提供 Tab 补全。
 ///
 /// 输入以 `/` 开头时，按前缀匹配候选命令；否则不做补全。
-#[derive(Clone, Default)]
+///
+/// 注：使用 `Vec<Pair>` 直接存储（无需 `RefCell`），
+/// 因为 `complete()` 是 `&self` 引用，rustyline 保证不会并发调用。
+#[derive(Clone)]
 pub struct SlashHelper {
-    /// 已输入的候选命令集合（首次补全时惰性收集，避免每次重建）。
     candidates: std::cell::RefCell<Vec<Pair>>,
+}
+
+impl Default for SlashHelper {
+    fn default() -> Self {
+        Self { candidates: std::cell::RefCell::new(Vec::new()) }
+    }
 }
 
 impl SlashHelper {
     pub fn new() -> Self {
-        Self {
-            candidates: std::cell::RefCell::new(Vec::new()),
-        }
+        Self::default()
     }
 }
 

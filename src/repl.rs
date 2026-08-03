@@ -13,24 +13,21 @@ use crate::utils::error::AppError;
 // ── 状态指示器 ─────────────────────────────────────────────────────────
 
 /// 根据上一轮输出的最后一条消息，推导下一步的上下文状态提示。
+///
+/// 使用 [`crate::ui::StatusType`] 进行分类，确保与状态栏显示语义一致。
 fn derive_thinking_status(last_msg: Option<&str>) -> &'static str {
     let msg = match last_msg {
         Some(m) => m,
         None => return "LLM 正在思考...",
     };
 
-    if msg.contains("工具") || msg.contains("tool") || msg.contains("执行") {
-        "正在执行工具调用..."
-    } else if msg.contains("发送请求") || msg.contains("LLM") || msg.contains("API") {
-        "等待 LLM 响应..."
-    } else if msg.contains("分析") || msg.contains("检查") {
-        "正在分析代码..."
-    } else if msg.contains("读取") || msg.contains("read") || msg.contains("搜索") || msg.contains("search") {
-        "正在读取文件..."
-    } else if msg.contains("完成") || msg.contains("done") || msg.contains("成功") || msg.contains("success") {
-        "处理完成，生成回复中..."
-    } else {
-        "LLM 正在思考..."
+    match crate::ui::StatusType::from(msg) {
+        crate::ui::StatusType::ToolCall => "正在执行工具调用...",
+        crate::ui::StatusType::WaitingLLM => "等待 LLM 响应...",
+        crate::ui::StatusType::Analyzing => "正在分析代码...",
+        crate::ui::StatusType::Reading => "正在读取文件...",
+        crate::ui::StatusType::Done => "处理完成，生成回复中...",
+        crate::ui::StatusType::Other => "LLM 正在思考...",
     }
 }
 
@@ -51,33 +48,17 @@ fn merge_consecutive_blocks(blocks: &[ui::MessageBlock]) -> Vec<ui::MessageBlock
     let mut current_run: Vec<&ui::MessageBlock> = Vec::new();
 
     for block in blocks {
-        let block_type_key = message_block_type(block);
+        let block_type_key = block.block_type();
 
         if let Some(&first) = current_run.first() {
-            if message_block_type(first) == block_type_key {
+            if first.block_type() == block_type_key {
                 current_run.push(block);
                 continue;
             }
 
             // 不同类型的块：先处理当前批次
             if current_run.len() > 1 {
-                let prefix = current_run[0].prefix();
-                let content = current_run[0].content();
-                // 使用摘要作为合并后的显示内容
-                let merged_content = if content.is_empty() {
-                    format!("{} (×{})", prefix, current_run.len())
-                } else {
-                    let first_line = content.lines().next().unwrap_or("");
-                    let truncated = if first_line.len() > 80 {
-                        format!("{}...", &first_line[..80])
-                    } else {
-                        first_line.to_string()
-                    };
-                    format!("{} {} (×{})", prefix, truncated, current_run.len())
-                };
-                result.push(ui::MessageBlock::System {
-                    content: merged_content,
-                });
+                result.push(current_run[0].with_merge_count(current_run.len()));
             } else {
                 result.push((*current_run[0]).clone());
             }
@@ -89,22 +70,7 @@ fn merge_consecutive_blocks(blocks: &[ui::MessageBlock]) -> Vec<ui::MessageBlock
     // 处理最后一个批次
     if !current_run.is_empty() {
         if current_run.len() > 1 {
-            let prefix = current_run[0].prefix();
-            let content = current_run[0].content();
-            let merged_content = if content.is_empty() {
-                format!("{} (×{})", prefix, current_run.len())
-            } else {
-                let first_line = content.lines().next().unwrap_or("");
-                let truncated = if first_line.len() > 80 {
-                    format!("{}...", &first_line[..80])
-                } else {
-                    first_line.to_string()
-                };
-                format!("{} {} (×{})", prefix, truncated, current_run.len())
-            };
-            result.push(ui::MessageBlock::System {
-                content: merged_content,
-            });
+            result.push(current_run[0].with_merge_count(current_run.len()));
         } else {
             result.push((*current_run[0]).clone());
         }
@@ -112,23 +78,6 @@ fn merge_consecutive_blocks(blocks: &[ui::MessageBlock]) -> Vec<ui::MessageBlock
 
     result
 }
-
-/// 获取消息块的类型标签（用于节流判断）
-fn message_block_type(block: &ui::MessageBlock) -> &'static str {
-    match block {
-        ui::MessageBlock::User { .. } => "user",
-        ui::MessageBlock::Assistant { .. } => "assistant",
-        ui::MessageBlock::Thinking { .. } => "thinking",
-        ui::MessageBlock::ToolCall { .. } => "tool_call",
-        ui::MessageBlock::ToolResult { success, .. } => if *success { "tool_success" } else { "tool_error" },
-        ui::MessageBlock::System { .. } => "system",
-        ui::MessageBlock::Error { .. } => "error",
-        ui::MessageBlock::Diff { .. } => "diff",
-        ui::MessageBlock::Divider => "divider",
-    }
-}
-
-/// 根据消息内容将 Info 级别消息分类为具体的 MessageBlock 类型。
 ///
 /// 优先通过前导 emoji 判断，避免字符串误匹配。
 fn classify_info_message(msg: &str) -> ui::MessageBlock {
@@ -655,7 +604,7 @@ pub async fn process_user_message(
             flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
             let block = ui::MessageBlock::Assistant {
                 content: assistant_content,
-                is_streaming: false,
+                
             };
             let merged_blocks = merge_consecutive_blocks(&[block]);
             for merged in merged_blocks {
@@ -707,7 +656,7 @@ pub async fn process_user_message(
         };
 
         // 检查是否是连续相同类型的消息（50ms 内）
-        let block_type = message_block_type(&block);
+        let block_type = block.block_type();
         let now = std::time::Instant::now();
 
         match &last_block_type {
@@ -816,7 +765,7 @@ pub async fn process_user_message(
         };
 
         // 检查是否是连续相同类型的消息（50ms 内）
-        let block_type = message_block_type(&block);
+        let block_type = block.block_type();
         let now = std::time::Instant::now();
 
         match &last_block_type {
@@ -888,7 +837,7 @@ pub async fn process_user_message(
     if let Some(ref content) = last_assistant {
         let block = ui::MessageBlock::Assistant {
             content: content.clone(),
-            is_streaming: false,
+            
         };
         ui::render_block(&block, markdown_renderer)?;
     }
@@ -901,7 +850,7 @@ pub async fn process_user_message(
     {
         let result_block = ui::MessageBlock::Assistant {
             content: result.message.clone(),
-            is_streaming: false,
+            
         };
         ui::render_block(&result_block, markdown_renderer)?;
     }

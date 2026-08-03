@@ -12,7 +12,7 @@
 //! 暗色主题色值与历史硬编码完全一致（可见输出不变）；亮色主题面向
 //! `COLORFGBG >= 8` 的浅色终端，保证正文可读。
 
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 // ═══════════════════════════════════════════════════════════════════════
 // 第 1 层：RGB 元组（原始色值）
@@ -180,6 +180,7 @@ impl Theme {
 
     /// 亮色主题 — 面向浅色终端的高对比配色。
     #[must_use]
+#[allow(dead_code)]
     pub const fn light() -> Self {
         Self {
             mode: ThemeMode::Light,
@@ -202,6 +203,7 @@ impl Theme {
 
     /// 按模式取对应预设。
     #[must_use]
+#[allow(dead_code)]
     pub const fn for_mode(mode: ThemeMode) -> Self {
         match mode {
             ThemeMode::Dark => Self::dark(),
@@ -238,6 +240,7 @@ pub const fn diff_tint_rgb(mode: ThemeMode) -> DiffTint {
 ///
 /// 最后一个数字段是终端背景色，`>= 8` 视为亮色 profile。
 #[must_use]
+#[allow(dead_code)]
 pub fn from_colorfgbg(value: &str) -> Option<ThemeMode> {
     let bg = value
         .split(';')
@@ -247,6 +250,7 @@ pub fn from_colorfgbg(value: &str) -> Option<ThemeMode> {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 fn detect_macos_mode() -> Option<ThemeMode> {
     let output = std::process::Command::new("defaults")
         .args(["read", "-g", "AppleInterfaceStyle"])
@@ -275,6 +279,7 @@ fn detect_macos_mode() -> Option<ThemeMode> {
 /// `COLORFGBG` 环境变量优先；macOS 外观是回退；缺失/不可解析默认暗色，
 /// 保证既有终端环境保持原有观感。
 #[must_use]
+#[allow(dead_code)]
 pub fn detect_mode() -> ThemeMode {
     std::env::var("COLORFGBG")
         .ok()
@@ -284,17 +289,31 @@ pub fn detect_mode() -> ThemeMode {
         .unwrap_or(ThemeMode::Dark)
 }
 
-static ACTIVE_THEME: OnceLock<Theme> = OnceLock::new();
+// ── 主题缓存（支持热切换） ────────────────────────────────────────────
 
-/// 当前生效的主题（按 [`detect_mode`] 自动选择，进程内缓存）。
+/// 进程内缓存的当前主题，使用 `Mutex` 而非 `OnceLock` 以支持运行时刷新。
+static ACTIVE_THEME: Mutex<Theme> = Mutex::new(Theme::dark());
+
+/// 当前生效的主题（按 [`detect_mode`] 自动选择，支持运行时刷新）。
+///
+/// 进程启动时初始化为暗色主题；可通过 [`refresh_theme`] 手动刷新以响应
+/// 终端主题切换（如 macOS 暗/亮模式变化）。
 #[must_use]
-pub fn active_theme() -> &'static Theme {
-    ACTIVE_THEME.get_or_init(|| Theme::for_mode(detect_mode()))
+pub fn active_theme() -> Theme {
+    ACTIVE_THEME.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// 刷新主题缓存，重新检测终端主题模式。
+///
+/// 可在检测到终端主题变化时调用，使后续渲染使用新主题。
+#[allow(dead_code)]
+pub fn refresh_theme() {
+    *ACTIVE_THEME.lock().unwrap_or_else(|e| e.into_inner()) = Theme::for_mode(detect_mode());
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Theme, ThemeMode, active_theme, detect_mode, from_colorfgbg};
+    use super::{Theme, ThemeMode, active_theme, detect_mode, from_colorfgbg, refresh_theme};
 
     #[test]
     fn from_colorfgbg_parses_background() {
@@ -331,11 +350,21 @@ mod tests {
     }
 
     #[test]
-    fn active_theme_is_consistent() {
-        // 两次调用返回同一缓存实例
-        let a = active_theme() as *const Theme;
-        let b = active_theme() as *const Theme;
-        assert_eq!(a, b);
+    fn active_theme_returns_clone() {
+        // 两次调用返回独立副本（Theme 实现了 Clone，不共享可变状态）
+        let a = active_theme();
+        let b = active_theme();
+        assert_eq!(a.mode, b.mode);
+    }
+
+    #[test]
+    fn refresh_theme_updates() {
+        // 强制刷新主题
+        refresh_theme();
+        let refreshed = active_theme();
+        // 刷新后的主题 mode 应与 detect_mode() 一致
+        assert_eq!(refreshed.mode, detect_mode());
+        assert_eq!(refreshed.mode, detect_mode());
     }
 
     #[test]

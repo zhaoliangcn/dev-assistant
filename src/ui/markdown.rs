@@ -57,7 +57,7 @@ impl Default for MarkdownRenderer {
 impl MarkdownRenderer {
     pub fn new() -> Self {
         Self {
-            theme: *crate::ui::theme::active_theme(),
+            theme: crate::ui::theme::active_theme(),
         }
     }
 

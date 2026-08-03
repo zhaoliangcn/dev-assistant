@@ -12,7 +12,6 @@ pub use output_impls::{CliMessageOutput, UIMessageOutput};
 pub use realtime_output::RealtimeOutput;
 
 use std::io::{self, Write};
-use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 // ── 新 API：块级渲染 ──────────────────────────────────────────────────
@@ -30,8 +29,11 @@ use std::sync::Mutex;
 static LAST_TRUNCATED_CONTENT: Mutex<Option<String>> = Mutex::new(None);
 
 /// 获取最后一条被截断的内容（由 `/expand` 调用）。
+///
+/// 使用 `clone()` 而非 `take()`，支持多次调用 `/expand`。
+/// 新截断发生时自动覆盖旧值（见 `render_blocks_to_string`）。
 pub fn get_last_truncated_content() -> Option<String> {
-    LAST_TRUNCATED_CONTENT.lock().ok().and_then(|mut guard| guard.take())
+    LAST_TRUNCATED_CONTENT.lock().ok().and_then(|guard| guard.clone())
 }
 
 /// 将消息块渲染为字符串（纯渲染，无 IO 操作）。
@@ -52,12 +54,8 @@ pub fn render_blocks_to_string(
             continue;
         }
 
-        // Diff 块使用 full_prefix（含文件路径），其他块用 prefix
-        let prefix = if matches!(block, MessageBlock::Diff { .. }) {
-            block.full_prefix()
-        } else {
-            block.prefix().to_string()
-        };
+        // 使用 render_prefix() 统一前缀选择逻辑（Diff 含文件路径，其他用标准前缀）
+        let prefix = block.render_prefix();
         let pw = prefix_width(&prefix);
 
         // 获取内容（需要 Markdown 渲染的块先渲染）
@@ -110,7 +108,7 @@ pub fn render_blocks_to_string(
 }
 
 /// 渲染单个消息块（追加模式，不清屏）
-/// 
+///
 /// 这是新的核心渲染 API，支持流式输出，保留终端滚动历史。
 pub fn render_block(
     block: &MessageBlock,
@@ -135,61 +133,43 @@ pub fn render_blocks(
     Ok(())
 }
 
-/// 消息类型标签（用于节流判断）
-#[allow(dead_code)]
-fn message_block_type(block: &MessageBlock) -> &'static str {
-    match block {
-        MessageBlock::User { .. } => "user",
-        MessageBlock::Assistant { .. } => "assistant",
-        MessageBlock::Thinking { .. } => "thinking",
-        MessageBlock::ToolCall { .. } => "tool_call",
-        MessageBlock::ToolResult { success, .. } => if *success { "tool_success" } else { "tool_error" },
-        MessageBlock::System { .. } => "system",
-        MessageBlock::Error { .. } => "error",
-        MessageBlock::Diff { .. } => "diff",
-        MessageBlock::Divider => "divider",
-    }
+/// 状态类型枚举，用于精确分类状态消息（避免字符串 contains 误匹配）。
+///
+/// 同时用于 `enhance_status`（UI 状态栏显示）和 `derive_thinking_status`
+///（REPL 上下文提示），确保两处语义一致。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatusType {
+    ToolCall,
+    WaitingLLM,
+    Analyzing,
+    Reading,
+    Done,
+    Other,
 }
 
-/// 渲染消息块列表（节流模式：合并 50ms 内的相同类型消息）
-#[allow(dead_code)]
-pub fn render_blocks_throttled(
-    blocks: &[MessageBlock],
-    markdown_renderer: &MarkdownRenderer,
-) -> io::Result<()> {
-    let mut last_block_type: Option<(&'static str, Instant)> = None;
-    let mut batch_count: usize = 0;
-
-    for block in blocks {
-        let block_type = message_block_type(block);
-        let now = Instant::now();
-
-        let is_same_type = match &last_block_type {
-            Some((last_type, last_time)) => *last_type == block_type && now.duration_since(*last_time).as_millis() < 50,
-            None => false,
-        };
-
-        if is_same_type {
-            batch_count += 1;
-            // 更新最后时间
-            last_block_type = Some((block_type, now));
-            // 相同类型 50ms 内：跳过渲染（节流）
-            continue;
+impl From<&str> for StatusType {
+    fn from(s: &str) -> Self {
+        // 优先匹配 emoji 前缀，避免文本误匹配
+        if s.starts_with("🔧") || s.contains("工具调用") || s.contains("执行工具") {
+            Self::ToolCall
+        } else if s.starts_with("🤖") || s.contains("等待 LLM") || s.contains("LLM 正在思考")
+            || s.contains("发送请求") || s.contains("LLM") || s.contains("API")
+        {
+            Self::WaitingLLM
+        } else if s.starts_with("🔍") || s.contains("分析") || s.contains("检查") {
+            Self::Analyzing
+        } else if s.starts_with("📂") || s.contains("读取文件") || s.contains("搜索")
+            || s.contains("读取") || s.contains("search")
+        {
+            Self::Reading
+        } else if s.starts_with("✅") || s.contains("完成") || s.contains("处理完成")
+            || s.contains("done") || s.contains("成功") || s.contains("success")
+        {
+            Self::Done
+        } else {
+            Self::Other
         }
-
-        // 不同类型或超过 50ms：渲染上一个块（如果累积了多个，显示计数）
-        if batch_count > 0 {
-            // 如果累积了多个被节流的块，这里理论上可以显示计数
-            // 但实际渲染由上层（repl.rs）决定
-        }
-
-        // 渲染当前块
-        render_block(block, markdown_renderer)?;
-        last_block_type = Some((block_type, now));
-        batch_count = 0;
     }
-
-    Ok(())
 }
 
 // ── 进度条 ────────────────────────────────────────────────────────────
@@ -208,6 +188,7 @@ pub fn render_progress_bar(
     start_time: &std::time::Instant,
     status: &str,
 ) -> io::Result<()> {
+    // 每次渲染时重新检测终端宽度，响应窗口 resize
     let term_width = get_terminal_width().unwrap_or(80);
     // 进度条宽度
     let bar_width = (term_width.saturating_sub(20)).clamp(10, 60);
@@ -250,13 +231,13 @@ pub fn render_progress_bar(
 /// 无状态时仅显示 `> ` 提示符；有状态时显示 `⌛ 状态信息`。
 pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
     let mut stdout = io::stdout();
-    
+
     // 移动到行首并清除当前行
     write!(stdout, "\x1b[1G\x1b[K")?;
-    
+
     match status_line {
         Some(status) => {
-            // 增强状态栏：解析状态文本，添加更丰富的视觉样式
+            // 增强状态栏：使用枚举精确分类，避免字符串 contains 误匹配
             let enhanced = enhance_status(status);
             write!(stdout, "{}", enhanced)?;
         }
@@ -270,33 +251,30 @@ pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
             )?;
         }
     }
-    
+
     // 清除行尾残留内容
     write!(stdout, "\x1b[J")?;
     stdout.flush()?;
-    
+
     Ok(())
 }
 
 /// 增强状态栏文本，根据状态类型添加更丰富的视觉样式。
+///
+/// 使用 [`StatusType`] 枚举进行分类，优先匹配 emoji 前缀，再回退到关键词。
 fn enhance_status(status: &str) -> String {
     // 移除可能已有的 spinner 前缀
     let clean = status
         .trim_start_matches("⏳ ")
         .trim_start_matches("⌛ ");
 
-    if clean.contains("工具调用") || clean.contains("执行工具") {
-        format!("🔧 {}", clean)
-    } else if clean.contains("等待 LLM") || clean.contains("LLM 正在思考") {
-        format!("🤖 {}", clean)
-    } else if clean.contains("分析") || clean.contains("检查") {
-        format!("🔍 {}", clean)
-    } else if clean.contains("读取文件") || clean.contains("搜索") {
-        format!("📂 {}", clean)
-    } else if clean.contains("完成") || clean.contains("处理完成") {
-        format!("✅ {}", clean)
-    } else {
-        format!("⏳ {}", clean)
+    match StatusType::from(clean) {
+        StatusType::ToolCall => format!("🔧 {}", clean),
+        StatusType::WaitingLLM => format!("🤖 {}", clean),
+        StatusType::Analyzing => format!("🔍 {}", clean),
+        StatusType::Reading => format!("📂 {}", clean),
+        StatusType::Done => format!("✅ {}", clean),
+        StatusType::Other => format!("⏳ {}", clean),
     }
 }
 
@@ -304,7 +282,7 @@ fn enhance_status(status: &str) -> String {
 pub fn init_ui() -> io::Result<()> {
     let mut stdout = io::stdout();
     let term_width = get_terminal_width().unwrap_or(80);
-    
+
     writeln!(stdout, "{}", "═".repeat(term_width))?;
     writeln!(stdout, "  Dev-Assistant — 消息窗口")?;
     writeln!(stdout, "{}", "═".repeat(term_width))?;
@@ -317,12 +295,14 @@ pub fn init_ui() -> io::Result<()> {
         crate::ui::theme::RESET
     )?;
     writeln!(stdout)?;
-    
+
     stdout.flush()?;
     Ok(())
 }
 
-/// Get terminal width, returns None if unavailable
+/// Get terminal width, returns None if unavailable.
+///
+/// 跨平台统一获取：Unix 使用 ioctl，其他平台回退到 COLUMNS 环境变量。
 fn get_terminal_width() -> Option<usize> {
     #[cfg(unix)]
     {

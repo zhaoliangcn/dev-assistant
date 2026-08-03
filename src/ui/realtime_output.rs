@@ -130,7 +130,7 @@ impl MessageOutput for RealtimeOutput {
             let tag = format!("[{}]", self.agent_type);
             let block = MessageBlock::Assistant {
                 content: format!("{}📋 {} 结果:\n{}", indent, tag, content),
-                is_streaming: false,
+                
             };
             let _ = ui::render_block(&block, &self.markdown_renderer);
         }

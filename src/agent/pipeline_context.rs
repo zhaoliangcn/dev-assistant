@@ -9,17 +9,17 @@
 //! .kb/pipeline/
 //! ├── context.json                # 全局上下文索引（PipelineContext）
 //! ├── checkpoint.json             # 断点信息（用于恢复）
-//! ├── stage-0-architecture/
+//! ├── stage-0/
 //! │   └── summary.json            # 阶段上下文（StageContext）
-//! ├── stage-1-implementation/
+//! ├── stage-1/
 //! │   └── summary.json
-//! ├── stage-2-testing/
+//! ├── stage-2/
 //! │   └── summary.json
-//! ├── stage-3-review/
+//! ├── stage-3/
 //! │   └── summary.json
-//! ├── stage-4-debug/
+//! ├── stage-4/
 //! │   └── summary.json
-//! └── stage-5-recording/
+//! └── stage-5/
 //!     └── summary.json
 //! ```
 
@@ -421,7 +421,7 @@ mod tests {
         ctx.stages[0].stage_name = "架构设计".to_string();
         ctx.stages[0].status = StageStatus::Completed;
         ctx.stages[0].summary = "完成了模块划分".to_string();
-        ctx.stages[0].artifacts = vec!["pipeline/stage-0-architecture/design.md".to_string()];
+        ctx.stages[0].artifacts = vec!["pipeline/stage-0/design.md".to_string()];
 
         let prompt = ctx.build_context_prompt();
         assert!(prompt.contains("架构设计"));

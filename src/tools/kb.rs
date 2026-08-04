@@ -124,21 +124,21 @@ pub struct KbQueryResult {
 pub fn kb_store_tool() -> ToolDefinition {
     ToolDefinition {
         name: "kb_store".to_string(),
-        description: "创建或更新 KnowledgeBase 条目。用于记录架构决策、模块接口定义、问题追踪等。内容需包含 YAML frontmatter（--- 分隔）。".to_string(),
+        description: "Create or update a KnowledgeBase entry. Used for recording architecture decisions, module interface definitions, issue tracking, etc. Content must include YAML frontmatter (delimited by ---).".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "条目路径，如 'decisions/ADR-001-use-ecs.md'"
+                    "description": "Entry path relative to .kb/, e.g. 'decisions/ADR-001-use-ecs.md'"
                 },
                 "content": {
                     "type": "string",
-                    "description": "完整的 Markdown 内容（含 YAML frontmatter）"
+                    "description": "Full Markdown content (including YAML frontmatter)"
                 },
                 "update_index": {
                     "type": "boolean",
-                    "description": "是否自动更新 index.json",
+                    "description": "Whether to update index.json automatically",
                     "default": true
                 }
             },
@@ -155,33 +155,33 @@ pub fn kb_store_tool() -> ToolDefinition {
 pub fn kb_query_tool() -> ToolDefinition {
     ToolDefinition {
         name: "kb_query".to_string(),
-        description: "检索 KnowledgeBase 条目。支持按标签、类型、关键词过滤。".to_string(),
+        description: "Search KnowledgeBase entries. Supports filtering by keywords, type, and tags.".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "搜索关键词"
+                    "description": "Search keywords"
                 },
                 "type": {
                     "type": "string",
                     "enum": ["decision", "interface", "summary", "issue", "any"],
-                    "description": "条目类型过滤",
+                    "description": "Entry type filter",
                     "default": "any"
                 },
                 "tags": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "标签过滤（满足任一即匹配）"
+                    "description": "Tag filter (matches if any tag matches)"
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "最大返回结果数",
+                    "description": "Maximum number of results to return",
                     "default": 5
                 },
                 "include_content": {
                     "type": "boolean",
-                    "description": "是否包含条目内容",
+                    "description": "Whether to include entry content",
                     "default": false
                 }
             },

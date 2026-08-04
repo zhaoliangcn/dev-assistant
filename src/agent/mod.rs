@@ -533,7 +533,7 @@ impl Agent {
                      原始需求：\n\
                      {task_ref}\n\n\
                      {{context}}\n\n\
-                     请使用 kb_store 将架构决策保存到 pipeline/stage-0-architecture/ 目录下。\n\n\
+                     请使用 kb_store 将架构决策保存到 pipeline/stage-0/ 目录下。\n\n\
                      {finish}",
                     task_ref = task,
                     finish = Self::finish_warning("架构设计", "架构设计完成：模块划分、接口定义、数据流、决策理由")
@@ -550,7 +550,7 @@ impl Agent {
                      上一阶段输出（架构设计）：\n\
                      {{context}}\n\n\
                      注意：严格遵循架构设计，不擅自修改接口定义。\n\
-                     请使用 kb_store 将修改的文件列表保存到 pipeline/stage-1-implementation/ 目录下。\n\n\
+                     请使用 kb_store 将修改的文件列表保存到 pipeline/stage-1/ 目录下。\n\n\
                      {finish}",
                     task_ref = task,
                     finish = Self::finish_warning("代码实现", "代码实现完成：新增文件、关键接口、测试覆盖")
@@ -566,7 +566,7 @@ impl Agent {
                      {task_ref}\n\n\
                      上一阶段输出（代码实现）：\n\
                      {{context}}\n\n\
-                     请使用 kb_store 将测试结果保存到 pipeline/stage-2-testing/ 目录下。\n\n\
+                     请使用 kb_store 将测试结果保存到 pipeline/stage-2/ 目录下。\n\n\
                      {finish}",
                     task_ref = task,
                     finish = Self::finish_warning("测试报告", "测试完成：N 个测试用例，M 个通过，K 个失败")
@@ -582,7 +582,7 @@ impl Agent {
                      {task_ref}\n\n\
                      上一阶段输出（测试结果和代码实现）：\n\
                      {{context}}\n\n\
-                     请使用 kb_store 将审查结果保存到 pipeline/stage-3-review/ 目录下。\n\n\
+                     请使用 kb_store 将审查结果保存到 pipeline/stage-3/ 目录下。\n\n\
                      {finish}",
                     task_ref = task,
                     finish = Self::finish_warning("审查报告", "审查完成：发现 N 个问题，其中严重 X 个，建议 Y 项")
@@ -599,7 +599,7 @@ impl Agent {
                      上一阶段输出（审查报告）：\n\
                      {{context}}\n\n\
                      注意：只修复审查中提出的问题，不要引入新的功能变更。\n\
-                     请使用 kb_store 将修复记录保存到 pipeline/stage-4-debug/ 目录下。\n\n\
+                     请使用 kb_store 将修复记录保存到 pipeline/stage-4/ 目录下。\n\n\
                      {finish}",
                     task_ref = task,
                     finish = Self::finish_warning("修复", "修复完成：处理 N 个问题，编译通过")
@@ -615,7 +615,7 @@ impl Agent {
                      {task_ref}\n\n\
                      已完成的工作：\n\
                      {{context}}\n\n\
-                     请使用 kb_store 记录到 pipeline/stage-5-recording/ 目录下：\n\
+                     请使用 kb_store 记录到 pipeline/stage-5/ 目录下：\n\
                      1. 完成的功能列表\n\
                      2. 修改的文件清单\n\
                      3. 测试结果概要\n\
@@ -749,9 +749,8 @@ impl Agent {
                     if let Ok(files) = detect_modified_files(&self.working_dir()) {
                         stage_ctx.modified_files = files;
                     }
-                    // 记录产物引用
-                    let artifact_dir = format!("pipeline/stage-{}-{}", stage_idx, stage.name.replace(' ', "-").to_lowercase());
-                    stage_ctx.artifacts.push(artifact_dir);
+                    // 记录产物引用（与阶段模板中指示 LLM 保存的目录保持一致）
+                    stage_ctx.artifacts.push(format!("pipeline/stage-{}", stage_idx));
 
                     // 保存阶段上下文到文件
                     let _ = pipeline_store.save_stage_context(stage_ctx);

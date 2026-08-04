@@ -48,7 +48,7 @@ pub fn build_system_prompt(skills: &[Skill]) -> String {
 
 - **spawn_subagent**：创建子代理执行独立子任务。适用于：文件搜索分析、并行研究、复杂任务分解。可选 `agent_type`：{agent_types}。子代理有深度限制（最多 {max_depth} 层），不要创建子代理的子代理
   示例：`spawn_subagent(task="分析 src/main.rs 的代码结构", agent_type="architect")`
-- **exec_command**：直接执行程序，`command` 为可执行文件名，`args` 为参数列表（如 `command="cargo", args=["build"]`）。**不支持** shell 语法（管道 `|`、重定向 `>`、`&&`、`||` 等），也不支持 `sh -c`。每个调用只能执行一个命令
+- **exec_command**：直接执行程序，`command` 为可执行文件名，`args` 为参数列表（如 `command="cargo", args=["build"]`）。不经过 shell，管道 `|`、重定向 `>`、`&&`、`||` 等语法不能直接作为参数；如需 shell 特性，可用 `command="sh", args=["-c", "..."]`（内容仍会经过安全扫描）
 - **restart**：修改 Rust 源代码后调用 `restart` 自动编译验证。调用后进程会重启并自动恢复对话，**重启后不要再调用 restart**
 - **edit_file**：编辑现有文件，需要提供 `old_content`（文件中准确的旧内容）和 `new_content`
 - **kb_store / kb_query**：KnowledgeBase 系统用于跨子代理共享架构决策、接口定义、问题追踪。开始新任务前先 `kb_query` 了解已有信息

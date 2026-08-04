@@ -8,13 +8,13 @@ const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 pub fn finish_tool() -> ToolDefinition {
     ToolDefinition {
         name: "finish".to_string(),
-        description: "Finish the task and provide a summary".to_string(),
+        description: "Finish the task and provide a structured summary. Include: what was accomplished, key findings/decisions, modified files (if any), and unresolved issues (if any). Use this when the task is complete — do not just output text.".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "Task completion summary"
+                    "description": "Structured completion summary: accomplishments, key findings/decisions, modified files, unresolved issues"
                 }
             },
             "required": ["summary"]

@@ -13,8 +13,10 @@ pub mod io;
 pub mod read;
 pub mod read_shared;
 pub mod search;
+pub mod symbol;
 pub mod write;
 
 pub use read::{batch_read_files_tool, read_file_tool};
 pub use search::{file_exists_tool, glob_tool, list_directory_tool};
+pub use symbol::read_symbol_tool;
 pub use write::{edit_file_tool, write_file_tool};

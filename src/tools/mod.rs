@@ -155,6 +155,7 @@ impl ToolRegistry {
     fn register_builtin_tools(&mut self) {
         self.register_tools_by_names(&[
             "read_file", "batch_read_files", "write_file", "edit_file",
+            "read_symbol",
             "glob", "list_directory", "file_exists", "exec_command",
             "finish", "restart", "spawn_subagent",
             "kb_store", "kb_query",
@@ -178,6 +179,7 @@ impl ToolRegistry {
     fn create_tool_by_name(&self, name: &str) -> Option<ToolDefinition> {
         match name {
             "read_file" => Some(file::read_file_tool()),
+            "read_symbol" => Some(file::read_symbol_tool()),
             "batch_read_files" => Some(file::batch_read_files_tool()),
             "write_file" => Some(file::write_file_tool()),
             "edit_file" => Some(file::edit_file_tool()),

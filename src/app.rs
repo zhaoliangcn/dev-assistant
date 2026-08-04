@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::agent::{Agent, AgentConfig, ContextManager};
 use crate::config::{load_agent_config, load_models};
+use crate::hooks::HookManager;
 use crate::llm::LlmClient;
 use crate::orchestrator::{TaskOrchestrator, BackgroundConfig};
 use crate::persist::SessionStore;
@@ -31,6 +32,8 @@ pub struct AppConfig {
     pub model: Option<String>,
     pub message: Option<String>,
     pub resume: bool,
+    /// 是否启用 hook 机制（--no-hooks 时关闭）
+    pub hooks_enabled: bool,
     /// 后台模式：长时间运行任务
     pub background: bool,
     /// 传给 restart 子进程的 CLI 参数列表（不含 argv[0]）
@@ -119,12 +122,25 @@ impl App {
         // 构建 system prompt
         let system_prompt = build_system_prompt(&discovered_skills);
 
+        // 初始化 HookManager 并执行 session-start hooks
+        let hook_manager = HookManager::load(&config.working_dir, config.hooks_enabled);
+        let hook_output = hook_manager.execute_session_start();
+
         // 创建或恢复 ContextManager
-        let context = if config.resume {
+        let mut context = if config.resume {
             Self::load_state_or_fresh(&config, &system_prompt)
         } else {
             ContextManager::new(system_prompt.clone(), config.max_tokens)
         };
+        // 将 hook 输出作为独立的 system 消息注入（紧跟在系统提示词之后）
+        if !hook_output.is_empty() {
+            context.add_message(
+                crate::agent::context::Role::System,
+                hook_output,
+                None,
+                None,
+            );
+        }
 
         let env_config = load_agent_config();
         let max_iterations: usize = if config.max_iterations > 0 {

@@ -14,6 +14,7 @@
 mod agent;
 mod app;
 mod config;
+mod hooks;
 mod llm;
 mod orchestrator;
 mod persist;
@@ -107,6 +108,10 @@ struct Cli {
     #[arg(long)]
     no_approval: bool,
 
+    /// 禁用 hook 机制（session-start hook 不会执行）
+    #[arg(long)]
+    no_hooks: bool,
+
     /// 启用详细日志输出
     #[arg(long)]
     verbose: bool,
@@ -166,6 +171,9 @@ impl Cli {
         }
         if self.no_approval {
             args.push("--no-approval".to_string());
+        }
+        if self.no_hooks {
+            args.push("--no-hooks".to_string());
         }
         if self.background {
             args.push("--background".to_string());
@@ -234,6 +242,7 @@ fn main() -> Result<(), AppError> {
         max_iterations: cli.max_iterations.unwrap_or(15),
         max_tokens: cli.max_tokens,
         no_approval: cli.no_approval,
+        hooks_enabled: !cli.no_hooks,
         provider: cli.provider.clone(),
         model: cli.model.clone(),
         message: cli.message,

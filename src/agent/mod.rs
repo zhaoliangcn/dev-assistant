@@ -191,6 +191,7 @@ impl Agent {
     // ----- 活跃模型管理 -----
 
     /// 设置当前活跃模型名称（用于切换模型后持久化）。
+    #[allow(dead_code)]
     pub fn set_active_model(&mut self, name: String) {
         self.context.active_model = Some(name);
     }

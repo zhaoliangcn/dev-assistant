@@ -36,6 +36,30 @@ impl AgentIdentity {
         }
     }
 
+    /// 身份的中文显示名（与 `to_str` 一一对应）。
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Architect => "架构师",
+            Self::Implementer => "实现者",
+            Self::Reviewer => "审查员",
+            Self::Tester => "测试员",
+            Self::Debugger => "调试专家",
+            Self::General => "通用代理",
+        }
+    }
+
+    /// 全部身份，按固定顺序排列（用于提示词中的 `agent_type` 列表等）。
+    pub fn all() -> [Self; 6] {
+        [
+            Self::Architect,
+            Self::Implementer,
+            Self::Reviewer,
+            Self::Tester,
+            Self::Debugger,
+            Self::General,
+        ]
+    }
+
     /// 工具使用优先级说明（各身份通用）
     fn tool_usage_guide() -> &'static str {
         "工具使用优先级：
@@ -54,6 +78,50 @@ impl AgentIdentity {
 - 如遇到未解决的问题，在 summary 末尾说明"
     }
 
+    /// 终止规则说明（各身份通用，防止死循环）
+    fn guard_guide() -> &'static str {
+        "终止规则（防止死循环）：
+- 批量读取：一次读完所需文件，不要分批反复读取
+- 已读不重读：已读过的文件不要重复读取
+- 不写中间文件：结果直接通过 finish 输出，不要写入报告文件
+- 完成即结束：工作完成后立即调用 finish，不要继续寻找新任务"
+    }
+
+    /// 提示词中工具的固定展示顺序（阅读友好，`finish` 保持在末尾）。
+    fn tool_display_order() -> &'static [&'static str] {
+        &[
+            "read_file",
+            "batch_read_files",
+            "write_file",
+            "edit_file",
+            "exec_command",
+            "glob",
+            "list_directory",
+            "file_exists",
+            "kb_store",
+            "kb_query",
+            "finish",
+        ]
+    }
+
+    /// 从 `default_tools()` 生成工具列表字符串（单一数据源，与工具注册保持一致）。
+    fn tool_list(&self) -> String {
+        let tools = self.default_tools();
+        let mut extra: Vec<&str> = tools
+            .iter()
+            .map(String::as_str)
+            .filter(|t| !Self::tool_display_order().contains(t))
+            .collect();
+        extra.sort_unstable();
+        Self::tool_display_order()
+            .iter()
+            .copied()
+            .filter(|t| tools.contains(*t))
+            .chain(extra)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     pub fn system_prompt(&self) -> String {
         let base = match self {
             Self::Architect => {
@@ -65,18 +133,14 @@ impl AgentIdentity {
 - 制定技术选型和设计决策
 - 识别潜在的风险和优化机会
 
-可用工具：
-- read_file, batch_read_files, write_file, glob, list_directory, file_exists, exec_command, kb_store, kb_query, finish
-
 工作方式：
 1. 分析需求和约束，识别关键质量属性（可扩展性、可维护性、性能、安全性）
 2. 考虑架构风格（分层架构、模块化、事件驱动等），选择适合的方案
 3. 设计模块结构和接口定义，关注高内聚低耦合
 4. 使用 kb_store 记录架构决策，使用 kb_query 了解已有约束
 5. 为实现者提供清晰的规范和指导
-6. 所有工作完成后，调用 finish 提交设计方案
 
-输出格式（通过 finish 的 summary 提交）：
+输出内容：
 - 架构图（文本描述，如模块树形图或 ASCII 图）
 - 模块列表和职责说明
 - 接口定义（输入输出）
@@ -95,18 +159,14 @@ impl AgentIdentity {
 - 遵循编码规范和最佳实践
 - 完成后进行基础测试验证
 
-可用工具：
-- read_file, batch_read_files, write_file, edit_file, exec_command, glob, list_directory, file_exists, kb_store, kb_query, finish
-
 工作方式：
 1. 先使用 kb_query 查询已有设计文档和接口定义
 2. 使用 batch_read_files 了解现有代码风格和模式
 3. 实现功能代码，关注防御性编程和错误处理
 4. 编写单元测试，覆盖正常路径、边界条件和异常场景
 5. 使用 kb_store 记录修改的文件列表和实现进展
-6. 所有工作完成后，调用 finish 提交实现成果
 
-输出格式（通过 finish 的 summary 提交）：
+输出内容：
 - 修改的文件列表
 - 关键代码片段说明
 - 测试结果
@@ -124,10 +184,7 @@ impl AgentIdentity {
 - 识别潜在的 bug 和性能问题
 - 提供可操作的改进建议
 
-可用工具：
-- read_file, batch_read_files, exec_command, glob, list_directory, file_exists, kb_store, kb_query, finish
-
-工作方式（一次通过，不要循环）：
+工作方式：
 1. 使用 batch_read_files 一次性批量读取所有相关文件
 2. 审查以下维度：
    - 安全性：路径遍历、命令注入、SQL 注入、敏感信息泄露等（参考 OWASP Top 10）
@@ -137,21 +194,13 @@ impl AgentIdentity {
    - 性能：不必要的分配、循环效率、缓存使用
    - API 设计：接口一致性、向后兼容性
 3. 汇总所有发现的问题，按严重程度分级（Critical/High/Medium/Low）
-4. 调用 finish 输出审查报告
 
-⚠️ 终止规则（防止死循环）：
-- 一次读完，一次审完：batch_read 一次性读取所有文件，不要分批
-- 不要反复读取文件：已读过的文件不重复读取
-- 不要保存中间文件：审查结果直接通过 finish 输出，不要写入 review-report.md 等文件
-- 不要反复编辑保存：不要多次调用 kb_store 或 write_file
-- 审查完成立即结束：所有文件审查完毕后立即调用 finish，不要继续寻找新文件
-
-输出格式（通过 finish 的 summary 提交）：
+输出内容：
 - 问题清单（严重程度：Critical/High/Medium/Low）
 - 改进建议（含代码片段）
 - 审查总结（整体质量评估）
 
-注意：保持客观中立，提供可操作的建议。一次审查，一次输出，立即结束。"#
+注意：保持客观中立，提供可操作的建议。"#
                     .to_string()
             }
             Self::Tester => {
@@ -163,9 +212,6 @@ impl AgentIdentity {
 - 报告测试覆盖率和问题
 - 确保代码质量符合标准
 
-可用工具：
-- read_file, batch_read_files, write_file, edit_file, exec_command, glob, list_directory, file_exists, kb_store, kb_query, finish
-
 工作方式：
 1. 先使用 kb_query 查询已有接口定义和实现代码
 2. 设计测试策略：单元测试、集成测试
@@ -176,9 +222,8 @@ impl AgentIdentity {
 4. 编写测试用例并运行
 5. 分析测试结果，识别失败原因
 6. 使用 kb_store 记录测试结果
-7. 所有工作完成后，调用 finish 提交测试报告
 
-输出格式（通过 finish 的 summary 提交）：
+输出内容：
 - 测试用例列表（含测试目标）
 - 测试结果摘要（通过/失败/跳过）
 - 问题清单（bug 报告，含重现步骤）
@@ -196,9 +241,6 @@ impl AgentIdentity {
 - 提供修复方案
 - 验证修复效果
 
-可用工具：
-- read_file, batch_read_files, write_file, edit_file, exec_command, glob, list_directory, file_exists, kb_store, kb_query, finish
-
 工作方式：
 1. 分析错误信息和堆栈跟踪，理解错误类型
 2. 定位问题代码位置：
@@ -208,10 +250,8 @@ impl AgentIdentity {
 3. 设计修复方案，考虑最小改动原则
 4. 实施修复并验证（编译+测试）
 5. 使用 kb_store 记录问题和解决方案
-6. 记录修改的文件列表
-7. 所有工作完成后，调用 finish 提交修复结果
 
-输出格式（通过 finish 的 summary 提交）：
+输出内容：
 - 问题分析（根因）
 - 修复方案
 - 修改的文件和代码
@@ -223,43 +263,24 @@ impl AgentIdentity {
             Self::General => {
                 r#"你是一个子代理。你的职责是完成父代理分配的任务。
 
-可用工具：
-- read_file, batch_read_files, write_file, edit_file, exec_command, glob, list_directory, file_exists, kb_store, kb_query, finish
-
 工作方式：
 1. 明确理解任务目标，如有疑问基于已有信息做出合理判断
-2. 先使用 kb_query 查询 KnowledgeBase 了解已有决策和上下文
-3. 制定执行计划，按步骤推进，使用可用工具完成任务
-4. 遇到工具失败时：① 阅读错误信息 ② 判断是临时错误还是永久错误 ③ 临时错误可重试 1-2 次 ④ 永久错误则换方法，并在 finish summary 中说明
-5. 所有工作完成后，调用 finish 提交结果
-
-输出要求（通过 finish 的 summary 提交）：
-- 必须包含：① 完成了什么 ② 关键发现/结果 ③ 遇到的问题（如有）
-- 保持结构化，父代理可直接读取使用
-- 不要保存中间文件，直接通过 finish 输出
-- 重要信息写入 summary 返回给父代理
-
-规则：
-1. 专注完成分配的任务，不要偏离范围
-2. 完成后必须使用 finish 工具结束，不要仅输出文本
-3. 不要调用 spawn_subagent（它不可用）
-4. 不要调用 restart（它不可用）
-5. 不要写入 review-report.md 等中间报告文件，直接通过 finish 输出"#
+2. 制定执行计划，按步骤推进，使用可用工具完成任务
+3. 遇到工具失败时：① 阅读错误信息 ② 判断是临时错误还是永久错误 ③ 临时错误可重试 1-2 次 ④ 永久错误则换方法，并在 finish summary 中说明
+4. 专注完成分配的任务，不要偏离范围"#
                     .to_string()
             }
         };
 
-        // 为所有身份添加统一的工具优先级和输出规范
-        // （General 和 Reviewer 已包含同类内容，不再重复）
-        match self {
-            Self::General | Self::Reviewer => base,
-            _ => format!(
-                "{}\n\n{}\n\n{}",
-                base,
-                Self::tool_usage_guide(),
-                Self::output_guide()
-            ),
-        }
+        // 为所有身份统一附加：工具列表（从 default_tools 生成）、工具使用优先级、输出规范、防死循环终止规则
+        format!(
+            "{}\n\n可用工具：\n- {}\n\n{}\n\n{}\n\n{}",
+            base,
+            self.tool_list(),
+            Self::tool_usage_guide(),
+            Self::output_guide(),
+            Self::guard_guide()
+        )
     }
 
     pub fn default_tools(&self) -> HashSet<String> {
@@ -476,5 +497,89 @@ mod tests {
         let tools = AgentIdentity::General.default_tools();
         assert!(tools.contains("kb_store"), "General should have kb_store");
         assert!(tools.contains("kb_query"), "General should have kb_query");
+    }
+
+    #[test]
+    fn tool_list_matches_default_tools() {
+        for identity in [
+            AgentIdentity::Architect,
+            AgentIdentity::Implementer,
+            AgentIdentity::Reviewer,
+            AgentIdentity::Tester,
+            AgentIdentity::Debugger,
+            AgentIdentity::General,
+        ] {
+            let tool_list = identity.tool_list();
+            let list: std::collections::HashSet<&str> = tool_list.split(", ").collect();
+            let default_tools = identity.default_tools();
+            let expected: std::collections::HashSet<&str> =
+                default_tools.iter().map(String::as_str).collect();
+            assert_eq!(
+                list, expected,
+                "{} tool_list diverges from default_tools",
+                identity.to_str()
+            );
+        }
+    }
+
+    #[test]
+    fn tool_list_is_deterministic_and_finish_last() {
+        for identity in [
+            AgentIdentity::Architect,
+            AgentIdentity::Implementer,
+            AgentIdentity::Reviewer,
+            AgentIdentity::Tester,
+            AgentIdentity::Debugger,
+            AgentIdentity::General,
+        ] {
+            let first = identity.tool_list();
+            let second = identity.tool_list();
+            assert_eq!(first, second, "{} tool_list is not deterministic", identity.to_str());
+            assert!(
+                first.trim_end().ends_with("finish"),
+                "{} tool_list should end with finish: {}",
+                identity.to_str(),
+                first
+            );
+        }
+    }
+
+    #[test]
+    fn system_prompt_includes_guard_guide_for_all() {
+        for identity in [
+            AgentIdentity::Architect,
+            AgentIdentity::Implementer,
+            AgentIdentity::Reviewer,
+            AgentIdentity::Tester,
+            AgentIdentity::Debugger,
+            AgentIdentity::General,
+        ] {
+            let prompt = identity.system_prompt();
+            assert!(prompt.contains("终止规则"), "{} missing guard guide", identity.to_str());
+            assert!(
+                prompt.contains("不要写入报告文件"),
+                "{} missing no-report-file rule",
+                identity.to_str()
+            );
+        }
+    }
+
+    #[test]
+    fn system_prompt_tool_section_matches_default_tools() {
+        for identity in [
+            AgentIdentity::Architect,
+            AgentIdentity::Implementer,
+            AgentIdentity::Reviewer,
+            AgentIdentity::Tester,
+            AgentIdentity::Debugger,
+            AgentIdentity::General,
+        ] {
+            let prompt = identity.system_prompt();
+            assert!(
+                prompt.contains(&format!("可用工具：\n- {}", identity.tool_list())),
+                "{} prompt tool section mismatch",
+                identity.to_str()
+            );
+        }
     }
 }

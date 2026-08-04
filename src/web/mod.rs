@@ -177,10 +177,9 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
     async_tools.register_tool(Arc::new(crate::tools::file::async_write::AsyncEditFileTool));
 
     // ── 系统提示词 ──
-    let tool_schemas = tools.get_tool_schemas();
     let skills_dir = default_skills_dir(&config.working_dir);
     let discovered_skills = discover_skills(&skills_dir).unwrap_or_default();
-    let system_prompt = build_system_prompt(&tool_schemas, &discovered_skills);
+    let system_prompt = build_system_prompt(&discovered_skills);
 
     // ── Agent 配置 ──
     let env_config = load_agent_config();

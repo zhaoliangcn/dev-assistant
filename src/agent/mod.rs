@@ -24,7 +24,7 @@ use crate::utils::error::AppError;
 use tracing::{debug, info, warn};
 
 /// 最大子代理深度。超过此深度时，返回 `SubagentDepthLimit` 错误。
-const MAX_SUBAGENT_DEPTH: usize = 3;
+pub(crate) const MAX_SUBAGENT_DEPTH: usize = 3;
 
 // ---------------------------------------------------------------------------
 // 子代理配置

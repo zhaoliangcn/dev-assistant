@@ -117,8 +117,7 @@ impl App {
         let discovered_skills = discover_all_skills(&config.working_dir).unwrap_or_default();
 
         // 构建 system prompt
-        let tool_schemas = tools.get_tool_schemas();
-        let system_prompt = build_system_prompt(&tool_schemas, &discovered_skills);
+        let system_prompt = build_system_prompt(&discovered_skills);
 
         // 创建或恢复 ContextManager
         let context = if config.resume {

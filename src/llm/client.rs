@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::pin::Pin;
 use futures::Stream;
@@ -25,13 +25,13 @@ const MAX_DELAY: Duration = Duration::from_secs(120);
 
 /// 多 provider 容器，支持运行时切换模型。
 ///
-/// `active_idx` 使用 `Mutex` 内部可变性，使得 `&self` 即可切换模型。
-/// 这允许通过 `Arc<LlmClient>` 在多个子 Agent 间共享同一个 LLM 客户端。
+/// `active_idx` 使用 `AtomicUsize`，无锁且无中毒风险，
+/// 使得 `&self` 即可切换模型，支持 `Arc<LlmClient>` 在多子 Agent 间安全共享。
 pub struct LlmClient {
     http_client: Client,
     providers: Vec<Box<dyn LlmProvider>>,
     provider_configs: Vec<ProviderConfig>,
-    active_idx: Mutex<usize>,
+    active_idx: AtomicUsize,
 }
 
 impl LlmClient {
@@ -59,7 +59,7 @@ impl LlmClient {
             http_client,
             providers,
             provider_configs,
-            active_idx: Mutex::new(0),
+            active_idx: AtomicUsize::new(0),
         })
     }
 
@@ -85,13 +85,13 @@ impl LlmClient {
             .iter()
             .position(|c| c.name == name)
             .ok_or_else(|| AppError::Config(format!("Unknown model: '{}'", name)))?;
-        *self.active_idx.lock().unwrap() = idx;
+        self.active_idx.store(idx, Ordering::SeqCst);
         Ok(())
     }
 
     /// 当前活跃模型名称
     pub fn active_model(&self) -> &str {
-        let idx = *self.active_idx.lock().unwrap();
+        let idx = self.active_idx.load(Ordering::SeqCst);
         &self.provider_configs[idx].name
     }
 
@@ -102,7 +102,7 @@ impl LlmClient {
 
     /// 列出所有可用模型详情：(名称, provider, 是否当前激活)
     pub fn list_model_info(&self) -> Vec<(String, String, bool)> {
-        let active_idx = *self.active_idx.lock().unwrap();
+        let active_idx = self.active_idx.load(Ordering::SeqCst);
         self.provider_configs
             .iter()
             .enumerate()
@@ -116,7 +116,7 @@ impl LlmClient {
         messages: Vec<LlmMessage>,
         tools: Vec<ToolSchema>,
     ) -> Result<LlmResponse, AppError> {
-        let start_idx = *self.active_idx.lock().unwrap();
+        let start_idx = self.active_idx.load(Ordering::SeqCst);
         let total_providers = self.providers.len();
         let mut last_error: Option<AppError> = None;
 
@@ -135,7 +135,7 @@ impl LlmClient {
                     cfg.name,
                 );
                 // 更新活跃索引以便后续调用使用新 provider
-                *self.active_idx.lock().unwrap() = idx;
+                self.active_idx.store(idx, Ordering::SeqCst);
             }
 
             debug!(model = %cfg.name, provider = %cfg.provider, "Calling LLM API");
@@ -231,7 +231,7 @@ impl LlmClient {
         messages: Vec<LlmMessage>,
         tools: Vec<ToolSchema>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<LlmStreamEvent, AppError>> + Send>>, AppError> {
-        let start_idx = *self.active_idx.lock().unwrap();
+        let start_idx = self.active_idx.load(Ordering::SeqCst);
         let total_providers = self.providers.len();
         let mut last_error: Option<AppError> = None;
 
@@ -250,7 +250,7 @@ impl LlmClient {
                     cfg.name,
                 );
                 // 更新活跃索引以便后续调用使用新 provider
-                *self.active_idx.lock().unwrap() = idx;
+                self.active_idx.store(idx, Ordering::SeqCst);
             }
 
             debug!(model = %cfg.name, provider = %cfg.provider, "Calling LLM API (streaming)");

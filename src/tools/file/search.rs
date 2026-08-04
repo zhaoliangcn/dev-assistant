@@ -83,15 +83,20 @@ fn glob_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, Ap
     };
 
     let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let mut skipped_dirs = 0usize;
+    let mut filtered_gitignore = 0usize;
+
     for entry in WalkDir::new(&context.working_dir)
         .into_iter()
         .filter_map(|e| e.ok())
     {
-        // Skip common large directories and hidden directories
         let entry_path = entry.path();
+
+        // Skip common large directories and hidden directories
         if entry_path.is_dir() {
             if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
                 if SKIP_DIRS.contains(&name) || name.starts_with('.') {
+                    skipped_dirs += 1;
                     continue;
                 }
             }
@@ -99,11 +104,13 @@ fn glob_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, Ap
 
         // 检查 gitignore
         if common::check_gitignore(entry_path, &context.resources).is_some() {
+            filtered_gitignore += 1;
             continue;
         }
 
-        if glob_set.is_match(entry.path()) {
-            if let Ok(relative) = entry.path().strip_prefix(&context.working_dir) {
+        // 使用相对路径匹配 glob（与 batch_read_files 的 resolve_glob_patterns 一致）
+        if let Ok(relative) = entry_path.strip_prefix(&context.working_dir) {
+            if glob_set.is_match(relative) {
                 files.push(relative.to_path_buf());
             }
         }
@@ -117,18 +124,29 @@ fn glob_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, Ap
         .collect();
 
     let max_display = 50;
+    let stats = if filtered_gitignore > 0 || skipped_dirs > 0 {
+        format!(
+            " (已跳过 {} 个目录, 已过滤 {} 个 gitignore 文件)",
+            skipped_dirs, filtered_gitignore
+        )
+    } else {
+        String::new()
+    };
+
     let truncated = if file_list.len() > max_display {
         let display_list: Vec<String> = file_list.iter().take(max_display).cloned().collect();
         format!(
-            "[glob] Found {} files (showing first {}):\n{}",
+            "[glob] Found {} files (showing first {}){}:\n{}",
             file_list.len(),
             max_display,
+            stats,
             display_list.join("\n")
         )
     } else {
         format!(
-            "[glob] Found {} files:\n{}",
+            "[glob] Found {} files{}:\n{}",
             file_list.len(),
+            stats,
             file_list.join("\n")
         )
     };
@@ -137,7 +155,7 @@ fn glob_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, Ap
         success: true,
         security_evaluation: None,
         restart_requested: false,
-                error_category: None,
+        error_category: None,
         content: truncated,
     })
 }

@@ -67,7 +67,12 @@ fn write_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResu
     let full_path = common::resolve_model_path(&context.working_dir, file_path);
     debug!(file = %file_path, path = %full_path.display(), content_len = content.len(), "write_file");
     match write_file_content(&full_path, content) {
-        Ok(_) => {}
+        Ok(_) => {
+            // 写入后使缓存失效，确保下次读取看到最新内容
+            if let Some(ref cache) = context.cache {
+                cache.invalidate(&full_path);
+            }
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ToolResult {
                 success: false,
@@ -130,8 +135,6 @@ fn fuzzy_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(pos) = haystack.find(&needle_dedented) {
-                // 计算原始 needle 在 haystack 中的实际匹配长度
-                // 从匹配位置开始，跳过前导空白，然后计算到 needle 末尾的长度
                 let haystack_from_pos = &haystack[pos..];
                 let leading_spaces = haystack_from_pos.chars().take_while(|c| *c == ' ' || *c == '\t').count();
                 let actual_match_len = leading_spaces + needle_dedented.len();
@@ -156,37 +159,43 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
 
     let full_path = common::resolve_model_path(&context.working_dir, file_path);
     debug!(file = %file_path, path = %full_path.display(), "edit_file");
-    let content = match read_file_content(&full_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ToolResult {
-                success: false,
-                security_evaluation: None,
-                restart_requested: false,
-                error_category: None,
-                content: format!(
-                    "[edit_file] ❌ File not found: {}\n\
-                     The file does not exist at this path. You may want to:\n\
-                     1. Use glob to find the correct file path\n\
-                     2. Use write_file instead to create a new file",
-                    file_path
-                ),
-            });
+
+    // 先查缓存，避免重复读取
+    let content: String = if let Some(cached) = context.cache.as_ref().and_then(|c| c.read(&full_path)) {
+        cached
+    } else {
+        match read_file_content(&full_path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ToolResult {
+                    success: false,
+                    security_evaluation: None,
+                    restart_requested: false,
+                    error_category: None,
+                    content: format!(
+                        "[edit_file] ❌ File not found: {}\n\
+                         The file does not exist at this path. You may want to:\n\
+                         1. Use glob to find the correct file path\n\
+                         2. Use write_file instead to create a new file",
+                        file_path
+                    ),
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Ok(ToolResult {
+                    success: false,
+                    security_evaluation: None,
+                    restart_requested: false,
+                    error_category: None,
+                    content: format!(
+                        "[edit_file] ❌ Permission denied: {}\n\
+                         The file exists but you don't have write access.",
+                        file_path
+                    ),
+                });
+            }
+            Err(e) => return Err(AppError::Io(e)),
         }
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            return Ok(ToolResult {
-                success: false,
-                security_evaluation: None,
-                restart_requested: false,
-                error_category: None,
-                content: format!(
-                    "[edit_file] ❌ Permission denied: {}\n\
-                     The file exists but you don't have write access.",
-                    file_path
-                ),
-            });
-        }
-        Err(e) => return Err(AppError::Io(e)),
     };
 
     let match_result = fuzzy_find(&content, old_content);
@@ -223,6 +232,11 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
     let result = format!("{}{}{}", before, new_content, after);
     write_file_content(&full_path, &result)?;
 
+    // 写入后使缓存失效，确保下次读取看到最新内容
+    if let Some(ref cache) = context.cache {
+        cache.invalidate(&full_path);
+    }
+
     // Check if the old content appears again later (potential multi-replace)
     let has_duplicate = content[pos + matched_len..].contains(old_content)
         || content[..pos].contains(old_content);
@@ -249,5 +263,3 @@ fn edit_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
         ),
     })
 }
-
-

@@ -9,6 +9,7 @@ use tracing::{debug, warn};
 use crate::agent::AgentIdentity;
 use crate::llm::ToolSchema;
 use crate::security::{ApprovalManager, SecurityEvaluation, SecurityPolicy};
+use crate::tools::cache::ReadCache;
 use crate::utils::error::AppError;
 
 pub mod file;
@@ -39,6 +40,7 @@ pub struct ToolRegistry {
     pub approval_manager: Arc<ApprovalManager>,
     pub retry_manager: retry::RetryManager,
     pub resources: Option<crate::tools::resources::SharedResources>,
+    pub cache: Arc<ReadCache>,
     schema_tokens: AtomicUsize,
 }
 
@@ -69,6 +71,8 @@ pub struct ToolContext {
     pub working_dir: PathBuf,
     /// 可选的资源容器，用于依赖注入
     pub resources: Option<crate::tools::resources::SharedResources>,
+    /// 可选的文件读取缓存，用于避免重复读取同一文件
+    pub cache: Option<Arc<ReadCache>>,
 }
 
 /// 错误类别，用于区分可重试和不可重试的错误
@@ -127,6 +131,7 @@ impl ToolRegistry {
             approval_manager: Arc::new(ApprovalManager::new()),
             retry_manager: retry::RetryManager::default(),
             resources: None,
+            cache: Arc::new(ReadCache::default()),
             schema_tokens: AtomicUsize::new(0),
         };
         registry.register_builtin_tools();
@@ -146,6 +151,7 @@ impl ToolRegistry {
             approval_manager,
             retry_manager: retry::RetryManager::default(),
             resources: Some(resources),
+            cache: Arc::new(ReadCache::default()),
             schema_tokens: AtomicUsize::new(0),
         };
         registry.register_builtin_tools();
@@ -320,6 +326,7 @@ impl ToolRegistry {
             approval_manager: self.approval_manager.clone(),
             retry_manager: self.retry_manager.clone(),
             resources: self.resources.clone(),
+            cache: self.cache.clone(),
             schema_tokens: AtomicUsize::new(0),
         };
         // 子 Agent 拥有文件工具、KB 工具和 finish
@@ -348,6 +355,7 @@ impl ToolRegistry {
             approval_manager: self.approval_manager.clone(),
             retry_manager: self.retry_manager.clone(),
             resources: self.resources.clone(),
+            cache: self.cache.clone(),
             schema_tokens: AtomicUsize::new(0),
         };
 
@@ -393,6 +401,7 @@ impl ToolRegistry {
         let context = ToolContext {
             working_dir: self.working_dir.clone(),
             resources: self.resources.clone(),
+            cache: Some(self.cache.clone()),
         };
 
         // 使用重试管理器执行工具，只对可重试错误进行重试

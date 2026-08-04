@@ -654,6 +654,7 @@ mod tests {
         ToolContext {
             working_dir: working_dir.to_path_buf(),
             resources: None,
+            cache: None,
         }
     }
 

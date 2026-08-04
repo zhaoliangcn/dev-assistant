@@ -753,6 +753,7 @@ mod tests {
         let context = ToolContext {
             working_dir: temp_dir.path().to_path_buf(),
             resources: None,
+            cache: None,
         };
 
         let result = analyze_codebase_handler(&args, &context).unwrap();

@@ -79,60 +79,70 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
 
     let full_path = common::resolve_model_path(&context.working_dir, file_path);
     
-// 检查 gitignore
-	    if let Some(reason) = common::check_gitignore(&full_path, &context.resources) {
-	        return Ok(ToolResult {
-	            success: false,
-	            security_evaluation: None,
-	            restart_requested: false,
-	            error_category: None,
-	            content: format!("[read_file] ❌ Gitignore ignored: {}", reason),
-	        });
+    // 检查 gitignore
+    if let Some(reason) = common::check_gitignore(&full_path, &context.resources) {
+        return Ok(ToolResult {
+            success: false,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+            content: format!("[read_file] ❌ Gitignore ignored: {}", reason),
+        });
     }
     
-    let content = match read_file_content(&full_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ToolResult {
-                success: false,
-                security_evaluation: None,
-                restart_requested: false,
-                error_category: None,
-                content: format!(
-                    "[read_file] ❌ File not found: {}\n\
-                     Please check the file path. You may need to use glob to find the correct file name.",
-                    file_path
-                ),
-            });
+    // 检查缓存，避免重复读取同一文件
+    let content = if let Some(cached) = context.cache.as_ref().and_then(|c| c.read(&full_path)) {
+        cached
+    } else {
+        let content = match read_file_content(&full_path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ToolResult {
+                    success: false,
+                    security_evaluation: None,
+                    restart_requested: false,
+                    error_category: None,
+                    content: format!(
+                        "[read_file] ❌ File not found: {}\n\
+                         Please check the file path. You may need to use glob to find the correct file name.",
+                        file_path
+                    ),
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Ok(ToolResult {
+                    success: false,
+                    security_evaluation: None,
+                    restart_requested: false,
+                    error_category: None,
+                    content: format!(
+                        "[read_file] ❌ Permission denied: {}\n\
+                         The file exists but you don't have read access.",
+                        file_path
+                    ),
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                return Ok(ToolResult {
+                    success: false,
+                    security_evaluation: None,
+                    restart_requested: false,
+                    error_category: None,
+                    content: format!(
+                        "[read_file] ❌ Binary/non-UTF-8 file: {}\n\
+                         This file contains binary or non-text data and cannot be displayed.\n\
+                         Use exec_command with `file {}` or `xxd {}` to inspect it.",
+                        file_path, file_path, file_path
+                    ),
+                });
+            }
+            Err(e) => return Err(AppError::Io(e)),
+        };
+        // 写入缓存，供后续读取使用
+        if let Some(cache) = &context.cache {
+            cache.write(&full_path, &content);
         }
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            return Ok(ToolResult {
-                success: false,
-                security_evaluation: None,
-                restart_requested: false,
-                error_category: None,
-                content: format!(
-                    "[read_file] ❌ Permission denied: {}\n\
-                     The file exists but you don't have read access.",
-                    file_path
-                ),
-            });
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-            return Ok(ToolResult {
-                success: false,
-                security_evaluation: None,
-                restart_requested: false,
-                error_category: None,
-                content: format!(
-                    "[read_file] ❌ Binary/non-UTF-8 file: {}\n\
-                     This file contains binary or non-text data and cannot be displayed.\n\
-                     Use exec_command with `file {}` or `xxd {}` to inspect it.",
-                    file_path, file_path, file_path
-                ),
-            });
-        }
-        Err(e) => return Err(AppError::Io(e)),
+        content
     };
 
     let lines: Vec<&str> = content.lines().collect();
@@ -146,13 +156,13 @@ fn read_file_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResul
 
     let info = generate_read_info(file_path, start, end, total_lines, displayed_len);
 
-Ok(ToolResult {
-	        success: true,
-	        security_evaluation: None,
-	        restart_requested: false,
-	        error_category: None,
-	        content: format!("{}\n\n{}", info, displayed),
-	    })
+    Ok(ToolResult {
+        success: true,
+        security_evaluation: None,
+        restart_requested: false,
+        error_category: None,
+        content: format!("{}\n\n{}", info, displayed),
+    })
 }
 
 fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, AppError> {
@@ -166,13 +176,13 @@ fn batch_read_files_handler(args: &ToolArgs, context: &ToolContext) -> Result<To
         .collect();
 
     if file_patterns.is_empty() {
-return Ok(ToolResult {
-	            success: false,
-	            security_evaluation: None,
-	            restart_requested: false,
-	            error_category: None,
-	            content: "[batch_read_files] ❌ No files specified".to_string(),
-	        });
+        return Ok(ToolResult {
+            success: false,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+            content: "[batch_read_files] ❌ No files specified".to_string(),
+        });
     }
 
     let max_chars_per_file = common::get_lenient_usize(&args.arguments["max_chars_per_file"], "max_chars_per_file", 3000)
@@ -205,42 +215,54 @@ return Ok(ToolResult {
             continue;
         }
         
-        match read_file_content(&full_path) {
-            Ok(content) => {
-                success_count += 1;
-
-                let content_len = content.chars().count();
-                let truncated = if content_len > max_chars_per_file {
-                    let chars: Vec<char> = content.chars().take(max_chars_per_file).collect();
-                    chars.into_iter().collect()
-                } else {
-                    content.clone()
-                };
-                let was_truncated = content_len > max_chars_per_file;
-
-                if summarize {
-                    let summary = generate_code_summary(&content, &file_path);
-                    result.push_str(&summary);
+        // 检查缓存，避免重复读取同一文件
+        let content = if let Some(cached) = context.cache.as_ref().and_then(|c| c.read(&full_path)) {
+            cached
+        } else {
+            match read_file_content(&full_path) {
+                Ok(c) => {
+                    // 写入缓存，供后续读取使用
+                    if let Some(cache) = &context.cache {
+                        cache.write(&full_path, &c);
+                    }
+                    c
                 }
-
-                result.push_str(&format!("\n=== 文件内容: {} ===\n", file_path));
-                result.push_str(&truncated);
-                if was_truncated {
+                Err(e) => {
+                    fail_count += 1;
                     result.push_str(&format!(
-                        "\n\n[truncated] 文件共 {} 字符，显示前 {} 字符。使用 read_file 读取完整内容。\n",
-                        content_len, max_chars_per_file
+                        "\n[batch_read_files] ❌ Failed to read {}: {}\n",
+                        file_path, e
                     ));
+                    continue;
                 }
-                result.push('\n');
             }
-            Err(e) => {
-                fail_count += 1;
-                result.push_str(&format!(
-                    "\n[batch_read_files] ❌ Failed to read {}: {}\n",
-                    file_path, e
-                ));
-            }
+        };
+
+        success_count += 1;
+
+        let content_len = content.chars().count();
+        let truncated = if content_len > max_chars_per_file {
+            let chars: Vec<char> = content.chars().take(max_chars_per_file).collect();
+            chars.into_iter().collect()
+        } else {
+            content.clone()
+        };
+        let was_truncated = content_len > max_chars_per_file;
+
+        if summarize {
+            let summary = generate_code_summary(&content, &file_path);
+            result.push_str(&summary);
         }
+
+        result.push_str(&format!("\n=== 文件内容: {} ===\n", file_path));
+        result.push_str(&truncated);
+        if was_truncated {
+            result.push_str(&format!(
+                "\n\n[truncated] 文件共 {} 字符，显示前 {} 字符。使用 read_file 读取完整内容。\n",
+                content_len, max_chars_per_file
+            ));
+        }
+        result.push('\n');
     }
 
     let header = format!(
@@ -249,11 +271,11 @@ return Ok(ToolResult {
         success_count + fail_count
     );
 
-Ok(ToolResult {
-	        success: success_count > 0,
-	        security_evaluation: None,
-	        restart_requested: false,
-	        error_category: None,
-	        content: format!("{}{}", header, result),
-	    })
+    Ok(ToolResult {
+        success: success_count > 0,
+        security_evaluation: None,
+        restart_requested: false,
+        error_category: None,
+        content: format!("{}{}", header, result),
+    })
 }

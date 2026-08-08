@@ -27,10 +27,13 @@ pub struct UIMessageOutput {
     /// 由 `report_token_usage` 累计，不 emit 到 buffer，
     /// 调用方在 `process_user_message` 末尾单独渲染，避免与交互消息混在一起。
     token_usage: Option<(usize, usize, usize)>,
+    /// 缓存的流式输出前缀（含主题色），避免每次渲染都获取主题锁
+    stream_prefix: String,
 }
 
 impl UIMessageOutput {
     pub fn new(verbose: bool) -> Self {
+        let theme = crate::ui::theme::active_theme();
         Self {
             verbose,
             buffer: Vec::new(),
@@ -38,6 +41,7 @@ impl UIMessageOutput {
             last_streamed_lines: 0,
             pending_assistant_content: None,
             token_usage: None,
+            stream_prefix: format!("{}🤖 助手:{} ", theme.tool_fg, crate::ui::theme::RESET),
         }
     }
 
@@ -154,10 +158,8 @@ impl MessageOutput for UIMessageOutput {
             self.last_streamed_content = content.to_string();
             self.last_streamed_lines = total_lines;
 
-            // 渲染：第一行带前缀，后续行缩进对齐前缀宽度
-            // 注意：前缀含 ANSI 转义，缩进宽度按可见文本计算，避免错位
-            let theme = crate::ui::theme::active_theme();
-            let prefix = format!("{}🤖 助手:{} ", theme.tool_fg, crate::ui::theme::RESET);
+            // 使用缓存的流式输出前缀（含主题色），避免每次渲染都获取主题锁
+            let prefix = &self.stream_prefix;
             let indent = " ".repeat(ASSISTANT_STREAM_PREFIX.width());
             
             for (i, line) in content.lines().enumerate() {

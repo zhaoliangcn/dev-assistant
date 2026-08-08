@@ -140,6 +140,7 @@ pub struct Theme {
     #[allow(dead_code)]
     pub warning_fg: &'static str,
     /// 输入提示符前景
+    #[allow(dead_code)]
     pub input_prompt_fg: &'static str,
 
     // Diff 配色（与 markdown.rs 历史值一致，保持可见输出不变）
@@ -300,7 +301,7 @@ static ACTIVE_THEME: Mutex<Theme> = Mutex::new(Theme::dark());
 /// 终端主题切换（如 macOS 暗/亮模式变化）。
 #[must_use]
 pub fn active_theme() -> Theme {
-    ACTIVE_THEME.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    *ACTIVE_THEME.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// 刷新主题缓存，重新检测终端主题模式。

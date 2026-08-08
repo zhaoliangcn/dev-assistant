@@ -2,7 +2,6 @@
 //!
 //! 使用单层时间轮，3600 个槽（精度 1 秒，覆盖 1 小时）。
 //! 超过 1 小时的任务放入"溢出队列"，定期检查。
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

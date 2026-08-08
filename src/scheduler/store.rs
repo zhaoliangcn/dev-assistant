@@ -2,7 +2,6 @@
 //!
 //! 使用 JSONL 格式存储任务定义和执行记录。
 //! 启动时全量加载到内存缓存，运行时先更新缓存再异步写文件。
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::fs;
@@ -263,6 +262,7 @@ impl ScheduledTaskStore {
     }
 
     /// 获取执行记录总数。
+    #[allow(dead_code)]
     pub fn get_execution_logs_count(&self, task_id: &str) -> Result<usize, AppError> {
         let log_file = self.logs_dir.join(format!("{}.jsonl", task_id));
         if !log_file.exists() {
@@ -276,6 +276,7 @@ impl ScheduledTaskStore {
     }
 
     /// 删除任务。
+    #[allow(dead_code)]
     pub fn delete_task(&self, id: &str) -> Result<(), AppError> {
         {
             let mut cache = self.cache.write().map_err(|e| {

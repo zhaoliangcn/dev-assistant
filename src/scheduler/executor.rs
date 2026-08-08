@@ -2,7 +2,6 @@
 //!
 //! 负责按任务类型派发执行（Agent/Command），处理重试逻辑。
 //! 与 `Scheduler` 分离，职责单一。
-#![allow(dead_code)]
 
 use std::sync::Arc;
 use std::time::Instant;

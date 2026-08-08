@@ -800,26 +800,6 @@ pub async fn process_user_message(
     Ok(ReplAction::Continue)
 }
 
-/// 处理 /pipeline 命令：启动多阶段流水线（设计→编码→审查→修复→记录）。
-///
-/// 每个阶段创建一个对应身份的子 Agent，上一个阶段的输出作为
-/// 下一个阶段的上下文传入。
-#[allow(dead_code)]
-pub async fn handle_pipeline_command(
-    agent: &mut Agent,
-    task: &str,
-    verbose: bool,
-) -> Result<ReplAction, AppError> {
-    agent.add_display_message(
-        MessageLevel::Info,
-        &format!("🚀 启动流水线: {}", task),
-    );
-
-    agent.run_pipeline(task, verbose, false).await?;
-
-    Ok(ReplAction::Continue)
-}
-
 /// 处理 restart 请求：保存状态、cargo build、exec 替换进程。
 ///
 /// 返回 [`ReplAction::Continue`] 表示构建失败、继续 REPL；
@@ -945,7 +925,6 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
             let working_dir = working_dir.to_path_buf();
             let source = source.to_string();
             let skill_filters = skill_filters.clone();
-            let scope = scope.clone();
             let result = std::thread::spawn(move || {
                 tokio::runtime::Handle::current().block_on(async {
                     install_skill(&source, scope, &working_dir, Some(&skill_filters)).await
@@ -1058,7 +1037,7 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
             }
 
             let name = parts[2];
-            let is_global = parts.iter().any(|p| *p == "--global");
+            let is_global = parts.contains(&"--global");
             let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
 
             match remove_skill(name, scope, working_dir) {

@@ -269,16 +269,13 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     }
 
     // 5. impl <target> (impl 块)
-    if trimmed.starts_with("impl ") && !trimmed.starts_with("impl ") {
-        // 重新检查
-    }
-    if trimmed.starts_with("impl ") {
-        let rest = &trimmed[5..].trim();
+    if let Some(after_impl) = trimmed.strip_prefix("impl ") {
+        let rest = after_impl.trim();
         // 跳过 unsafe impl, pub impl 等修饰
         let rest = rest.strip_prefix("unsafe ").unwrap_or(rest);
         let rest = rest.strip_prefix("pub ").unwrap_or(rest);
         // 提取目标类型名（直到 { 或 where 或 :）
-        if let Some(target) = rest.split(|c: char| c == '{' || c == 'w' || c == ':').next() {
+        if let Some(target) = rest.split(['{', 'w', ':']).next() {
             let target = target.trim();
             if !target.is_empty() && target != " " {
                 // 过滤掉裸 impl (impl 块)
@@ -328,7 +325,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     if let Some(name) = match_keyword(trimmed, "mod ") {
         let name = name.trim();
         if !name.is_empty() {
-            let name = name.split(|c: char| c == ';' || c == '{').next().unwrap_or(name).trim().to_string();
+            let name = name.split([';', '{']).next().unwrap_or(name).trim().to_string();
             if !name.is_empty() {
                 let has_body = trimmed.contains('{');
                 let body_end = if has_body { find_body_end(lines, line_idx) } else { None };
@@ -342,11 +339,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
 
 /// 检查字符串是否以指定关键字开头（注意空格），并返回关键字后的内容。
 fn match_keyword<'a>(s: &'a str, keyword: &str) -> Option<&'a str> {
-    if s.starts_with(keyword) {
-        Some(&s[keyword.len()..])
-    } else {
-        None
-    }
+    s.strip_prefix(keyword)
 }
 
 /// 从定义行提取符号名（跳过 pub、pub(crate)、pub(super) 等修饰，以及泛型参数）。
@@ -360,10 +353,10 @@ fn extract_name(s: &str) -> String {
         } else {
             s
         }
-    } else if s.starts_with("pub ") {
-        &s[4..].trim()
-    } else if s.starts_with("pub\t") {
-        &s[4..].trim()
+    } else if let Some(stripped) = s.strip_prefix("pub ") {
+        stripped.trim()
+    } else if let Some(stripped) = s.strip_prefix("pub\t") {
+        stripped.trim()
     } else {
         s
     };
@@ -374,7 +367,7 @@ fn extract_name(s: &str) -> String {
     let s = s.strip_prefix("extern ").unwrap_or(s);
 
     // 取第一个非空 token（直到泛型 < 或括号 (）
-    let name = s.split(|c: char| c == '<' || c == '(' || c == ' ' || c == '\t')
+    let name = s.split(['<', '(', ' ', '\t'])
         .next()
         .unwrap_or(s)
         .trim()
@@ -392,8 +385,7 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
     let mut in_char = false;
     let mut found_open = false;
 
-    for i in start_line..lines.len() {
-        let line = lines[i];
+    for (i, &line) in lines.iter().enumerate().skip(start_line) {
         let bytes = line.as_bytes();
         let mut j = 0;
 
@@ -527,8 +519,8 @@ fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include
 
     // 主体
     if include_body && sym.end_line > sym.line {
-        for i in (sym.line)..(sym.end_line.min(lines.len())) {
-            out.push_str(lines[i]);
+        for line in lines.iter().take(sym.end_line.min(lines.len())).skip(sym.line) {
+            out.push_str(line);
             out.push('\n');
         }
     }
@@ -537,12 +529,12 @@ fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include
     if context_lines > 0 && sym.start_line > 1 {
         let ctx_start = (sym.start_line as isize - 1 - context_lines as isize).max(0) as usize;
         let mut ctx_out = String::new();
-        for i in ctx_start..(sym.start_line - 1) {
-            ctx_out.push_str(&format!("  {}\n", lines[i]));
+        for line in lines.iter().take(sym.start_line - 1).skip(ctx_start) {
+            ctx_out.push_str(&format!("  {}\n", line));
         }
         if !ctx_out.is_empty() {
             out.insert_str(0, &format!("... 上下文前 {} 行:\n{}", sym.start_line - 1 - ctx_start, ctx_out));
-            out.insert_str(0, "\n");
+            out.insert(0, '\n');
         }
     }
 
@@ -550,8 +542,8 @@ fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include
     if context_lines > 0 && sym.end_line < lines.len() {
         let ctx_end = (sym.end_line + context_lines).min(lines.len());
         out.push_str(&format!("\n... 上下文后 {} 行:\n", ctx_end - sym.end_line));
-        for i in sym.end_line..ctx_end {
-            out.push_str(&format!("  {}\n", lines[i]));
+        for line in lines.iter().take(ctx_end).skip(sym.end_line) {
+            out.push_str(&format!("  {}\n", line));
         }
     }
 

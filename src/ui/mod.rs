@@ -245,29 +245,27 @@ pub fn render_progress_bar(
 }
 
 /// 更新输入提示行（清除旧内容，显示新状态）。
-/// 无状态时仅显示 `> ` 提示符；有状态时显示 `⌛ 状态信息`。
+///
+/// # 参数
+/// - `status_line`: `Some(status)` 显示状态信息；`None` 时仅清除行，不写入任何内容。
+///
+/// # 设计说明
+/// - 有状态时：清除旧行 → 写入增强后的状态文本 → 清除行尾残留
+/// - 无状态时：仅清除整行，**不写入任何内容**。因为调用方（如 `read_line`）会自行处理 prompt，
+///   若此处也写入 `> ` 会导致 prompt 重复或叠加。
 pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
     let mut stdout = io::stdout();
 
     // 使用 \r 回到行首并清除整行，与流式输出策略一致
     write!(stdout, "\r\x1b[2K")?;
 
-    match status_line {
-        Some(status) => {
-            // 增强状态栏：使用枚举精确分类，避免字符串 contains 误匹配
-            let enhanced = enhance_status(status);
-            write!(stdout, "{}", enhanced)?;
-        }
-        None => {
-            // 使用柔和的前景色显示输入提示
-            write!(
-                stdout,
-                "{}> {}",
-                crate::ui::theme::active_theme().input_prompt_fg,
-                crate::ui::theme::RESET
-            )?;
-        }
+    if let Some(status) = status_line {
+        // 增强状态栏：使用枚举精确分类，避免字符串 contains 误匹配
+        let enhanced = enhance_status(status);
+        write!(stdout, "{}", enhanced)?;
     }
+    // 当 status_line 为 None 时，仅清除行，不写入任何内容
+    // prompt 由调用方（如 rustyline 的 read_line）处理
 
     // 清除行尾残留内容
     write!(stdout, "\x1b[J")?;

@@ -3,7 +3,6 @@
 //! 负责定时任务的调度触发、状态管理和生命周期管理。
 //! 使用时间轮 (TimingWheel) 进行高精度触发，
 //! 使用持久化存储 (ScheduledTaskStore) 管理任务状态。
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -236,28 +235,33 @@ impl Scheduler {
     }
 
     /// 暂停调度器。
+    #[allow(dead_code)]
     pub fn pause(&self) {
         self.paused.store(true, Ordering::SeqCst);
         info!("Scheduler paused");
     }
 
     /// 恢复调度器。
+    #[allow(dead_code)]
     pub fn resume(&self) {
         self.paused.store(false, Ordering::SeqCst);
         info!("Scheduler resumed");
     }
 
     /// 检查调度器是否已暂停。
+    #[allow(dead_code)]
     pub fn is_paused(&self) -> bool {
         self.paused.load(Ordering::SeqCst)
     }
 
     /// 检查调度器是否正在运行。
+    #[allow(dead_code)]
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
 
     /// 优雅关闭调度器。
+    #[allow(dead_code)]
     pub async fn shutdown(&self) {
         self.running.store(false, Ordering::SeqCst);
         info!("Scheduler shutdown requested");
@@ -292,6 +296,7 @@ impl Scheduler {
     }
 
     /// 获取时间轮引用。
+    #[allow(dead_code)]
     pub fn wheel(&self) -> &Arc<TimingWheel> {
         &self.wheel
     }

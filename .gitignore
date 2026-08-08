@@ -8,3 +8,5 @@ target/
 .dev-assistant-state.json
 .dev-assistant-store/
 dev-assistant
+
+.kb/

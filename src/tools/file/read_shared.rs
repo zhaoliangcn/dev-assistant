@@ -64,9 +64,9 @@ pub fn generate_code_summary(content: &str, file_path: &str) -> String {
             let impl_target = trimmed
                 .strip_prefix("impl")
                 .and_then(|s| {
-                    let s = s.trim().split_whitespace().next()?;
+                    let s = s.split_whitespace().next()?;
                     // 去掉尾部 "for" 或 "{"
-                    Some(s.trim_end_matches(&['{', ' ']))
+                    Some(s.trim_end_matches(['{', ' ']))
                 })
                 .unwrap_or("");
             impls.push(format!("  - {} (line {})", impl_target, i + 1));
@@ -76,11 +76,9 @@ pub fn generate_code_summary(content: &str, file_path: &str) -> String {
         // 头部注释（仅前 20 行）
         } else if i < 20
             && (trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*"))
-        {
-            if !comments.contains(&trimmed.to_string()) {
+            && !comments.contains(&trimmed.to_string()) {
                 comments.push(trimmed.to_string());
             }
-        }
     }
 
     let mut summary = format!("\n=== 文件摘要: {} ===\n", file_path);

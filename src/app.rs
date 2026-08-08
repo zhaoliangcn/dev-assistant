@@ -51,7 +51,6 @@ pub struct App {
     #[allow(dead_code)]
     system_prompt: String,
     /// 定时任务调度器。
-    #[allow(dead_code)]
     scheduler: Arc<Scheduler>,
 }
 
@@ -114,6 +113,11 @@ impl App {
             shared_resources.clone(),
             approval_manager.clone(),
         );
+        
+        // 初始化全局 TaskManager（供 task_status/pause_task/resume_task/cancel_task 工具使用）
+        let task_manager = crate::tools::task_tools::TaskManager::new(crate::orchestrator::DependencyGraph::new());
+        crate::tools::task_tools::set_global_task_manager(task_manager);
+        
         let llm_client = Arc::new(LlmClient::from_configs(provider_configs)?);
 
         // 发现全局 + 项目技能
@@ -257,6 +261,8 @@ impl App {
 
     /// 运行应用：根据配置选择交互 REPL、一次性模式或后台模式。
     pub async fn run(&mut self) -> Result<(), AppError> {
+        // 启动定时任务调度器后台 tick 循环，确保 /schedule 和 schedule_task 工具可用
+        self.scheduler.start().await;
         if self.config.background {
             self.run_background_mode().await
         } else if let Some(message) = self.config.message.clone() {
@@ -351,15 +357,12 @@ impl App {
         let mut round_num: usize = 0;
 
         loop {
-            // 更新输入面板
-            ui::render_input_panel(None)?;
-
-            // T5: 动态提示符 — 显示模式 / 模型 / 消息数
+            // T5: 动态提示符 — 紧凑显示模式 / 模型 / 消息数
             let mode = if verbose { "详细" } else { "安静" };
             let model = self.agent.active_model();
             let msg_count = self.agent.display_messages().len();
             let prompt = format!(
-                "│ {}模式 {} 模型 {} {} 消息 > ",
+                "│ {}│ {} │ {} │ {} 条 > ",
                 ui::style::ICON_INFO,
                 mode,
                 model,

@@ -3,7 +3,6 @@
 //! 定义 `ScheduledTaskHandler` trait 及内置实现：
 //! - `AgentTaskHandler`: 通过子代理执行自然语言指令
 //! - `CommandTaskHandler`: 执行 Shell 命令
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -21,6 +20,7 @@ pub trait ScheduledTaskHandler: Send + Sync {
     async fn execute(&self, task: &ScheduledTask) -> Result<ExecutionRecord, AppError>;
 
     /// 处理执行失败后的重试逻辑。
+    #[allow(dead_code)]
     async fn on_retry(&self, task: &ScheduledTask, error: &str) -> Result<(), AppError> {
         // 默认实现：仅记录日志
         warn!(

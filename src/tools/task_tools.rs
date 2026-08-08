@@ -53,6 +53,14 @@ impl TaskManager {
         *self.is_paused.lock().unwrap() = false;
         *self.is_cancelled.lock().unwrap() = false;
     }
+
+    #[allow(dead_code)]
+    /// 同步外部 DependencyGraph 到内部图。
+    /// 用于 TaskOrchestrator 将其图状态暴露给全局 TaskManager。
+    pub fn sync_graph(&self, other: &DependencyGraph) {
+        let mut graph = self.graph.lock().unwrap();
+        *graph = other.clone();
+    }
 }
 
 pub fn task_status_tool() -> ToolDefinition {

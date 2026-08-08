@@ -270,7 +270,7 @@ fn main() -> Result<(), AppError> {
 
         match cmd {
             SkillCommand::Add { source, skill, .. } => {
-                let filters = skill.as_ref().map(|v| v.as_slice());
+                let filters = skill.as_deref();
                 runtime.block_on(async {
                     match install_skill(&source, scope.unwrap_or(InstallScope::Project), &working_dir, filters).await {
                         Ok(skills) => {

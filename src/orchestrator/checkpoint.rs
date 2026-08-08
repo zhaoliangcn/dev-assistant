@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use super::task::{DependencyGraph, TaskId, TaskSnapshot};
+use crate::agent::summary::SummaryStore;
+use crate::agent::token_counter::TokenCounter;
+use crate::agent::ContextManager;
+use crate::llm::LlmMessage;
 use crate::utils::error::AppError;
 
 /// 检查点版本号（用于向后兼容）
@@ -60,6 +64,13 @@ pub struct Checkpoint {
     pub in_progress: Vec<RunningTask>,
     /// 进度摘要
     pub progress_summary: String,
+    /// 上次上下文的对话摘要（用于崩溃恢复时重建 Agent 上下文）。
+    /// 由 `save_summary` 工具或摘要压缩写入，恢复时注入新的 Agent。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_summary: Option<String>,
+    /// 会话 ID（用于从 `.kb/summaries/{session_id}/` 分层摘要中重建上下文）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub session_id: String,
     /// 元数据（用于扩展）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -103,6 +114,8 @@ mod system_time_serde {
 pub struct CheckpointManager {
     /// 检查点目录（`.kb/checkpoints/`）
     checkpoint_dir: PathBuf,
+    /// KB 根目录（用于重建上下文时定位摘要目录）
+    kb_root: PathBuf,
     /// 自动保存间隔（秒），默认 60
     #[allow(dead_code)]
     auto_save_interval: u64,
@@ -122,6 +135,7 @@ impl CheckpointManager {
         }
         Self {
             checkpoint_dir,
+            kb_root: kb_root.to_path_buf(),
             auto_save_interval: 60,
             max_archives: 10,
         }
@@ -189,6 +203,8 @@ impl CheckpointManager {
             completed_tasks,
             in_progress: running.to_vec(),
             progress_summary: graph.progress_summary(),
+            context_summary: None,
+            session_id: String::new(),
             metadata: None,
         };
 
@@ -246,6 +262,143 @@ impl CheckpointManager {
         );
 
         Ok(Some(checkpoint))
+    }
+
+    /// 从检查点重建 Agent 上下文。
+    ///
+    /// 流程：
+    /// 1. 从检查点获取 session_id
+    /// 2. 用 SummaryStore 加载分层摘要（final → phase → round）
+    /// 3. 按预算约束构建恢复消息列表
+    /// 4. 返回重建的 ContextManager
+    ///
+    /// 若检查点无 session_id 或摘要目录为空，返回 None（调用方应创建新上下文）。
+    pub fn rebuild_context_from_checkpoint(
+        &self,
+        system_prompt: &str,
+        max_tokens: usize,
+        task_description: &str,
+    ) -> Result<Option<ContextManager>, AppError> {
+        let checkpoint = match self.load()? {
+            Some(cp) => cp,
+            None => return Ok(None),
+        };
+
+        let sid = checkpoint.session_id;
+        if sid.is_empty() {
+            return Ok(None);
+        }
+
+        let store = SummaryStore::new(&sid, &self.kb_root);
+        let summaries = store.load_all()?;
+
+        let has_content = summaries.final_summary.is_some()
+            || !summaries.phases.is_empty()
+            || !summaries.rounds.is_empty();
+        if !has_content {
+            return Ok(None);
+        }
+
+        // 构建恢复消息列表
+        let mut messages: Vec<LlmMessage> = Vec::new();
+
+        // 恢复通知（system 角色）
+        let completed_count = checkpoint.completed_tasks.len();
+        let total_count = checkpoint.task_graph.tasks.len();
+        messages.push(LlmMessage {
+            role: "system".to_string(),
+            content: Some(format!(
+                "【恢复通知】你之前的工作在 {} 被中断。\n\
+                 已完成 {}/{} 个任务。\n\
+                 以下是之前的工作摘要，请仔细阅读后继续。",
+                chrono::DateTime::<chrono::Utc>::from(checkpoint.timestamp)
+                    .format("%Y-%m-%d %H:%M:%S UTC"),
+                completed_count,
+                total_count,
+            )),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+
+        // 预算计算：system_prompt + 已有消息 + task_description 不能超过 max_tokens
+        let system_tokens = TokenCounter::estimate(system_prompt);
+        let task_tokens = TokenCounter::estimate(task_description);
+        let existing_tokens: usize = messages
+            .iter()
+            .map(|m| TokenCounter::estimate(m.content.as_deref().unwrap_or("")))
+            .sum();
+        let mut budget_remaining = max_tokens.saturating_sub(system_tokens + task_tokens + existing_tokens);
+
+        // 按优先级加载摘要：final → phase → round（从高到低层级）
+        // 先尝试注入 final.md（层级 3，会话摘要）
+        if let Some(ref final_s) = summaries.final_summary {
+            let tokens = TokenCounter::estimate(final_s);
+            if tokens <= budget_remaining {
+                messages.push(LlmMessage {
+                    role: "system".to_string(),
+                    content: Some(format!("【会话摘要】\n{}", final_s)),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                budget_remaining = budget_remaining.saturating_sub(tokens);
+            }
+        }
+
+        // 注入阶段摘要（层级 2），从最新的开始，直到预算不足
+        if budget_remaining > 0 {
+            for phase in summaries.phases.iter().rev() {
+                let tokens = phase.tokens;
+                if tokens > budget_remaining {
+                    break;
+                }
+                messages.push(LlmMessage {
+                    role: "system".to_string(),
+                    content: Some(format!(
+                        "【阶段 {} 摘要】（轮次 {}-{}）\n{}",
+                        phase.phase, phase.round_start, phase.round_end, phase.content
+                    )),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                budget_remaining = budget_remaining.saturating_sub(tokens);
+            }
+        }
+
+        // 注入轮次摘要（层级 1），从最新的开始，直到预算不足
+        if budget_remaining > 0 {
+            for round in summaries.rounds.iter().rev() {
+                let tokens = round.tokens;
+                if tokens > budget_remaining {
+                    break;
+                }
+                messages.push(LlmMessage {
+                    role: "system".to_string(),
+                    content: Some(format!("【轮次 {} 摘要】\n{}", round.round, round.content)),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                budget_remaining = budget_remaining.saturating_sub(tokens);
+            }
+        }
+
+        // 继续指令
+        messages.push(LlmMessage {
+            role: "system".to_string(),
+            content: Some(format!(
+                "请从以下任务继续：\n{}",
+                task_description
+            )),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+
+        // 构建 ContextManager
+        let mut context = ContextManager::new(system_prompt.to_string(), max_tokens);
+        context.history.messages = messages;
+        context.history.recount_tokens();
+        context.session_id = sid;
+
+        Ok(Some(context))
     }
 
     /// 列出所有存档检查点。
@@ -473,5 +626,72 @@ mod tests {
         assert!(!cm.has_checkpoint());
         cm.save(&create_test_graph(), &[]).unwrap();
         assert!(cm.has_checkpoint());
+    }
+
+    #[test]
+    fn test_rebuild_context_no_checkpoint() {
+        let (_dir, cm) = setup_test_env();
+        let result = cm.rebuild_context_from_checkpoint("system prompt", 4096, "task desc").unwrap();
+        assert!(result.is_none(), "No checkpoint should mean no context");
+    }
+
+    #[test]
+    fn test_rebuild_context_no_session_id() {
+        let (_dir, cm) = setup_test_env();
+        cm.save(&create_test_graph(), &[]).unwrap();
+
+        // 检查点没有 session_id，应返回 None
+        let result = cm.rebuild_context_from_checkpoint("system prompt", 4096, "task desc").unwrap();
+        assert!(result.is_none(), "No session_id should mean no context");
+    }
+
+    #[test]
+    fn test_rebuild_context_with_summaries() {
+        let dir = tempdir().unwrap();
+        let kb_root = dir.path().join(".kb");
+        fs::create_dir_all(&kb_root).unwrap();
+
+        let cm = CheckpointManager::new(&kb_root);
+
+        // 先保存一个检查点并设置 session_id
+        let mut graph = create_test_graph();
+        graph.complete("task-2");
+        cm.save(&graph, &[]).unwrap();
+
+        // 手动修改检查点添加 session_id 和 context_summary
+        let checkpoint_path = cm.dir().join("latest.json");
+        let mut checkpoint: Checkpoint = serde_json::from_str(
+            &fs::read_to_string(&checkpoint_path).unwrap()
+        ).unwrap();
+        checkpoint.session_id = "test-session".to_string();
+        checkpoint.context_summary = Some("已完成的分析结果".to_string());
+        fs::write(&checkpoint_path, serde_json::to_string_pretty(&checkpoint).unwrap()).unwrap();
+
+        // 创建摘要目录和摘要文件（模拟之前 save_summary 的产物）
+        let store = SummaryStore::new("test-session", &kb_root);
+        store.save_round(1, "第一轮：分析了代码结构").unwrap();
+        store.save_phase(1, 5, "阶段一：完成了代码分析").unwrap();
+        store.save_final("会话摘要：完成了代码结构和接口分析").unwrap();
+
+        // 重建上下文
+        let result = cm.rebuild_context_from_checkpoint("你是助手", 8192, "继续完成任务").unwrap();
+        assert!(result.is_some(), "Should rebuild context from summaries");
+
+        let context = result.unwrap();
+        assert_eq!(context.session_id, "test-session");
+
+        // 验证重建的消息包含摘要
+        let msgs = context.build_messages();
+        let system_msgs: Vec<&str> = msgs.iter()
+            .filter(|m| m.role == "system")
+            .filter_map(|m| m.content.as_deref())
+            .collect();
+
+        let full_text = system_msgs.join(" ");
+        assert!(full_text.contains("恢复通知"), "Should have recovery notification");
+        assert!(full_text.contains("会话摘要"), "Should have session summary");
+        assert!(full_text.contains("阶段一"), "Should have phase summary");
+        assert!(full_text.contains("轮次 1"), "Should have round summary");
+        assert!(full_text.contains("继续完成任务"), "Should have task continuation instruction");
     }
 }

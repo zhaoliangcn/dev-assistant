@@ -27,6 +27,154 @@ impl From<Role> for String {
 }
 
 // ---------------------------------------------------------------------------
+// 上下文预算管理
+// ---------------------------------------------------------------------------
+
+/// 上下文压力等级。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub enum ContextPressure {
+    /// 充足 (> 40% 剩余)
+    Normal,
+    /// 注意 (20% ~ 40% 剩余)
+    Warning,
+    /// 紧张 (10% ~ 20% 剩余)
+    Critical,
+    /// 即将溢出 (< 10% 剩余)
+    Exhausted,
+}
+
+/// 上下文预算报告。
+///
+/// 告诉 Agent 当前上下文的使用情况，供其主动管理。
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextBudget {
+    /// 系统提示词占用的 tokens
+    pub system_prompt_tokens: usize,
+    /// 从 KB 注入的记忆占用的 tokens
+    pub memory_tokens: usize,
+    /// 对话历史占用的 tokens
+    pub history_tokens: usize,
+    /// 总使用量
+    pub total_tokens: usize,
+    /// 最大允许 tokens
+    pub max_tokens: usize,
+    /// 使用率百分比 (0.0 ~ 1.0)
+    pub utilization: f64,
+    /// 估算剩余可用 tokens
+    pub estimated_room: usize,
+    /// 上下文压力等级
+    pub pressure: ContextPressure,
+    /// 工具 schema 占用的 tokens
+    #[serde(default)]
+    pub tool_schema_tokens: usize,
+}
+
+/// 上下文预算管理器。
+///
+/// 跟踪和管理上下文预算，提供报告生成和预警功能。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextBudgetManager {
+    /// 最大允许 tokens
+    pub max_tokens: usize,
+    /// 系统提示词占用的 tokens
+    pub system_prompt_tokens: usize,
+    /// 从 KB 注入的记忆占用的 tokens
+    pub memory_tokens: usize,
+    /// 工具 schema 占用的 tokens
+    pub tool_schema_tokens: usize,
+    /// 预警阈值：当达到此使用率时触发预警
+    #[serde(default = "default_warning_threshold")]
+    pub warning_threshold: f64,
+    /// 关键阈值：当达到此使用率时触发关键预警
+    #[serde(default = "default_critical_threshold")]
+    pub critical_threshold: f64,
+}
+
+fn default_warning_threshold() -> f64 { 0.60 }
+fn default_critical_threshold() -> f64 { 0.80 }
+
+impl Default for ContextBudgetManager {
+    fn default() -> Self {
+        Self {
+            max_tokens: 8192,
+            system_prompt_tokens: 0,
+            memory_tokens: 0,
+            tool_schema_tokens: 0,
+            warning_threshold: 0.60,
+            critical_threshold: 0.80,
+        }
+    }
+}
+
+impl ContextBudgetManager {
+    /// 创建一个新的预算管理器。
+    pub fn new(max_tokens: usize, system_prompt_tokens: usize) -> Self {
+        Self {
+            max_tokens,
+            system_prompt_tokens,
+            memory_tokens: 0,
+            tool_schema_tokens: 0,
+            warning_threshold: 0.60,
+            critical_threshold: 0.80,
+        }
+    }
+
+    /// 生成当前上下文预算报告。
+    pub fn report(&self, history: &ConversationHistory) -> ContextBudget {
+        let total = history.used_tokens;
+        let history_tokens = total.saturating_sub(
+            self.system_prompt_tokens + self.memory_tokens + self.tool_schema_tokens
+        );
+        let utilization = if self.max_tokens > 0 {
+            total as f64 / self.max_tokens as f64
+        } else {
+            0.0
+        };
+        let estimated_room = self.max_tokens.saturating_sub(total);
+
+        let pressure = if utilization > 0.90 {
+            ContextPressure::Exhausted
+        } else if utilization > self.critical_threshold {
+            ContextPressure::Critical
+        } else if utilization > self.warning_threshold {
+            ContextPressure::Warning
+        } else {
+            ContextPressure::Normal
+        };
+
+        ContextBudget {
+            system_prompt_tokens: self.system_prompt_tokens,
+            memory_tokens: self.memory_tokens,
+            history_tokens,
+            total_tokens: total,
+            max_tokens: self.max_tokens,
+            utilization,
+            estimated_room,
+            pressure,
+            tool_schema_tokens: self.tool_schema_tokens,
+        }
+    }
+
+    /// 检查是否需要压缩（基于压力等级）。
+    pub fn should_compress(&self, history: &ConversationHistory) -> bool {
+        let report = self.report(history);
+        matches!(report.pressure,
+            ContextPressure::Critical | ContextPressure::Exhausted
+        )
+    }
+
+    /// 设置记忆 tokens 数。
+    pub fn set_memory_tokens(&mut self, tokens: usize) {
+        self.memory_tokens = tokens;
+    }
+
+    /// 设置工具 schema tokens 数。
+    pub fn set_tool_schema_tokens(&mut self, tokens: usize) {
+        self.tool_schema_tokens = tokens;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 上下文管理器（薄协调层）
 // ---------------------------------------------------------------------------
 
@@ -36,6 +184,7 @@ impl From<Role> for String {
 /// - [`ConversationHistory`]：消息存储与 token 累计
 /// - [`TokenCounter`]：token 估算
 /// - [`ContextCompressor`]：上下文压缩
+/// - [`ContextBudgetManager`]：上下文预算管理
 /// - [`DisplayBuffer`]：UI 展示缓冲区
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ContextManager {
@@ -49,22 +198,58 @@ pub struct ContextManager {
     /// UI 展示缓冲区（不参与 LLM 上下文，也不序列化）
     #[serde(skip)]
     pub display: DisplayBuffer,
+    /// 上下文预算管理器（不序列化，重启后重建）
+    #[serde(skip)]
+    pub budget_manager: ContextBudgetManager,
+    /// 会话 ID（用于分层摘要存储定位，如 `.kb/summaries/{session_id}/`）。
+    #[serde(default = "default_session_id")]
+    pub session_id: String,
+}
+
+fn default_session_id() -> String {
+    "default".to_string()
 }
 
 impl ContextManager {
     pub fn new(system_prompt: String, max_tokens: usize) -> Self {
+        let system_prompt_tokens = crate::agent::token_counter::TokenCounter::estimate(&system_prompt);
         Self {
             history: ConversationHistory::new(system_prompt),
             max_tokens,
             consecutive_no_tool_rounds: 0,
             active_model: None,
             display: DisplayBuffer::new(),
+            budget_manager: ContextBudgetManager::new(max_tokens, system_prompt_tokens),
+            session_id: "default".to_string(),
         }
     }
 
     #[allow(dead_code)] // reserved for future token budget management
     pub fn estimate_token_usage(&self) -> usize {
         self.history.used_tokens
+    }
+
+    /// 获取当前上下文预算报告。
+    ///
+    /// 用于 `context_budget` 工具，让 Agent 能感知自己的上下文使用情况。
+    pub fn get_budget_report(&self) -> ContextBudget {
+        self.budget_manager.report(&self.history)
+    }
+
+    /// 设置工具 schema 占用的 tokens（用于预算计算）。
+    pub fn set_tool_schema_tokens(&mut self, tokens: usize) {
+        self.budget_manager.set_tool_schema_tokens(tokens);
+    }
+
+    /// 设置记忆（KB 注入）占用的 tokens（用于预算计算）。
+    pub fn set_memory_tokens(&mut self, tokens: usize) {
+        self.budget_manager.set_memory_tokens(tokens);
+    }
+
+    /// 将当前上下文预算报告格式化为 JSON 字符串（用于工具返回）。
+    pub fn budget_report_json(&self) -> String {
+        serde_json::to_string_pretty(&self.get_budget_report())
+            .unwrap_or_else(|_| "{}".to_string())
     }
 
     /// 添加一条纯展示消息，用于在 UI 中显示。此消息不会发送给 LLM。

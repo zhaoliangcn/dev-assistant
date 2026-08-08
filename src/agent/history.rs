@@ -92,6 +92,71 @@ impl ConversationHistory {
     pub fn len(&self) -> usize {
         self.messages.len()
     }
+
+    /// 分离出需要摘要的旧消息（除最近 `keep_rounds` 轮之外的所有消息）。
+    ///
+    /// 返回 `(old_messages, new_messages)`：
+    /// - `old_messages`：应被摘要替换的较旧消息（保持时间顺序）
+    /// - `new_messages`：应保留完整的最近 `keep_rounds` 轮消息
+    ///
+    /// 轮（round）的划分：以 user 消息为界，一个 user + 若干 assistant/tool 消息为一轮。
+    pub fn split_old_messages(&self, keep_rounds: usize) -> (Vec<LlmMessage>, Vec<LlmMessage>) {
+        let mut rounds: Vec<Vec<LlmMessage>> = Vec::new();
+        let mut current_round: Vec<LlmMessage> = Vec::new();
+
+        // 从后往前遍历，收集最近的 keep_rounds 轮
+        for msg in self.messages.iter().rev() {
+            if msg.role == "user" && !current_round.is_empty() {
+                rounds.push(std::mem::take(&mut current_round));
+                if rounds.len() >= keep_rounds {
+                    break;
+                }
+            }
+            current_round.push(msg.clone());
+        }
+        if !current_round.is_empty() && rounds.len() < keep_rounds {
+            rounds.push(current_round);
+        }
+
+        // rounds 是倒序的（最新的在前），翻转成时间顺序
+        rounds.reverse();
+
+        // 重建 new_messages（时间顺序）
+        let mut new_messages: Vec<LlmMessage> = Vec::new();
+        for round in &rounds {
+            // 每轮内部也是倒序压入的，需要翻转
+            for msg in round.iter().rev() {
+                new_messages.push(msg.clone());
+            }
+        }
+
+        // old = 全部 - new
+        let old_count = self.messages.len() - new_messages.len();
+        let old_messages: Vec<LlmMessage> = self.messages[..old_count].to_vec();
+
+        (old_messages, new_messages)
+    }
+
+    /// 用一条摘要消息替换旧消息，保留最近 `keep_rounds` 轮完整消息。
+    ///
+    /// 结构：`[摘要消息] + [最近 keep_rounds 轮消息]`
+    /// 摘要消息以 `system` 角色插入，标注为「对话摘要」。
+    pub fn replace_old_with_summary(&mut self, summary: &str) {
+        let keep_rounds = 6usize;
+        let (_, mut new_messages) = self.split_old_messages(keep_rounds);
+
+        let mut messages = Vec::new();
+        messages.push(LlmMessage {
+            role: "system".to_string(),
+            content: Some(format!("【对话摘要】\n{}", summary)),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+        messages.append(&mut new_messages);
+
+        self.messages = messages;
+        self.recount_tokens();
+    }
 }
 
 #[cfg(test)]

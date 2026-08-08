@@ -64,6 +64,18 @@ pub fn build_system_prompt(skills: &[Skill]) -> String {
 - 注意 token 消耗，单次输出不要过长。需要大量输出时，用 `write_file` 写入文件而不是直接输出到聊天。
 - 调用 `finish` 时总结应简洁，详细内容可以写入文件让用户查阅。
 
+### 上下文预算管理
+你的上下文窗口有限。请遵循以下原则管理上下文：
+
+1. **定期检查预算**：每 3-5 轮工具调用后使用 `context_budget` 工具查看当前上下文使用情况
+2. **压力等级指引**：
+   - ✅ Normal（< 60%）：正常执行任务
+   - ⚠️ Warning（60-80%）：开始考虑压缩输出，使用 `kb_store` 保存关键信息
+   - 🔴 Critical（80-90%）：主动调用 `compress_context` 压缩，优先完成核心任务
+   - 🚨 Exhausted（> 90%）：立即使用 `save_summary` 保存关键信息，然后调用 `finish` 结束
+3. **优先使用外部记忆**：关键信息使用 `kb_store` 保存到知识库，而非依赖上下文保留
+4. **主动压缩**：在压力到达 Critical 前主动调用 `compress_context`
+
 {skills_section}
 
 ## 特殊工具说明
@@ -202,7 +214,7 @@ mod tests {
     fn build_prompt_includes_finish_decision_tree() {
         let prompt = build_system_prompt(&[]);
 
-        assert!(prompt.contains("决定是否调用 finish"), "missing finish decision tree");
+        assert!(prompt.contains("决定是否调用 `finish` 工具"), "missing finish decision tree");
         assert!(prompt.contains("明确要求执行任务"), "missing task criteria");
         assert!(prompt.contains("不确定是否是任务"), "missing uncertainty handling");
     }

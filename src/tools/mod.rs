@@ -25,6 +25,7 @@ pub mod cache;
 pub mod async_tool;
 pub mod resources;
 pub mod retry;
+pub mod context_budget;
 
 
 pub type ToolHandler =
@@ -168,6 +169,7 @@ impl ToolRegistry {
             "task_status", "pause_task", "resume_task", "cancel_task",
             "analyze_codebase", "record_analysis", "get_analysis_summary", "finish_analysis",
             "schedule_task", "unschedule_task", "list_scheduled_tasks", "get_scheduled_task_logs",
+            "context_budget", "compress_context", "save_summary",
         ]);
     }
 
@@ -210,6 +212,9 @@ impl ToolRegistry {
             "unschedule_task" => Some(crate::scheduler::tools_handlers::unschedule_task_tool()),
             "list_scheduled_tasks" => Some(crate::scheduler::tools_handlers::list_scheduled_tasks_tool()),
             "get_scheduled_task_logs" => Some(crate::scheduler::tools_handlers::get_scheduled_task_logs_tool()),
+            "context_budget" => Some(context_budget::context_budget_tool()),
+            "compress_context" => Some(context_budget::compress_context_tool()),
+            "save_summary" => Some(context_budget::save_summary_tool()),
             _ => None,
         }
     }
@@ -329,11 +334,12 @@ impl ToolRegistry {
             cache: self.cache.clone(),
             schema_tokens: AtomicUsize::new(0),
         };
-        // 子 Agent 拥有文件工具、KB 工具和 finish
+        // 子 Agent 拥有文件工具、KB 工具、预算工具和 finish
         registry.register_tools_by_names(&[
             "read_file", "batch_read_files", "write_file", "edit_file",
             "glob", "list_directory", "file_exists", "exec_command",
             "kb_store", "kb_query", "finish",
+            "context_budget", "compress_context", "save_summary",
         ]);
         registry
     }
@@ -366,6 +372,7 @@ impl ToolRegistry {
             "read_file", "batch_read_files", "write_file", "edit_file",
             "glob", "list_directory", "file_exists", "exec_command",
             "kb_store", "kb_query", "finish",
+            "context_budget", "compress_context", "save_summary",
         ];
         let filtered: Vec<&str> = all_tool_names.iter()
             .copied()

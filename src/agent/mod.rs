@@ -4,6 +4,7 @@ pub mod display;
 pub mod history;
 pub mod identity;
 pub mod pipeline_context;
+pub mod summary;
 pub mod token_counter;
 
 pub use context::ContextManager;
@@ -43,6 +44,9 @@ pub struct SubagentConfig {
     pub max_iterations: usize,
     pub max_tokens: usize,
     pub agent_type: Option<AgentIdentity>,
+    /// 父代理的上下文预算信息（可选）。传递给子代理，让子代理感知父代理的
+    /// 上下文压力，从而尽快完成并控制输出规模（结果需能容纳回父代理上下文）。
+    pub parent_budget: Option<crate::agent::context::ContextBudget>,
 }
 
 // ---------------------------------------------------------------------------
@@ -190,12 +194,6 @@ impl Agent {
     }
 
     // ----- 活跃模型管理 -----
-
-    /// 设置当前活跃模型名称（用于切换模型后持久化）。
-    #[allow(dead_code)]
-    pub fn set_active_model(&mut self, name: String) {
-        self.context.active_model = Some(name);
-    }
 
     /// 获取当前活跃模型名称（用于切换模型后持久化）。
     pub fn active_model_name(&self) -> Option<&str> {
@@ -470,11 +468,34 @@ impl Agent {
         let context_manager = ContextManager::new(system_prompt, config.max_tokens);
 
         let mut ctx = context_manager;
-        let task_description = if config.context.is_empty() {
+        let mut task_description = if config.context.is_empty() {
             format!("任务目标：{}", config.task)
         } else {
             format!("任务目标：{}\n\n上下文信息：\n{}", config.task, config.context)
         };
+
+        // 若父代理提供了上下文预算信息，附加到任务描述中，
+        // 让子代理感知父代理的压力从而控制输出规模。
+        if let Some(ref pb) = config.parent_budget {
+            let pressure_str = match pb.pressure {
+                crate::agent::context::ContextPressure::Normal => "Normal（充足）",
+                crate::agent::context::ContextPressure::Warning => "Warning（注意）",
+                crate::agent::context::ContextPressure::Critical => "Critical（紧张）",
+                crate::agent::context::ContextPressure::Exhausted => "Exhausted（即将溢出）",
+            };
+            let utilization_pct = pb.utilization * 100.0;
+            task_description.push_str(&format!(
+                "\n\n### 父代理上下文状态\n\
+                 父代理上下文压力：{pressure_str}\n\
+                 父代理使用率：{utilization_pct:.0}%\n\
+                 请尽快完成你的任务。父代理的上下文空间有限，\
+                 你的结果需要能容纳回父代理的上下文中，请控制输出规模，\
+                 只返回必要的关键信息。",
+                pressure_str = pressure_str,
+                utilization_pct = utilization_pct,
+            ));
+        }
+
         ctx.add_message(
             crate::agent::context::Role::User,
             task_description,
@@ -736,6 +757,7 @@ impl Agent {
                 max_iterations: stage.max_iterations,
                 max_tokens: self.context.max_tokens,
                 agent_type: Some(stage.agent_type.clone()),
+                parent_budget: Some(self.context.get_budget_report()),
             }) {
                 Ok(agent) => agent,
                 Err(e) => {
@@ -910,6 +932,16 @@ impl Agent {
                 continue;
             }
 
+            // ── 拦截上下文管理工具调用（context_budget / compress_context / save_summary）──
+            if matches!(
+                tool_call.function.name.as_str(),
+                "context_budget" | "compress_context" | "save_summary"
+            ) {
+                let result = self.handle_context_tool(tool_call).await?;
+                results.push(result);
+                continue;
+            }
+
             // 首先检查异步工具注册表
             let result = if let Some(ref async_tools) = self.async_tools {
                 match async_tools.execute_with_policy(
@@ -1068,6 +1100,7 @@ impl Agent {
             max_iterations: sub_max_iterations,
             max_tokens: sub_max_tokens,
             agent_type: agent_type.clone(),
+            parent_budget: Some(self.context.get_budget_report()),
         }) {
             Ok(agent) => agent,
             Err(e) => {
@@ -1126,6 +1159,146 @@ impl Agent {
         }
     }
 
+    /// 处理上下文管理工具调用（context_budget / compress_context / save_summary）。
+    ///
+    /// 与 `spawn_subagent` 相同的拦截模式：这些工具需要访问 Agent 的上下文，
+    /// 因此由 Agent 层直接处理，而非通过 ToolRegistry 的通用 handler。
+    async fn handle_context_tool(&mut self, tool_call: &ToolCall) -> Result<ToolResult, AppError> {
+        let name = tool_call.function.name.as_str();
+        match name {
+            "context_budget" => {
+                let report = self.context.budget_report_json();
+                Ok(ToolResult::success(format!(
+                    "当前上下文预算使用情况：\n{}",
+                    report
+                )))
+            }
+            "compress_context" => {
+                // 解析策略参数：auto=根据压力等级自动选择，summarize=摘要压缩，truncate=截断
+                let strategy = tool_call.function.arguments["strategy"]
+                    .as_str()
+                    .unwrap_or("auto");
+                let before = self.context.history.used_tokens;
+
+                // 选择压缩策略
+                use crate::agent::compressor::{CompressionStrategy, ContextCompressor};
+                let budget = self.context.get_budget_report();
+                let use_summarize = match strategy {
+                    "summarize" => true,
+                    "truncate" => false,
+                    // auto：仅在压力等级较高时使用摘要压缩（保留语义），
+                    // 正常压力下截断更快速且足够。
+                    _ => matches!(
+                        budget.pressure,
+                        crate::agent::context::ContextPressure::Critical
+                            | crate::agent::context::ContextPressure::Exhausted
+                    ),
+                };
+
+                let info = if use_summarize {
+                    ContextCompressor::summarize(&mut self.context.history, &self.llm).await?
+                } else {
+                    self.context.compress()?
+                };
+
+                if info.did_compress {
+                    let strategy_name = match info.strategy.unwrap_or(CompressionStrategy::Truncate) {
+                        CompressionStrategy::Summarize => "summarize",
+                        CompressionStrategy::Truncate => "truncate",
+                    };
+                    Ok(ToolResult::success(format!(
+                        "上下文已压缩（策略: {}）：{} → {} tokens（保留 {} 轮）",
+                        strategy_name, before, info.after_tokens, info.kept_rounds
+                    )))
+                } else {
+                    Ok(ToolResult::success(
+                        "上下文未达到压缩阈值，无需压缩。可使用 context_budget 查看当前使用情况。"
+                            .to_string(),
+                    ))
+                }
+            }
+            "save_summary" => {
+                let content = tool_call.function.arguments["content"]
+                    .as_str()
+                    .unwrap_or("");
+                if content.trim().is_empty() {
+                    return Ok(ToolResult::failure(
+                        "save_summary: 'content' 参数不能为空".to_string(),
+                        crate::tools::ErrorCategory::Permanent,
+                    ));
+                }
+                // 使用分层摘要系统保存到 .kb/summaries/{session_id}/
+                use crate::agent::summary::{aggregate_summaries, phase_number, SummaryStore};
+                let kb_root = self.working_dir().join(".kb");
+                let store = SummaryStore::new(&self.context.session_id, &kb_root);
+
+                // 1. 计算下一个轮次编号（已有轮次 + 1）
+                let existing_rounds = store.load_rounds()?;
+                let next_round = existing_rounds
+                    .iter()
+                    .map(|r| r.round)
+                    .max()
+                    .unwrap_or(0)
+                    + 1;
+
+                // 2. 保存轮次摘要（层级 1）
+                store.save_round(next_round, content)?;
+
+                // 3. 若凑满一个阶段（每 ROUNDS_PER_PHASE 轮），聚合为阶段摘要（层级 2）
+                let mut phase_aggregated = None;
+                let phase = phase_number(next_round);
+                let phase_start = (phase - 1) * crate::agent::summary::ROUNDS_PER_PHASE + 1;
+                let phase_end = phase * crate::agent::summary::ROUNDS_PER_PHASE;
+                let phase_rounds: Vec<String> = existing_rounds
+                    .iter()
+                    .filter(|r| r.round >= phase_start && r.round <= phase_end)
+                    .map(|r| r.content.clone())
+                    .collect();
+                // 若当前轮恰好是阶段末轮，且已有足够轮次，则聚合阶段摘要
+                if next_round == phase_end && phase_rounds.len() + 1 >= crate::agent::summary::ROUNDS_PER_PHASE {
+                    let mut items = phase_rounds;
+                    items.push(content.to_string());
+                    let phase_summary = aggregate_summaries(&self.llm, "轮次", &items, 500).await?;
+                    if !phase_summary.is_empty() {
+                        store.save_phase(phase_start, phase_end, &phase_summary)?;
+                        phase_aggregated = Some(phase);
+                    }
+                }
+
+                // 4. 若已积累多个阶段摘要，聚合为会话摘要（层级 3，final.md）
+                let mut final_aggregated = None;
+                let phases = store.load_phases()?;
+                if phases.len() >= 2 {
+                    let items: Vec<String> = phases.iter().map(|p| p.content.clone()).collect();
+                    let final_summary = aggregate_summaries(&self.llm, "阶段", &items, 1000).await?;
+                    if !final_summary.is_empty() {
+                        store.save_final(&final_summary)?;
+                        final_aggregated = Some(phases.len());
+                    }
+                }
+
+                let mut msg = format!(
+                    "摘要已保存为轮次 {}（.kb/summaries/{}/round-{}.md，约 {} tokens）",
+                    next_round,
+                    self.context.session_id,
+                    next_round,
+                    crate::agent::token_counter::TokenCounter::estimate(content)
+                );
+                if let Some(p) = phase_aggregated {
+                    msg.push_str(&format!("\n已聚合为阶段摘要 phase-{}", p));
+                }
+                if let Some(n) = final_aggregated {
+                    msg.push_str(&format!("\n已聚合为会话摘要 final.md（{} 个阶段）", n));
+                }
+                Ok(ToolResult::success(msg))
+            }
+            _ => Ok(ToolResult::failure(
+                format!("unknown context tool: {}", name),
+                crate::tools::ErrorCategory::Permanent,
+            )),
+        }
+    }
+
     /// 匹配用户消息与已注册技能。使用预计算的关键词索引进行快速匹配。
     ///
     /// 改进：
@@ -1158,8 +1331,8 @@ impl Agent {
                         // 确保关键词前后不是字母数字（单词边界）
                         let before = pos.checked_sub(1).map(|i| msg_lower.as_bytes()[i]).unwrap_or(b' ');
                         let after = msg_lower.as_bytes().get(pos + kw_lower.len()).copied().unwrap_or(b' ');
-                        let is_word_boundary = !before.is_ascii_alphanumeric() && !after.is_ascii_alphanumeric();
-                        is_word_boundary
+                        
+                        !before.is_ascii_alphanumeric() && !after.is_ascii_alphanumeric()
                     } else {
                         // 中文关键词直接匹配
                         true
@@ -1252,6 +1425,7 @@ mod tests {
             max_iterations: 10,
             max_tokens: 4096,
             agent_type: None,
+            parent_budget: None,
         }
     }
 

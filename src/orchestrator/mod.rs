@@ -549,6 +549,7 @@ async fn execute_single_task(
         max_iterations,
         max_tokens,
         agent_type,
+        parent_budget: None,
     }) {
         Ok(agent) => agent,
         Err(e) => {

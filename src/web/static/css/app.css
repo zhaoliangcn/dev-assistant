@@ -16,6 +16,19 @@
     --message-user-bg: #1a3a5c;
     --message-user-color: #e0e0e0;
     --message-user-border: #2a4a6c;
+    --status-thinking-color: #6aaef2;
+    --skeleton-bg: #2a2a3a;
+    --skeleton-highlight: #3a3a4a;
+    --toast-bg: #3b1111;
+    --toast-border: #7f1d1d;
+    --toast-text: #fecaca;
+    --search-bg: #1e1e2e;
+    --search-border: #3a3a4a;
+    --sidebar-hover-bg: #2a2a3a;
+    --file-row-hover-bg: #2a2a3a;
+    --diff-add-bg: rgba(40, 167, 69, 0.25);
+    --diff-del-bg: rgba(220, 53, 69, 0.25);
+    --code-block-header-bg: #2a2a3a;
 }
 
 /* ── 布局 ── */
@@ -99,10 +112,10 @@ footer {
 .message-list {
     flex: 1;
     overflow-y: auto;
-    padding: 1rem;
+    padding: 1.25rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.75rem;
 }
 
 /* ── 工具活动区（C1/C3：独立容器，位于对话区上方） ── */
@@ -321,6 +334,58 @@ footer {
     padding: 0.0625rem 0.375rem;
 }
 
+/* P5: 代码块运行按钮 */
+.run-btn {
+    font-size: 0.75em;
+    padding: 0.125rem 0.5rem;
+    background: #10b981;
+    color: #fff;
+    border: none;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    line-height: 1.4;
+    width: auto;
+    margin: 0;
+}
+
+.run-btn:hover {
+    background: #059669;
+}
+
+.code-run-output {
+    margin: 0.5rem;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    font-family: var(--pico-font-family-monospace, monospace);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.code-run-success {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #10b981;
+}
+
+.code-run-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #ef4444;
+}
+
+[data-theme="dark"] .code-run-success {
+    background: #064e3b;
+    color: #6ee7b7;
+    border-color: #10b981;
+}
+
+[data-theme="dark"] .code-run-error {
+    background: #3b1111;
+    color: #fecaca;
+    border-color: #ef4444;
+}
+
 .code-block pre {
     margin: 0;
     border-radius: 0;
@@ -375,6 +440,48 @@ footer {
     font-weight: 600;
 }
 
+/* P3: 任务列表样式 */
+.message-content .task-item {
+    list-style: none;
+    margin: 0.25rem 0;
+}
+
+.message-content .task-item input[type="checkbox"] {
+    margin-right: 0.5rem;
+    cursor: default;
+}
+
+.message-content .task-item[data-checked="true"] {
+    opacity: 0.7;
+    text-decoration: line-through;
+}
+
+/* P3: 数学公式样式 */
+.message-content .math-block {
+    padding: 0.75rem;
+    margin: 0.5rem 0;
+    background: var(--pico-card-sectioning-background-color);
+    border-radius: 0.375rem;
+    font-family: var(--pico-font-family-monospace, monospace);
+    font-size: 0.9em;
+    text-align: center;
+    overflow-x: auto;
+}
+
+.message-content code.math {
+    background: var(--pico-card-sectioning-background-color);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-family: var(--pico-font-family-monospace, monospace);
+    font-size: 0.9em;
+}
+
+/* P3: 删除线样式 */
+.message-content del {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
 /* ── 思考/状态条（W2：可替换，不进入消息列表） ── */
 
 .thinking {
@@ -412,13 +519,20 @@ footer {
 
 .input-area {
     border-top: 1px solid var(--pico-muted-border-color);
-    padding: 0.75rem 1rem;
+    padding: 0.875rem 1.25rem;
     background: var(--pico-card-background-color);
     flex-shrink: 0;
 }
 
 .input-form {
     margin: 0;
+}
+
+/* 输入区栅格：textarea 占满剩余宽度，按钮自适应内容宽度 */
+.input-form .grid {
+    grid-template-columns: 1fr auto auto auto;
+    gap: 0.5rem;
+    align-items: end;
 }
 
 .input-form input[type="text"] {
@@ -436,6 +550,43 @@ footer {
 /* W10: 停止按钮（生成中替代发送按钮） */
 .stop-btn {
     white-space: nowrap;
+}
+
+/* P2: 搜索按钮 */
+.search-toggle-btn {
+    white-space: nowrap;
+}
+
+.search-toggle-btn.search-active {
+    background: var(--pico-primary);
+    color: var(--pico-primary-inverse, #fff);
+    border-color: var(--pico-primary);
+}
+
+/* 错误消息样式 */
+.message.error-message {
+    align-self: center;
+    background: #fef2f2;
+    border-color: #fecaca;
+}
+
+[data-theme="dark"] .message.error-message {
+    background: #3b1111;
+    border-color: #7f1d1d;
+}
+
+/* 重试按钮 */
+.retry-btn {
+    margin-top: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.8em;
+    background: var(--pico-primary);
+    color: var(--pico-primary-inverse, #fff);
+    border-color: var(--pico-primary);
+}
+
+.retry-btn:hover {
+    opacity: 0.9;
 }
 
 /* ── 可折叠内容 ── */
@@ -501,22 +652,251 @@ footer {
 
 /* ── 响应式 ── */
 
-@media (max-width: 768px) {
+/* Alpine x-cloak：初始隐藏，Alpine 初始化后移除 */
+[x-cloak] { display: none !important; }
+
+/* 小屏手机：侧栏抽屉化 */
+@media (max-width: 480px) {
+    .chat-layout {
+        grid-template-columns: 1fr;
+        padding: 0.5rem;
+    }
+
+    .session-sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 85vw;
+        max-width: 320px;
+        z-index: 100;
+        transform: translateX(-100%);
+        transition: transform 0.25s ease;
+        border-radius: 0;
+    }
+
+    .session-sidebar.sidebar-open {
+        transform: translateX(0);
+        box-shadow: 4px 0 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 99;
+    }
+
+    .sidebar-overlay.sidebar-visible {
+        display: block;
+    }
+
     .message {
         max-width: 95%;
     }
+
+    /* 移动端紧凑内边距 */
+    .message-list {
+        padding: 0.875rem;
+        gap: 0.625rem;
+    }
+
+    .input-area {
+        padding: 0.625rem 0.875rem;
+    }
+
+    .file-layout {
+        grid-template-columns: 1fr;
+        padding: 0.5rem;
+    }
+
+    .file-tree-panel {
+        max-height: 35vh;
+    }
+
+    /* 移动端编辑器紧凑内边距 */
+    .file-editor {
+        padding: 0.625rem 0.75rem;
+    }
+
+    .file-panel-header {
+        padding: 0.375rem 0.5rem;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+    }
+
+    .file-content-actions {
+        gap: 0.25rem;
+    }
+
+    header nav ul li button,
+    header nav ul li a[role="button"] {
+        padding: 0.15rem 0.5rem;
+        font-size: 0.75em;
+    }
+
+    .input-form textarea {
+        min-height: 2.25rem;
+    }
+}
+
+/* 平板：侧栏两栏布局（769px 起，避免与 768px 以下单栏堆叠规则冲突） */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .chat-layout {
+        grid-template-columns: 240px 1fr;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+    }
+
+    .session-sidebar {
+        font-size: 0.9em;
+    }
+
+    .sidebar-tab {
+        font-size: 0.8em;
+    }
+
+    .message {
+        max-width: 90%;
+    }
+
+    .file-layout {
+        grid-template-columns: 240px 1fr;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+    }
+}
+
+/* 桌面端：宽屏优化 */
+@media (min-width: 1025px) {
+    .chat-layout {
+        grid-template-columns: 300px 1fr;
+        gap: 1rem;
+        padding: 1rem 1.25rem;
+    }
+
+    .message {
+        max-width: 75%;
+    }
+
+    .message-content {
+        font-size: 0.95em;
+    }
+
+    .file-layout {
+        grid-template-columns: 300px 1fr;
+        gap: 1rem;
+        padding: 1rem 1.25rem;
+        width: 100%;
+    }
+}
+
+/* 骨架屏加载状态 */
+.skeleton-container {
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+}
+
+.sidebar-skeleton {
+    padding: 0.5rem 0.625rem;
+}
+
+.skeleton-message {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+}
+
+.skeleton-avatar {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--skeleton-bg, var(--pico-muted-border-color));
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+[data-theme="dark"] .skeleton-avatar {
+    background: var(--skeleton-highlight, #3a3a4a);
+}
+
+.skeleton-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.skeleton-session-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px dashed var(--pico-muted-border-color);
+}
+
+.skeleton-session-item:last-child {
+    border-bottom: none;
+}
+
+.skeleton-file-item {
+    padding: 0.375rem 0.5rem;
+    border-radius: 0.25rem;
+}
+
+.skeleton-line {
+    height: 0.625rem;
+    border-radius: 0.25rem;
+    background: var(--skeleton-bg, var(--pico-muted-border-color));
+    opacity: 0.6;
+}
+
+[data-theme="dark"] .skeleton-line {
+    background: var(--skeleton-highlight, #3a3a4a);
+}
+
+.skeleton-line-short {
+    width: 40%;
+}
+
+.skeleton-line-medium {
+    width: 70%;
+}
+
+.skeleton-line-long {
+    width: 90%;
+}
+
+/* ── 虚拟滚动 ── */
+
+.virtual-scroll-container {
+    position: relative;
+    min-height: 0;
+}
+
+.virtual-spacer {
+    width: 100%;
+    pointer-events: none;
 }
 
 /* ── 对话布局与会话侧栏（S2） ── */
 
 /* B17: 高度由 flex 自适应（main 为 flex 列容器，flex:1 占满剩余空间），
-   不再硬编码 calc(100vh - Npx)——header 高度变化时不会遮挡消息区顶部 */
+   不再硬编码 calc(100vh - Npx)——header 高度变化时不会遮挡消息区顶部
+   侧栏固定靠左（300px），消息对话区自适应剩余宽度 */
 .chat-layout {
-    grid-template-columns: 260px 1fr;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
+    grid-template-columns: 300px 1fr;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
     flex: 1;
     min-height: 0;
+    width: 100%;
 }
 
 .session-sidebar {
@@ -534,6 +914,42 @@ footer {
     display: flex;
     border-bottom: 1px solid var(--pico-muted-border-color);
     flex-shrink: 0;
+}
+
+/* 移动端侧栏头部 */
+.mobile-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    background: var(--pico-card-sectioning-background-color);
+    flex-shrink: 0;
+}
+
+.mobile-menu-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 1.2em;
+    line-height: 1;
+}
+
+/* 侧栏外部点击遮罩（移动端抽屉） */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 99;
+}
+
+.sidebar-overlay.sidebar-visible {
+    display: block;
+}
+
+@media (min-width: 481px) {
+    .sidebar-overlay {
+        display: none !important;
+    }
 }
 
 .sidebar-tab {
@@ -663,10 +1079,13 @@ footer {
     .chat-layout {
         grid-template-columns: 1fr;
         height: auto;
+        padding: 0.625rem;
     }
 
     .session-sidebar {
-        max-height: 30vh;
+        max-height: 40vh;
+        border-bottom: 1px solid var(--pico-muted-border-color);
+        border-radius: 0.5rem;
     }
 }
 
@@ -687,6 +1106,74 @@ footer {
     white-space: nowrap;
 }
 
+/* ── 连接错误 Toast（P3） ── */
+
+.connection-error-toast {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    background: var(--toast-bg, #fef2f2);
+    border: 1px solid var(--toast-border, #fecaca);
+    border-radius: 0.375rem;
+    color: var(--toast-text, #991b1b);
+    font-size: 0.85em;
+}
+
+[data-theme="dark"] .connection-error-toast {
+    background: var(--toast-bg, #3b1111);
+    border-color: var(--toast-border, #7f1d1d);
+    color: var(--toast-text, #fecaca);
+}
+
+/* ── 搜索面板（P2） ── */
+
+.search-panel {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    background: var(--pico-card-background-color);
+}
+
+.search-header {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.search-input {
+    flex: 1;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.85em;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.375rem;
+    background: var(--pico-card-background-color);
+    color: inherit;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--pico-primary);
+    box-shadow: 0 0 0 3px rgba(var(--pico-primary-rgb, 59, 130, 246), 0.1);
+}
+
+.search-count {
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+    white-space: nowrap;
+}
+
+.search-actions {
+    display: flex;
+    gap: 0.25rem;
+}
+
 /* ── 文件浏览器页面（W11） ── */
 
 .file-page {
@@ -697,10 +1184,10 @@ footer {
 
 .file-layout {
     display: grid;
-    grid-template-columns: 1fr 2fr;
-    gap: 0.75rem;
+    grid-template-columns: 300px 1fr;
+    gap: 1rem;
     width: 100%;
-    padding: 0.75rem 1rem;
+    padding: 1rem 1.25rem;
     flex: 1;
     min-height: 0;
 }
@@ -716,13 +1203,37 @@ footer {
     min-height: 0;
 }
 
+/* x-if 渲染的内容包裹层：继承 flex 列布局，
+   使 file-editor / file-preview / file-diff 的 flex:1 能自适应填充剩余高度 */
+.file-content-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
 .file-panel-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 0.75rem;
     padding: 0.5rem 0.75rem;
     border-bottom: 1px solid var(--pico-muted-border-color);
     background: var(--pico-card-sectioning-background-color);
+    flex-shrink: 0;
+}
+
+/* 长路径截断，避免工具栏溢出 */
+.file-panel-header > strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9em;
+}
+
+.file-content-actions {
     flex-shrink: 0;
 }
 
@@ -768,18 +1279,53 @@ footer {
 }
 
 .file-empty,
-.file-loading,
-.file-placeholder {
+.file-loading {
     padding: 1.5rem;
     text-align: center;
     color: var(--pico-muted-color);
     font-size: 0.9em;
 }
 
+/* 文件占位（未选择文件）：居中空状态卡片 */
+.file-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    color: var(--pico-muted-color);
+    font-size: 0.95em;
+    border: 1px dashed var(--pico-muted-border-color);
+    border-radius: 0.5rem;
+    margin: 0.75rem;
+    background: var(--pico-card-sectioning-background-color);
+}
+
+.file-placeholder p {
+    margin: 0;
+}
+
 .file-content-panel .file-content-actions {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+/* 视图切换按钮：激活态高亮 */
+.file-content-actions .view-active {
+    background: var(--pico-primary);
+    border-color: var(--pico-primary);
+    color: var(--pico-primary-inverse, #fff);
+}
+
+.file-content-actions .view-active:hover {
+    color: var(--pico-primary-inverse, #fff);
+}
+
+.file-content-actions .copy-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .file-status {
@@ -792,18 +1338,20 @@ footer {
     width: 100%;
     border: none;
     resize: none;
-    padding: 0.75rem;
+    padding: 0.875rem 1rem;
     font-family: var(--pico-font-family-monospace, monospace);
     font-size: 0.85em;
-    line-height: 1.5;
+    line-height: 1.55;
     background: transparent;
     color: inherit;
     min-height: 0;
+    tab-size: 4;
 }
 
 .file-editor:focus {
     outline: none;
     box-shadow: none;
+    background: color-mix(in srgb, var(--pico-primary) 4%, transparent);
 }
 
 /* ── 文件预览视图（N2） ── */
@@ -872,6 +1420,11 @@ footer {
     padding: 0 0.75rem;
     white-space: pre-wrap;
     word-break: break-word;
+    transition: background-color 0.12s ease;
+}
+
+.diff-line:hover {
+    background: color-mix(in srgb, var(--pico-primary) 6%, transparent);
 }
 
 .diff-marker {
@@ -913,5 +1466,457 @@ footer {
 
     .file-tree-panel {
         max-height: 40vh;
+    }
+}
+
+/* ── PWA 安装提示横幅（P4） ── */
+
+.pwa-install-banner {
+    position: fixed;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    max-width: 90vw;
+    width: 420px;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.75rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    padding: 1rem;
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+.pwa-install-content {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.pwa-install-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+}
+
+.pwa-install-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.pwa-install-text strong {
+    display: block;
+    font-size: 0.95em;
+    margin-bottom: 0.25rem;
+}
+
+.pwa-install-text p {
+    margin: 0;
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+}
+
+.pwa-install-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.pwa-install-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.85em;
+    background: var(--pico-primary);
+    color: var(--pico-primary-inverse, #fff);
+    border: none;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.pwa-install-btn:hover {
+    opacity: 0.9;
+}
+
+.pwa-install-dismiss {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85em;
+    background: transparent;
+    color: var(--pico-muted-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.pwa-install-dismiss:hover {
+    background: var(--pico-card-sectioning-background-color);
+}
+
+/* ── 性能监控面板（P5） ── */
+
+.performance-panel {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 200;
+    width: 280px;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.performance-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    background: var(--pico-card-sectioning-background-color);
+}
+
+.performance-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    padding: 0.75rem;
+}
+
+.metric {
+    text-align: center;
+}
+
+.metric-label {
+    display: block;
+    font-size: 0.75em;
+    color: var(--pico-muted-color);
+    margin-bottom: 0.25rem;
+}
+
+.metric-value {
+    display: block;
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--pico-primary);
+}
+
+@media (max-width: 480px) {
+    .performance-panel {
+        top: auto;
+        bottom: 1rem;
+        right: 0.5rem;
+        left: 0.5rem;
+        width: auto;
+    }
+}
+
+/* ── 主题定制面板（P5） ── */
+
+.customization-panel {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 200;
+    width: 300px;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.customization-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    background: var(--pico-card-sectioning-background-color);
+}
+
+.customization-body {
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.customize-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.customize-item label {
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--pico-muted-color);
+}
+
+.customize-item input[type="range"] {
+    width: 100%;
+    cursor: pointer;
+}
+
+.customize-item input[type="color"] {
+    width: 100%;
+    height: 2.5rem;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    padding: 0.125rem;
+}
+
+.customize-item span {
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+    text-align: right;
+}
+
+@media (max-width: 480px) {
+    .customization-panel {
+        top: auto;
+        bottom: 1rem;
+        right: 0.5rem;
+        left: 0.5rem;
+        width: auto;
+    }
+}
+
+/* ── 可访问性 a11y（P4） ── */
+
+/* 屏幕阅读器专用：视觉隐藏但可访问 */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* 焦点指示器：增强键盘导航可见性 */
+:focus-visible {
+    outline: 2px solid var(--pico-primary);
+    outline-offset: 2px;
+}
+
+/* 跳过导航链接（键盘用户快速跳转到主内容） */
+.skip-nav {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    padding: 8px 16px;
+    background: var(--pico-primary);
+    color: var(--pico-primary-inverse, #fff);
+    text-decoration: none;
+    z-index: 100;
+    border-radius: 0 0 4px 0;
+}
+
+.skip-nav:focus {
+    top: 0;
+}
+
+/* 消息区域 ARIA 标签 */
+.message-list[aria-label] {
+    scroll-behavior: smooth;
+}
+
+/* 按钮和交互元素的可访问性增强 */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline: 2px solid var(--pico-primary);
+    outline-offset: 2px;
+}
+
+/* 高对比度模式支持 */
+@media (forced-colors: active) {
+    .message.user {
+        border: 2px solid LinkText;
+    }
+    
+    .message.assistant {
+        border: 2px solid WindowText;
+    }
+    
+    button:focus-visible {
+        outline: 2px solid Highlight;
+    }
+}
+
+/* 减少动画偏好（可访问性） */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    
+    .pwa-install-banner {
+        animation: none;
+    }
+}
+
+/* 暗色模式下的焦点指示器 */
+[data-theme="dark"] :focus-visible {
+    outline-color: #60a5fa;
+}
+
+/* 工具结果折叠区域可访问性 */
+details[role="region"] {
+    cursor: pointer;
+}
+
+details[aria-expanded] summary {
+    list-style: none;
+}
+
+details[aria-expanded] summary::-webkit-details-marker {
+    display: none;
+}
+
+/* ============================================================
+   视觉美化优化块
+   ============================================================ */
+
+/* ── 消息入场动效与卡片质感 ── */
+
+@keyframes message-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.message {
+    animation: message-in 0.2s ease-out;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.message.user {
+    background: linear-gradient(135deg, var(--message-user-bg, #e3f2fd), var(--message-user-bg, #e3f2fd) 85%);
+}
+
+.message.assistant {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* 流式生成中的光标动画 */
+.message.streaming .message-content::after {
+    content: '▌';
+    display: inline-block;
+    margin-left: 2px;
+    color: var(--pico-primary);
+    animation: cursor-blink 0.8s steps(1) infinite;
+}
+
+@keyframes cursor-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* ── 侧栏交互优化 ── */
+
+.sidebar-tab,
+.session-item,
+.copy-btn,
+.session-new {
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.session-item.session-active {
+    background: linear-gradient(90deg, var(--pico-primary), color-mix(in srgb, var(--pico-primary) 80%, transparent));
+    border-left: 3px solid color-mix(in srgb, var(--pico-primary) 120%, #000);
+}
+
+.session-item.session-active .session-item-title {
+    color: var(--pico-primary-inverse, #fff);
+}
+
+.session-item.session-active .session-item-meta {
+    color: var(--pico-primary-inverse, #fff);
+    opacity: 0.85;
+}
+
+.session-item .session-delete {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.session-item:hover .session-delete,
+.session-item:focus-within .session-delete {
+    opacity: 1;
+}
+
+/* ── 空状态美化 ── */
+
+.session-empty {
+    border: 1px dashed var(--pico-muted-border-color);
+    border-radius: 0.5rem;
+    margin: 0.5rem;
+    padding: 1.25rem 0.75rem;
+    background: var(--pico-card-sectioning-background-color);
+}
+
+/* ── 输入区细节 ── */
+
+.input-form textarea:focus {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--pico-primary) 30%, transparent);
+}
+
+/* ── 细滚动条（WebKit） ── */
+
+.message-list::-webkit-scrollbar,
+.session-list::-webkit-scrollbar,
+.file-tree-list::-webkit-scrollbar,
+.tool-activity-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.message-list::-webkit-scrollbar-thumb,
+.session-list::-webkit-scrollbar-thumb,
+.file-tree-list::-webkit-scrollbar-thumb,
+.tool-activity-list::-webkit-scrollbar-thumb {
+    background: var(--pico-muted-border-color);
+    border-radius: 4px;
+}
+
+.message-list::-webkit-scrollbar-thumb:hover,
+.session-list::-webkit-scrollbar-thumb:hover {
+    background: var(--pico-muted-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .message,
+    .sidebar-tab,
+    .session-item,
+    .copy-btn,
+    .session-new {
+        animation: none;
+        transition: none;
     }
 }

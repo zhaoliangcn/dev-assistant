@@ -201,11 +201,11 @@ pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
         return String::new();
     }
 
-    let mut sections = vec!["可用技能（请求匹配技能关键词时会自动激活，技能内容将附加到你的输入中）：".to_string()];
+    // 标题由调用方（build_system_prompt）提供，此处只输出技能列表，避免重复标题。
+    let mut sections: Vec<String> = Vec::new();
     for skill in skills {
         sections.push(skill.format_for_prompt());
     }
-    sections.push(String::new());
     sections.join("\n")
 }
 
@@ -268,16 +268,10 @@ mod tests {
         );
 
         let skill = parse_skill_file(&skill_dir.join("SKILL.md")).unwrap();
-        eprintln!("DEBUG body=[{}]", skill.body);
         assert_eq!(skill.meta.name, "my-skill");
         assert_eq!(skill.meta.description, "A test skill");
         assert_eq!(skill.meta.when_to_use.as_deref(), Some("trigger keyword"));
-        // 当前 splitn 逻辑实际取出的 body 包含 frontmatter 字段名（未正确分隔 closing ---）
-        assert!(
-            skill.body.contains("name: my-skill") || skill.body.contains("Do thing"),
-            "body should contain either frontmatter leak or user content, got: [{}]",
-            skill.body
-        );
+        assert_eq!(skill.body, "## Steps\n1. Do thing\n2. Finish");
     }
 
     #[test]
@@ -341,16 +335,18 @@ mod tests {
             keywords,
         };
         let prompt = skill.format_for_prompt();
-        assert!(prompt.contains("code-review"));
-        assert!(prompt.contains("审查代码"));
-        assert!(prompt.contains("重构"));
+        assert_eq!(prompt, "- **code-review**: 审查代码\n  触发条件: 重构、清理");
     }
 
     #[test]
     fn format_skills_for_prompt_handles_empty_list() {
+        // 空技能列表返回空字符串（标题由调用方 build_system_prompt 负责），不应 panic
         let prompt = format_skills_for_prompt(&[]);
-        // 空列表应当有明确说明（不是 panic）
-        assert!(prompt.contains("暂无") || prompt.trim().is_empty() || prompt.contains("No skills"), "expected empty-skills notice, got: {}", prompt);
+        assert!(
+            prompt.is_empty(),
+            "expected empty prompt for empty skills, got: [{}]",
+            prompt
+        );
     }
 }
 

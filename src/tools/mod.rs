@@ -337,6 +337,7 @@ impl ToolRegistry {
         // 子 Agent 拥有文件工具、KB 工具、预算工具和 finish
         registry.register_tools_by_names(&[
             "read_file", "batch_read_files", "write_file", "edit_file",
+            "read_symbol",
             "glob", "list_directory", "file_exists", "exec_command",
             "kb_store", "kb_query", "finish",
             "context_budget", "compress_context", "save_summary",
@@ -370,6 +371,7 @@ impl ToolRegistry {
         // 根据身份过滤工具名，然后批量注册
         let all_tool_names = [
             "read_file", "batch_read_files", "write_file", "edit_file",
+            "read_symbol",
             "glob", "list_directory", "file_exists", "exec_command",
             "kb_store", "kb_query", "finish",
             "context_budget", "compress_context", "save_summary",

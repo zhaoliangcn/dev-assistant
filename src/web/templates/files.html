@@ -3,31 +3,56 @@
 {% block title %}Dev-Assistant 文件浏览器{% endblock %}
 
 {% block content %}
-<div class="file-page" x-data="fileExplorer()" x-init="loadDir('.')">
+<div class="file-page" x-data="fileExplorer()" x-init="loadDir('.')"
+     @file-opened.window="openFile($event.detail.path)">
     <div class="file-layout">
-        <!-- 左侧：目录树 -->
-        <div class="file-tree-panel">
+        <!-- 左侧：共享侧栏组件（文件树） -->
+        <div class="file-tree-panel"
+             x-data="sidebarWidget()"
+             role="region"
+             aria-label="文件树">
             <div class="file-panel-header">
                 <strong>📁 文件浏览器</strong>
                 <div class="file-content-actions">
-                    <button type="button" class="copy-btn" @click="newFile()" title="新建文件">＋ 新建</button>
-                    <button type="button" class="copy-btn" @click="loadDir(currentPath)">🔄</button>
+                    <button type="button" class="copy-btn" @click="newFile()" title="新建文件" aria-label="新建文件">＋ 新建</button>
+                    <button type="button" class="copy-btn" @click="loadDir(currentPath)" title="刷新" aria-label="刷新文件列表">🔄</button>
                 </div>
             </div>
-            <div class="file-tree" x-show="!loading">
+            <!-- 骨架屏加载状态 -->
+            <div x-show="loading" class="skeleton-container">
+                <template x-for="i in 8" :key="i">
+                    <div class="skeleton-file-item">
+                        <div class="skeleton-line" :class="i % 3 === 0 ? 'skeleton-line-short' : (i % 3 === 1 ? 'skeleton-line-medium' : 'skeleton-line-long')"></div>
+                    </div>
+                </template>
+            </div>
+            <div class="file-tree" x-show="!loading" @scroll="onTreeScroll($event)">
                 <div class="file-nav">
                     <span class="file-nav-path" x-text="'📂 ' + (currentPath || '.')"></span>
                     <button type="button" class="copy-btn" @click="loadDir(parentPath())"
-                            x-show="currentPath !== '.'" title="上一级">⬆ 上级</button>
+                            x-show="currentPath !== '.'" title="上一级" aria-label="返回上一级目录">⬆ 上级</button>
                 </div>
-                <template x-for="entry in entries" :key="entry.path">
-                    <div class="file-row"
-                         :class="{ 'file-dir': entry.is_dir, 'file-active': entry.path === activePath }"
-                         @click="entry.is_dir ? loadDir(entry.path) : openFile(entry.path)">
-                        <span x-text="entry.is_dir ? '📁 ' + entry.name : '📄 ' + entry.name"></span>
-                        <span class="file-size" x-show="!entry.is_dir" x-text="formatSize(entry.size)"></span>
-                    </div>
-                </template>
+                <!-- 虚拟滚动顶部占位 -->
+                <div x-show="entries.length > treeVirtualWindow + treeOverscan * 2" class="virtual-spacer"
+                     :style="'height:' + treeSpacerTop + 'px'"></div>
+                <div class="file-tree-list" role="list">
+                    <template x-for="entry in visibleTreeEntries" :key="entry.path">
+                        <div class="file-row"
+                             role="button"
+                             tabindex="0"
+                             :aria-label="entry.is_dir ? ('打开目录 ' + entry.name) : ('打开文件 ' + entry.name)"
+                             :class="{ 'file-dir': entry.is_dir, 'file-active': entry.path === activePath }"
+                             @click="entry.is_dir ? loadDir(entry.path) : openFile(entry.path)"
+                             @keydown.enter.prevent="entry.is_dir ? loadDir(entry.path) : openFile(entry.path)"
+                             @keydown.space.prevent="entry.is_dir ? loadDir(entry.path) : openFile(entry.path)">
+                            <span x-text="entry.is_dir ? '📁 ' + entry.name : '📄 ' + entry.name"></span>
+                            <span class="file-size" x-show="!entry.is_dir" x-text="formatSize(entry.size)"></span>
+                        </div>
+                    </template>
+                </div>
+                <!-- 虚拟滚动底部占位 -->
+                <div x-show="entries.length > treeVirtualWindow + treeOverscan * 2" class="virtual-spacer"
+                     :style="'height:' + treeSpacerBottom + 'px'"></div>
                 <div class="file-empty" x-show="!loading && entries.length === 0">（空目录）</div>
             </div>
             <div class="file-loading" x-show="loading">加载中...</div>
@@ -36,7 +61,7 @@
         <!-- 右侧：文件内容 -->
         <div class="file-content-panel">
             <template x-if="activePath">
-                <div>
+                <div class="file-content-body">
                     <div class="file-panel-header">
                         <strong x-text="'📄 ' + activePath"></strong>
                         <div class="file-content-actions">

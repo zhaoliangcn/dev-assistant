@@ -229,23 +229,53 @@ fn attrs_start_line(lines: &[&str], line_idx: usize) -> usize {
     (i + 1) as usize
 }
 
+/// 去掉行首的可见性修饰符（pub、pub(crate)、pub(super) 等）和
+/// async/unsafe/extern 关键字，返回核心内容。
+/// 使 `pub fn`、`pub async fn`、`pub(crate) struct` 等都能被正确匹配。
+fn strip_modifiers(s: &str) -> &str {
+    let s = s.trim();
+    // 跳过可见性修饰符
+    let s = if s.starts_with("pub(") {
+        // pub(crate), pub(super), pub(in path)
+        if let Some(end) = s.find(')') {
+            s[end + 1..].trim()
+        } else {
+            s
+        }
+    } else if let Some(stripped) = s.strip_prefix("pub ") {
+        stripped.trim()
+    } else if let Some(stripped) = s.strip_prefix("pub\t") {
+        stripped.trim()
+    } else {
+        s
+    };
+    // 跳过 async, unsafe, extern 等修饰
+    let s = s.strip_prefix("async ").unwrap_or(s);
+    let s = s.strip_prefix("unsafe ").unwrap_or(s);
+    let s = s.strip_prefix("extern ").unwrap_or(s);
+    s
+}
+
 /// 尝试在指定行匹配一个符号定义。
 /// 返回 (符号类型, 符号名, 主体结束行号（0-indexed, 不含 body 则为 None）)
 fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, String, Option<usize>)> {
     let line = lines[line_idx];
     let trimmed = line.trim();
+    // 去掉可见性/async/unsafe 等修饰符后再匹配关键字，
+    // 使 `pub fn`、`pub async fn`、`pub(crate) struct` 等都能被正确识别。
+    let core = strip_modifiers(trimmed);
 
     // 按优先级从高到低匹配
 
     // 1. 函数: fn <name>(
-    if let Some(name) = match_keyword(trimmed, "fn ") {
+    if let Some(name) = match_keyword(core, "fn ") {
         if !name.starts_with(|c: char| c.is_whitespace() || c == '(') {
             return Some((SymbolKind::Function, extract_name(name), find_body_end(lines, line_idx)));
         }
     }
 
     // 2. 结构体: struct <name>
-    if let Some(name) = match_keyword(trimmed, "struct ") {
+    if let Some(name) = match_keyword(core, "struct ") {
         let name = extract_name(name);
         if !name.is_empty() && !name.starts_with('{') {
             return Some((SymbolKind::Struct, name, find_body_end(lines, line_idx)));
@@ -253,7 +283,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     }
 
     // 3. 枚举: enum <name>
-    if let Some(name) = match_keyword(trimmed, "enum ") {
+    if let Some(name) = match_keyword(core, "enum ") {
         let name = extract_name(name);
         if !name.is_empty() && !name.starts_with('{') {
             return Some((SymbolKind::Enum, name, find_body_end(lines, line_idx)));
@@ -261,7 +291,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     }
 
     // 4. trait: trait <name>
-    if let Some(name) = match_keyword(trimmed, "trait ") {
+    if let Some(name) = match_keyword(core, "trait ") {
         let name = extract_name(name);
         if !name.is_empty() && !name.starts_with('{') && !name.starts_with('(') {
             return Some((SymbolKind::Trait, name, find_body_end(lines, line_idx)));
@@ -269,7 +299,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     }
 
     // 5. impl <target> (impl 块)
-    if let Some(after_impl) = trimmed.strip_prefix("impl ") {
+    if let Some(after_impl) = core.strip_prefix("impl ") {
         let rest = after_impl.trim();
         // 跳过 unsafe impl, pub impl 等修饰
         let rest = rest.strip_prefix("unsafe ").unwrap_or(rest);
@@ -293,7 +323,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     }
 
     // 6. 常量: const <name>:
-    if let Some(name) = match_keyword(trimmed, "const ") {
+    if let Some(name) = match_keyword(core, "const ") {
         let name = extract_name(name);
         if !name.is_empty() {
             // 常量可能没有 body（const X: i32 = 5;）
@@ -304,7 +334,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     }
 
     // 7. 类型别名: type <name> =
-    if let Some(name) = match_keyword(trimmed, "type ") {
+    if let Some(name) = match_keyword(core, "type ") {
         let name = extract_name(name);
         if !name.is_empty() && !name.starts_with('=') {
             let has_body = trimmed.contains('{');
@@ -314,7 +344,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     }
 
     // 8. 宏: macro_rules! <name>
-    if let Some(name) = trimmed.strip_prefix("macro_rules! ") {
+    if let Some(name) = core.strip_prefix("macro_rules! ") {
         let name = name.split_whitespace().next().unwrap_or(name).trim().to_string();
         if !name.is_empty() {
             return Some((SymbolKind::Macro, name, find_body_end(lines, line_idx)));
@@ -322,7 +352,7 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     }
 
     // 9. 模块: mod <name>; 或 mod <name> {
-    if let Some(name) = match_keyword(trimmed, "mod ") {
+    if let Some(name) = match_keyword(core, "mod ") {
         let name = name.trim();
         if !name.is_empty() {
             let name = name.split([';', '{']).next().unwrap_or(name).trim().to_string();
@@ -366,8 +396,8 @@ fn extract_name(s: &str) -> String {
     let s = s.strip_prefix("unsafe ").unwrap_or(s);
     let s = s.strip_prefix("extern ").unwrap_or(s);
 
-    // 取第一个非空 token（直到泛型 < 或括号 (）
-    let name = s.split(['<', '(', ' ', '\t'])
+    // 取第一个非空 token（直到泛型 <、括号 ( 或类型注解冒号 : )
+    let name = s.split(['<', '(', ' ', '\t', ':'])
         .next()
         .unwrap_or(s)
         .trim()

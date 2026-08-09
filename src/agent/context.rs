@@ -156,6 +156,7 @@ impl ContextBudgetManager {
     }
 
     /// 检查是否需要压缩（基于压力等级）。
+    #[allow(dead_code)] // reserved for automatic compression triggering
     pub fn should_compress(&self, history: &ConversationHistory) -> bool {
         let report = self.report(history);
         matches!(report.pressure,
@@ -164,6 +165,7 @@ impl ContextBudgetManager {
     }
 
     /// 设置记忆 tokens 数。
+    #[allow(dead_code)] // reserved for future KB memory quota management
     pub fn set_memory_tokens(&mut self, tokens: usize) {
         self.memory_tokens = tokens;
     }
@@ -198,8 +200,7 @@ pub struct ContextManager {
     /// UI 展示缓冲区（不参与 LLM 上下文，也不序列化）
     #[serde(skip)]
     pub display: DisplayBuffer,
-    /// 上下文预算管理器（不序列化，重启后重建）
-    #[serde(skip)]
+    /// 上下文预算管理器
     pub budget_manager: ContextBudgetManager,
     /// 会话 ID（用于分层摘要存储定位，如 `.kb/summaries/{session_id}/`）。
     #[serde(default = "default_session_id")]
@@ -242,6 +243,7 @@ impl ContextManager {
     }
 
     /// 设置记忆（KB 注入）占用的 tokens（用于预算计算）。
+    #[allow(dead_code)] // reserved for future KB memory quota management
     pub fn set_memory_tokens(&mut self, tokens: usize) {
         self.budget_manager.set_memory_tokens(tokens);
     }

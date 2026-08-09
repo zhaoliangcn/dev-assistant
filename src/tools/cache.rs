@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+// AtomicUsize, Ordering removed — not used after size field cleanup
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,19 +22,16 @@ struct CacheEntry {
     mtime: Timestamp,
     created_at: Timestamp,
     accessed_at: Timestamp,
-    #[allow(dead_code)] // reserved for future cache size tracking
-    size: usize,
 }
 
 impl CacheEntry {
-    fn new(content: String, mtime: Timestamp, size: usize) -> Self {
+    fn new(content: String, mtime: Timestamp) -> Self {
         let now = now_timestamp();
         Self {
             content,
             mtime,
             created_at: now,
             accessed_at: now,
-            size,
         }
     }
 
@@ -278,7 +276,7 @@ impl ReadCache {
             self.cleanup(&mut cache);
         }
 
-        cache.insert(path_buf, CacheEntry::new(content.to_string(), mtime, content.len()));
+        cache.insert(path_buf, CacheEntry::new(content.to_string(), mtime));
         debug!(path = ?path, "Cache written");
     }
 
@@ -313,7 +311,7 @@ impl ReadCache {
             self.cleanup(&mut cache);
         }
 
-        cache.insert(path_buf, CacheEntry::new(content.to_string(), mtime, content.len()));
+        cache.insert(path_buf, CacheEntry::new(content.to_string(), mtime));
         debug!(path = ?path, "Cache written");
     }
 

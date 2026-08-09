@@ -4,12 +4,14 @@ pub mod display;
 pub mod history;
 pub mod identity;
 pub mod pipeline_context;
+pub mod pipeline_stages;
 pub mod summary;
 pub mod token_counter;
 
 pub use context::ContextManager;
 pub use identity::{AgentIdentity, PipelineStage};
 pub use pipeline_context::{PipelineContext, PipelineContextStore, StageStatus};
+pub use pipeline_stages::STAGE_TEMPLATES;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -248,6 +250,21 @@ impl Agent {
         let messages = self.context.build_messages();
         let tool_schemas = self.get_all_tool_schemas();
 
+        // 记录工具 schema 占用的 token 数，用于预算报告准确计算
+        // （system_prompt + memory + tool_schema + history 之和等于总使用量）。
+        let schema_tokens = crate::agent::token_counter::TokenCounter::estimate_messages(
+            &tool_schemas
+                .iter()
+                .map(|s| crate::llm::LlmMessage {
+                    role: "system".to_string(),
+                    content: serde_json::to_string(s).ok(),
+                    tool_calls: None,
+                    tool_call_id: None,
+                })
+                .collect::<Vec<_>>(),
+        );
+        self.context.set_tool_schema_tokens(schema_tokens);
+
         const MAX_EMPTY_RETRIES: u32 = 3;
         let mut empty_attempt = 0u32;
 
@@ -336,6 +353,17 @@ impl Agent {
                             finished: false,
                         }));
                     }
+                }
+
+                // 在压缩前自动保存摘要（若上下文压力达到 Critical）
+                let budget = self.context.get_budget_report();
+                if matches!(
+                    budget.pressure,
+                    crate::agent::context::ContextPressure::Critical
+                        | crate::agent::context::ContextPressure::Exhausted
+                ) {
+                    // 自动保存当前轮次摘要到分层摘要系统
+                    let _ = self.auto_save_round_summary().await;
                 }
 
                 // 压缩上下文，防止 token 无限制增长
@@ -569,109 +597,21 @@ impl Agent {
             ((env_max_iter * w).div_ceil(TOTAL_WEIGHT)).max(5)
         };
 
-        let stages = [PipelineStage {
-                name: "🏗 架构设计".to_string(),
-                agent_type: AgentIdentity::Architect,
-                task_template: format!(
-                    "这是流水线第一阶段：架构设计。\n\n\
-                     原始需求：\n\
-                     {task_ref}\n\n\
-                     {{context}}\n\n\
-                     请使用 kb_store 将架构决策保存到 pipeline/stage-0/ 目录下。\n\n\
-                     {finish}",
-                    task_ref = task,
-                    finish = Self::finish_warning("架构设计", "架构设计完成：模块划分、接口定义、数据流、决策理由")
-                ),
-                max_iterations: alloc(STAGE_WEIGHTS[0]),
-            },
-            PipelineStage {
-                name: "💻 代码实现".to_string(),
-                agent_type: AgentIdentity::Implementer,
-                task_template: format!(
-                    "这是流水线第二阶段：代码实现。\n\n\
-                     原始需求：\n\
-                     {task_ref}\n\n\
-                     上一阶段输出（架构设计）：\n\
-                     {{context}}\n\n\
-                     注意：严格遵循架构设计，不擅自修改接口定义。\n\
-                     请使用 kb_store 将修改的文件列表保存到 pipeline/stage-1/ 目录下。\n\n\
-                     {finish}",
-                    task_ref = task,
-                    finish = Self::finish_warning("代码实现", "代码实现完成：新增文件、关键接口、测试覆盖")
-                ),
-                max_iterations: alloc(STAGE_WEIGHTS[1]),
-            },
-            PipelineStage {
-                name: "🧪 测试验证".to_string(),
-                agent_type: AgentIdentity::Tester,
-                task_template: format!(
-                    "这是流水线第三阶段：测试验证。\n\n\
-                     原始需求：\n\
-                     {task_ref}\n\n\
-                     上一阶段输出（代码实现）：\n\
-                     {{context}}\n\n\
-                     请使用 kb_store 将测试结果保存到 pipeline/stage-2/ 目录下。\n\n\
-                     {finish}",
-                    task_ref = task,
-                    finish = Self::finish_warning("测试报告", "测试完成：N 个测试用例，M 个通过，K 个失败")
-                ),
-                max_iterations: alloc(STAGE_WEIGHTS[2]),
-            },
-            PipelineStage {
-                name: "🔍 代码审查".to_string(),
-                agent_type: AgentIdentity::Reviewer,
-                task_template: format!(
-                    "这是流水线第四阶段：代码审查。\n\n\
-                     原始需求：\n\
-                     {task_ref}\n\n\
-                     上一阶段输出（测试结果和代码实现）：\n\
-                     {{context}}\n\n\
-                     请使用 kb_store 将审查结果保存到 pipeline/stage-3/ 目录下。\n\n\
-                     {finish}",
-                    task_ref = task,
-                    finish = Self::finish_warning("审查报告", "审查完成：发现 N 个问题，其中严重 X 个，建议 Y 项")
-                ),
-                max_iterations: alloc(STAGE_WEIGHTS[3]),
-            },
-            PipelineStage {
-                name: "🔧 问题修复".to_string(),
-                agent_type: AgentIdentity::Debugger,
-                task_template: format!(
-                    "这是流水线第五阶段：问题修复。\n\n\
-                     原始需求：\n\
-                     {task_ref}\n\n\
-                     上一阶段输出（审查报告）：\n\
-                     {{context}}\n\n\
-                     注意：只修复审查中提出的问题，不要引入新的功能变更。\n\
-                     请使用 kb_store 将修复记录保存到 pipeline/stage-4/ 目录下。\n\n\
-                     {finish}",
-                    task_ref = task,
-                    finish = Self::finish_warning("修复", "修复完成：处理 N 个问题，编译通过")
-                ),
-                max_iterations: alloc(STAGE_WEIGHTS[4]),
-            },
-            PipelineStage {
-                name: "📋 进度记录".to_string(),
-                agent_type: AgentIdentity::General,
-                task_template: format!(
-                    "这是流水线最终阶段：进度记录。\n\n\
-                     原始需求：\n\
-                     {task_ref}\n\n\
-                     已完成的工作：\n\
-                     {{context}}\n\n\
-                     请使用 kb_store 记录到 pipeline/stage-5/ 目录下：\n\
-                     1. 完成的功能列表\n\
-                     2. 修改的文件清单\n\
-                     3. 测试结果概要\n\
-                     4. 未解决的问题（如果有）\n\n\
-                     如果代码有变更，尝试使用 `exec_command` 执行 git add 和 git commit 提交代码变更。\n\
-                     如果 git 操作不可用，记录到 KB 即可。\n\n\
-                     {finish}",
-                    task_ref = task,
-                    finish = Self::finish_warning("进度记录", "进度已记录：功能列表、文件清单、测试结果")
-                ),
-                max_iterations: alloc(STAGE_WEIGHTS[5]),
-            }];
+        let stages: Vec<PipelineStage> = STAGE_TEMPLATES
+            .iter()
+            .enumerate()
+            .map(|(i, (name, agent_type, template, output_desc, example_summary))| {
+                let task_template = template
+                    .replace("{task_ref}", task)
+                    .replace("{finish}", &Self::finish_warning(output_desc, example_summary));
+                PipelineStage {
+                    name: name.to_string(),
+                    agent_type: agent_type.clone(),
+                    task_template,
+                    max_iterations: alloc(STAGE_WEIGHTS[i]),
+                }
+            })
+            .collect();
 
         let total = stages.len();
         let pipeline_start = std::time::Instant::now();
@@ -1227,75 +1167,123 @@ impl Agent {
                         crate::tools::ErrorCategory::Permanent,
                     ));
                 }
-                // 使用分层摘要系统保存到 .kb/summaries/{session_id}/
-                use crate::agent::summary::{aggregate_summaries, phase_number, SummaryStore};
-                let kb_root = self.working_dir().join(".kb");
-                let store = SummaryStore::new(&self.context.session_id, &kb_root);
-
-                // 1. 计算下一个轮次编号（已有轮次 + 1）
-                let existing_rounds = store.load_rounds()?;
-                let next_round = existing_rounds
-                    .iter()
-                    .map(|r| r.round)
-                    .max()
-                    .unwrap_or(0)
-                    + 1;
-
-                // 2. 保存轮次摘要（层级 1）
-                store.save_round(next_round, content)?;
-
-                // 3. 若凑满一个阶段（每 ROUNDS_PER_PHASE 轮），聚合为阶段摘要（层级 2）
-                let mut phase_aggregated = None;
-                let phase = phase_number(next_round);
-                let phase_start = (phase - 1) * crate::agent::summary::ROUNDS_PER_PHASE + 1;
-                let phase_end = phase * crate::agent::summary::ROUNDS_PER_PHASE;
-                let phase_rounds: Vec<String> = existing_rounds
-                    .iter()
-                    .filter(|r| r.round >= phase_start && r.round <= phase_end)
-                    .map(|r| r.content.clone())
-                    .collect();
-                // 若当前轮恰好是阶段末轮，且已有足够轮次，则聚合阶段摘要
-                if next_round == phase_end && phase_rounds.len() + 1 >= crate::agent::summary::ROUNDS_PER_PHASE {
-                    let mut items = phase_rounds;
-                    items.push(content.to_string());
-                    let phase_summary = aggregate_summaries(&self.llm, "轮次", &items, 500).await?;
-                    if !phase_summary.is_empty() {
-                        store.save_phase(phase_start, phase_end, &phase_summary)?;
-                        phase_aggregated = Some(phase);
-                    }
-                }
-
-                // 4. 若已积累多个阶段摘要，聚合为会话摘要（层级 3，final.md）
-                let mut final_aggregated = None;
-                let phases = store.load_phases()?;
-                if phases.len() >= 2 {
-                    let items: Vec<String> = phases.iter().map(|p| p.content.clone()).collect();
-                    let final_summary = aggregate_summaries(&self.llm, "阶段", &items, 1000).await?;
-                    if !final_summary.is_empty() {
-                        store.save_final(&final_summary)?;
-                        final_aggregated = Some(phases.len());
-                    }
-                }
-
-                let mut msg = format!(
-                    "摘要已保存为轮次 {}（.kb/summaries/{}/round-{}.md，约 {} tokens）",
-                    next_round,
-                    self.context.session_id,
-                    next_round,
-                    crate::agent::token_counter::TokenCounter::estimate(content)
-                );
-                if let Some(p) = phase_aggregated {
-                    msg.push_str(&format!("\n已聚合为阶段摘要 phase-{}", p));
-                }
-                if let Some(n) = final_aggregated {
-                    msg.push_str(&format!("\n已聚合为会话摘要 final.md（{} 个阶段）", n));
-                }
+                let msg = self.save_layered_summary(content).await?;
                 Ok(ToolResult::success(msg))
             }
             _ => Ok(ToolResult::failure(
                 format!("unknown context tool: {}", name),
                 crate::tools::ErrorCategory::Permanent,
             )),
+        }
+    }
+
+    /// 保存一条摘要到分层摘要系统，并自动聚合阶段/会话摘要。
+    ///
+    /// 供 `save_summary` 工具和自动摘要（`auto_save_round_summary`）共用。
+    /// 逻辑：
+    /// 1. 保存轮次摘要（层级 1，round-{n}.md）
+    /// 2. 若凑满一个阶段（每 ROUNDS_PER_PHASE 轮），聚合为阶段摘要（层级 2）
+    /// 3. 若已积累多个阶段摘要，聚合为会话摘要（层级 3，final.md）
+    ///
+    /// 返回格式化后的保存结果消息。
+    async fn save_layered_summary(&mut self, content: &str) -> Result<String, AppError> {
+        use crate::agent::summary::{aggregate_summaries, phase_number, SummaryStore};
+        let kb_root = self.working_dir().join(".kb");
+        let store = SummaryStore::new(&self.context.session_id, &kb_root);
+
+        // 1. 计算下一个轮次编号（已有轮次 + 1）
+        let existing_rounds = store.load_rounds()?;
+        let next_round = existing_rounds
+            .iter()
+            .map(|r| r.round)
+            .max()
+            .unwrap_or(0)
+            + 1;
+
+        // 2. 保存轮次摘要（层级 1）
+        store.save_round(next_round, content)?;
+
+        // 3. 若凑满一个阶段（每 ROUNDS_PER_PHASE 轮），聚合为阶段摘要（层级 2）
+        let mut phase_aggregated = None;
+        let phase = phase_number(next_round);
+        let phase_start = (phase - 1) * crate::agent::summary::ROUNDS_PER_PHASE + 1;
+        let phase_end = phase * crate::agent::summary::ROUNDS_PER_PHASE;
+        let phase_rounds: Vec<String> = existing_rounds
+            .iter()
+            .filter(|r| r.round >= phase_start && r.round <= phase_end)
+            .map(|r| r.content.clone())
+            .collect();
+        // 若当前轮恰好是阶段末轮，且已有足够轮次，则聚合阶段摘要
+        if next_round == phase_end && phase_rounds.len() + 1 >= crate::agent::summary::ROUNDS_PER_PHASE {
+            let mut items = phase_rounds;
+            items.push(content.to_string());
+            let phase_summary = aggregate_summaries(&self.llm, "轮次", &items, 500).await?;
+            if !phase_summary.is_empty() {
+                store.save_phase(phase_start, phase_end, &phase_summary)?;
+                phase_aggregated = Some(phase);
+            }
+        }
+
+        // 4. 若已积累多个阶段摘要，聚合为会话摘要（层级 3，final.md）
+        let mut final_aggregated = None;
+        let phases = store.load_phases()?;
+        if phases.len() >= 2 {
+            let items: Vec<String> = phases.iter().map(|p| p.content.clone()).collect();
+            let final_summary = aggregate_summaries(&self.llm, "阶段", &items, 1000).await?;
+            if !final_summary.is_empty() {
+                store.save_final(&final_summary)?;
+                final_aggregated = Some(phases.len());
+            }
+        }
+
+        let mut msg = format!(
+            "摘要已保存为轮次 {}（.kb/summaries/{}/round-{}.md，约 {} tokens）",
+            next_round,
+            self.context.session_id,
+            next_round,
+            crate::agent::token_counter::TokenCounter::estimate(content)
+        );
+        if let Some(p) = phase_aggregated {
+            msg.push_str(&format!("\n已聚合为阶段摘要 phase-{}", p));
+        }
+        if let Some(n) = final_aggregated {
+            msg.push_str(&format!("\n已聚合为会话摘要 final.md（{} 个阶段）", n));
+        }
+        Ok(msg)
+    }
+
+    /// 自动保存当前轮次摘要到分层摘要系统。
+    ///
+    /// 在上下文压缩前调用（当上下文压力达到 Critical/Exhausted 时），
+    /// 确保被压缩丢弃的历史信息仍可通过分层摘要回溯，避免信息永久丢失。
+    async fn auto_save_round_summary(&mut self) -> Result<(), AppError> {
+        let content = self.build_auto_summary();
+        let _ = self.save_layered_summary(&content).await?;
+        tracing::info!(
+            session = %self.context.session_id,
+            "上下文压力达 Critical，已自动保存轮次摘要到分层摘要系统"
+        );
+        Ok(())
+    }
+
+    /// 从对话历史中构建自动摘要内容（最近若干轮的关键消息）。
+    fn build_auto_summary(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        for msg in self.context.history.messages.iter().rev() {
+            match msg.role.as_str() {
+                "user" => parts.push(format!("- 用户: {}", msg.content.as_deref().unwrap_or(""))),
+                "assistant" => parts.push(format!("- 助手: {}", msg.content.as_deref().unwrap_or(""))),
+                _ => {}
+            }
+            if parts.len() >= 8 {
+                break;
+            }
+        }
+        parts.reverse();
+        if parts.is_empty() {
+            "（自动摘要：无可提取的对话内容）".to_string()
+        } else {
+            parts.join("\n")
         }
     }
 

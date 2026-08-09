@@ -119,7 +119,7 @@ impl TaskOrchestrator {
     ) -> Self {
         Self {
             graph: DependencyGraph::new(),
-            checkpoint: CheckpointManager::new(&kb_root.join(".kb/checkpoints")),
+            checkpoint: CheckpointManager::new(&kb_root.join(".kb")),
             kb_root,
             llm,
             tools,

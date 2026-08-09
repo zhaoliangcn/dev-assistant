@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
+    response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -234,4 +235,135 @@ pub async fn rename_session(
             "error": "标题保存失败"
         }))
     }
+}
+
+/// 导出查询参数。
+#[derive(Deserialize)]
+pub struct ExportQuery {
+    /// 导出格式：`md`（默认）或 `json`
+    pub format: Option<String>,
+}
+
+/// 导出会话（Markdown 或 JSON）。
+///
+/// `GET /api/sessions/{id}/export?format=md|json`
+///
+/// 返回原始文本响应，前端以 blob 下载。
+pub async fn export_session(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+    Query(query): Query<ExportQuery>,
+) -> impl IntoResponse {
+    let path = session_path(&state.working_dir, &id);
+    if !path.exists() {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            )],
+            "会话不存在".to_string(),
+        )
+            .into_response();
+    }
+    let events = SessionStore::read_events(&path).unwrap_or_default();
+
+    let titles = load_titles(&state.working_dir);
+    let title = titles.get(&id).cloned().unwrap_or_default();
+
+    let format = query.format.as_deref().unwrap_or("md");
+
+    if format == "json" {
+        // JSON 导出：id + 标题 + 完整事件序列
+        let events: Vec<serde_json::Value> = events
+            .iter()
+            .filter_map(|e| serde_json::to_value(e).ok())
+            .collect();
+        let payload = serde_json::json!({
+            "id": id,
+            "title": title,
+            "exported_at": chrono::Utc::now().to_rfc3339(),
+            "events": events,
+        });
+        let body = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
+        return (
+            axum::http::StatusCode::OK,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "application/json; charset=utf-8",
+            )],
+            body,
+        )
+            .into_response();
+    }
+
+    // Markdown 导出：按事件顺序渲染为可读对话记录
+    let heading = if title.is_empty() {
+        format!("# 会话 {}", id)
+    } else {
+        format!("# {}", title)
+    };
+    let mut md = String::from(&heading);
+    md.push_str("\n\n");
+
+    for event in &events {
+        match event {
+            SessionEvent::UserMessage { timestamp, content, .. } => {
+                md.push_str(&format!("## 👤 用户（{}）\n\n{}\n\n", timestamp, content));
+            }
+            SessionEvent::AssistantMessage { timestamp, content, .. } => {
+                md.push_str(&format!("## 🤖 助手（{}）\n\n{}\n\n", timestamp, content));
+            }
+            SessionEvent::SystemMessage { timestamp, content, .. } => {
+                md.push_str(&format!("> 💬 系统（{}）：{}\n\n", timestamp, content));
+            }
+            SessionEvent::ToolCallRequest {
+                timestamp,
+                name,
+                arguments,
+                ..
+            } => {
+                md.push_str(&format!(
+                    "> 🔧 工具调用 `{}`（{}）：`{}`\n\n",
+                    name, timestamp, arguments
+                ));
+            }
+            SessionEvent::ToolResult {
+                timestamp,
+                name,
+                success,
+                content,
+                ..
+            } => {
+                let status = if *success { "成功" } else { "失败" };
+                md.push_str(&format!(
+                    "> 📦 工具结果 `{}` [{}]（{}）：\n\n```\n{}\n```\n\n",
+                    name, status, timestamp, content
+                ));
+            }
+            SessionEvent::Compression {
+                timestamp,
+                original_messages,
+                after_messages,
+                original_tokens,
+                after_tokens,
+                ..
+            } => {
+                md.push_str(&format!(
+                    "> ⚠️ 上下文压缩（{}）：{} 条 → {} 条（{} → {} tokens）\n\n",
+                    timestamp, original_messages, after_messages, original_tokens, after_tokens
+                ));
+            }
+        }
+    }
+
+    (
+        axum::http::StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/markdown; charset=utf-8",
+        )],
+        md,
+    )
+        .into_response()
 }

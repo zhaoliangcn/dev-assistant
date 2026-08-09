@@ -115,6 +115,7 @@ pub struct CheckpointManager {
     /// 检查点目录（`.kb/checkpoints/`）
     checkpoint_dir: PathBuf,
     /// KB 根目录（用于重建上下文时定位摘要目录）
+    #[allow(dead_code)] // used by rebuild_context_from_checkpoint (reserved for checkpoint recovery)
     kb_root: PathBuf,
     /// 自动保存间隔（秒），默认 60
     #[allow(dead_code)]
@@ -273,6 +274,7 @@ impl CheckpointManager {
     /// 4. 返回重建的 ContextManager
     ///
     /// 若检查点无 session_id 或摘要目录为空，返回 None（调用方应创建新上下文）。
+    #[allow(dead_code)] // reserved for checkpoint recovery; covered by tests
     pub fn rebuild_context_from_checkpoint(
         &self,
         system_prompt: &str,

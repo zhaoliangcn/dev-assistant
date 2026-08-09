@@ -60,31 +60,9 @@ impl AgentIdentity {
         ]
     }
 
-    /// 工具使用优先级说明（各身份通用）
-    fn tool_usage_guide() -> &'static str {
-        "工具使用优先级：
-- 了解已有信息优先使用 `kb_query`
-- 批量读取文件优先使用 `batch_read_files`
-- 记录产出优先使用 `kb_store`
-- 完成后必须调用 `finish` 提交结果"
-    }
-
-    /// 输出规范说明（各身份通用）
-    fn output_guide() -> &'static str {
-        "输出要求（通过 `finish(summary=...)` 提交）：
-- 必须包含：① 完成了什么 ② 关键发现/决策 ③ 修改的文件列表（如有）
-- 保持结构化，父代理可直接读取使用
-- 不要保存中间文件，直接通过 finish 输出
-- 如遇到未解决的问题，在 summary 末尾说明"
-    }
-
-    /// 终止规则说明（各身份通用，防止死循环）
-    fn guard_guide() -> &'static str {
-        "终止规则（防止死循环）：
-- 批量读取：一次读完所需文件，不要分批反复读取
-- 已读不重读：已读过的文件不要重复读取
-- 不写中间文件：结果直接通过 finish 输出，不要写入报告文件
-- 完成即结束：工作完成后立即调用 finish，不要继续寻找新任务"
+    /// 通用规则（工具优先级、输出规范、终止规则合并，各身份共用）
+    fn shared_guide() -> &'static str {
+        "通用规则\n工具：kb_query→batch_read_files→kb_store→finish\n输出：finish(summary=...)含①完成内容②关键发现③修改文件列表\n终止：批量一次读完、已读不重读、不写中间文件、完成即finish"
     }
 
     /// 提示词中工具的固定展示顺序（阅读友好，`finish` 保持在末尾）。
@@ -92,12 +70,16 @@ impl AgentIdentity {
         &[
             "read_file",
             "batch_read_files",
+            "read_symbol",
             "write_file",
             "edit_file",
             "exec_command",
             "glob",
             "list_directory",
             "file_exists",
+            "context_budget",
+            "compress_context",
+            "save_summary",
             "kb_store",
             "kb_query",
             "finish",
@@ -261,25 +243,42 @@ impl AgentIdentity {
                     .to_string()
             }
             Self::General => {
-                r#"你是一个子代理。你的职责是完成父代理分配的任务。
+                r#"你是一个通用子代理。你的职责是完成父代理分配的任务。
+
+职责：
+- 按父代理的任务描述完成任务
+- 输出清晰、结构化的结果，便于父代理直接使用
+- 专注当前任务，不偏离范围
 
 工作方式：
-1. 明确理解任务目标，如有疑问基于已有信息做出合理判断
+1. 先理解任务目标，如有疑问基于已有信息做出合理判断
 2. 制定执行计划，按步骤推进，使用可用工具完成任务
-3. 遇到工具失败时：① 阅读错误信息 ② 判断是临时错误还是永久错误 ③ 临时错误可重试 1-2 次 ④ 永久错误则换方法，并在 finish summary 中说明
-4. 专注完成分配的任务，不要偏离范围"#
+3. 定期使用 `kb_query` 了解已有信息和决策
+4. 完成后使用 `kb_store` 保存关键信息
+
+输出要求：
+- 调用 `finish(summary=...)` 提交结果，summary 必须包含：
+  ① 完成了什么
+  ② 关键发现/决策
+  ③ 修改的文件列表（如有）
+  ④ 未解决的问题（如有）
+- 保持结构化，父代理可直接读取使用
+- 不要保存中间文件，结果直接通过 finish 输出
+
+错误处理：
+1. 工具失败时：① 阅读错误信息 ② 判断是临时错误还是永久错误 ③ 临时错误可重试 1-2 次 ④ 永久错误则换方法，在 finish summary 中说明
+2. 遇到需求不明确时：基于已有信息做出合理判断，在 finish summary 中备注你的假设
+3. 专注完成分配的任务，不要偏离范围"#
                     .to_string()
             }
         };
 
-        // 为所有身份统一附加：工具列表（从 default_tools 生成）、工具使用优先级、输出规范、防死循环终止规则
+        // 为所有身份统一附加：工具列表（从 default_tools 生成）、通用规则（工具优先级、输出规范、防死循环终止规则）
         format!(
-            "{}\n\n可用工具：\n- {}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n可用工具：\n- {}\n\n{}",
             base,
             self.tool_list(),
-            Self::tool_usage_guide(),
-            Self::output_guide(),
-            Self::guard_guide()
+            Self::shared_guide()
         )
     }
 
@@ -288,18 +287,24 @@ impl AgentIdentity {
             Self::Architect => HashSet::from([
                 "read_file".to_string(),
                 "batch_read_files".to_string(),
+                "read_symbol".to_string(),
                 "write_file".to_string(),
+                "edit_file".to_string(),
                 "glob".to_string(),
                 "list_directory".to_string(),
                 "file_exists".to_string(),
                 "exec_command".to_string(),
                 "kb_store".to_string(),
                 "kb_query".to_string(),
+                "context_budget".to_string(),
+                "compress_context".to_string(),
+                "save_summary".to_string(),
                 "finish".to_string(),
             ]),
             Self::Implementer => HashSet::from([
                 "read_file".to_string(),
                 "batch_read_files".to_string(),
+                "read_symbol".to_string(),
                 "write_file".to_string(),
                 "edit_file".to_string(),
                 "exec_command".to_string(),
@@ -308,22 +313,30 @@ impl AgentIdentity {
                 "file_exists".to_string(),
                 "kb_store".to_string(),
                 "kb_query".to_string(),
+                "context_budget".to_string(),
+                "compress_context".to_string(),
+                "save_summary".to_string(),
                 "finish".to_string(),
             ]),
             Self::Reviewer => HashSet::from([
                 "read_file".to_string(),
                 "batch_read_files".to_string(),
+                "read_symbol".to_string(),
                 "exec_command".to_string(),
                 "glob".to_string(),
                 "list_directory".to_string(),
                 "file_exists".to_string(),
                 "kb_store".to_string(),
                 "kb_query".to_string(),
+                "context_budget".to_string(),
+                "compress_context".to_string(),
+                "save_summary".to_string(),
                 "finish".to_string(),
             ]),
             Self::Tester => HashSet::from([
                 "read_file".to_string(),
                 "batch_read_files".to_string(),
+                "read_symbol".to_string(),
                 "write_file".to_string(),
                 "edit_file".to_string(),
                 "exec_command".to_string(),
@@ -332,11 +345,15 @@ impl AgentIdentity {
                 "file_exists".to_string(),
                 "kb_store".to_string(),
                 "kb_query".to_string(),
+                "context_budget".to_string(),
+                "compress_context".to_string(),
+                "save_summary".to_string(),
                 "finish".to_string(),
             ]),
             Self::Debugger => HashSet::from([
                 "read_file".to_string(),
                 "batch_read_files".to_string(),
+                "read_symbol".to_string(),
                 "write_file".to_string(),
                 "edit_file".to_string(),
                 "exec_command".to_string(),
@@ -345,11 +362,15 @@ impl AgentIdentity {
                 "file_exists".to_string(),
                 "kb_store".to_string(),
                 "kb_query".to_string(),
+                "context_budget".to_string(),
+                "compress_context".to_string(),
+                "save_summary".to_string(),
                 "finish".to_string(),
             ]),
             Self::General => HashSet::from([
                 "read_file".to_string(),
                 "batch_read_files".to_string(),
+                "read_symbol".to_string(),
                 "write_file".to_string(),
                 "edit_file".to_string(),
                 "exec_command".to_string(),
@@ -358,6 +379,9 @@ impl AgentIdentity {
                 "file_exists".to_string(),
                 "kb_store".to_string(),
                 "kb_query".to_string(),
+                "context_budget".to_string(),
+                "compress_context".to_string(),
+                "save_summary".to_string(),
                 "finish".to_string(),
             ]),
         }
@@ -555,10 +579,10 @@ mod tests {
             AgentIdentity::General,
         ] {
             let prompt = identity.system_prompt();
-            assert!(prompt.contains("终止规则"), "{} missing guard guide", identity.to_str());
+            assert!(prompt.contains("终止"), "{} missing guard guide", identity.to_str());
             assert!(
-                prompt.contains("不要写入报告文件"),
-                "{} missing no-report-file rule",
+                prompt.contains("不写中间文件"),
+                "{} missing no-intermediate-files rule",
                 identity.to_str()
             );
         }

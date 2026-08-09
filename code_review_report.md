@@ -1,356 +1,164 @@
-# Dev-Assistant-RS 代码审查报告
+# Dev-Assistant-RS 代码自查报告
 
-## 审查范围
-共审查 **23 个文件**，涵盖 Agent 核心逻辑、安全策略、工具系统、调度器、LLM 客户端、Web 会话、UI 交互、REPL 循环等模块。
-
----
-
-## 严重问题统计
-
-| 级别 | 数量 | 说明 |
-|-----|------|------|
-| CRITICAL | 4 | 路径遍历、死锁、引号处理缺陷、OOM |
-| HIGH | 6 | 缓存TTL、全局状态、模糊匹配、死代码 |
-| MEDIUM | 6 | dead_code泛滥、安全检测、路径不一致 |
-| LOW | 4 | 注释缺失、命名问题、顺序丢失 |
-| **总计** | **20** | |
+**日期**: 2026-08-04  
+**范围**: 全部 `src/` 目录（Rust 源代码）  
+**检查项**: 编译警告、测试失败、代码质量、安全、架构
 
 ---
 
-## 一、严重问题（CRITICAL）
+## 1. 编译状态
 
-### 1. `src/security/mod.rs` — `contains_symlink` 路径遍历绕过
+### 1.1 编译通过 ✅
+- `cargo check` 编译通过，无 error
+- 存在 **7 个 warning**（均为 `dead_code`）
 
-**严重程度: CRITICAL**
+### 1.2 编译警告详情
 
-**问题描述:**
-`contains_symlink` 函数在 walk 循环中逐级向上检查路径组件时，当 `current == base` 时返回 `false`。但 walk 使用的是未解析的路径（未调用 `canonicalize`），而 `base` 是 `allowed_paths` 中的路径（已 `canonicalize`）。
+| # | 文件 | 行号 | 类型 | 说明 | 优先级 |
+|---|------|------|------|------|--------|
+| W1 | `src/agent/context.rs` | 159 | `dead_code` | `ContextBudgetManager::should_compress` 方法从未使用 | P2 |
+| W2 | `src/agent/context.rs` | 167 | `dead_code` | `ContextBudgetManager::set_memory_tokens` 方法从未使用 | P2 |
+| W3 | `src/agent/context.rs` | 244 | `dead_code` | `ContextManager::set_memory_tokens` 方法从未使用 | P2 |
+| W4 | `src/agent/summary.rs` | 64 | `dead_code` | `LayeredSummaries` 结构体从未被构造 | P2 |
+| W5 | `src/agent/summary.rs` | 78 | `dead_code` | `session_id` 字段从未被读取 | P2 |
+| W6 | `src/agent/summary.rs` | 101 | `dead_code` | `session_id()`, `root()`, `load_final()`, `load_all()` 方法从未使用 | P2 |
+| W7 | `src/orchestrator/checkpoint.rs` | 118 | `dead_code` | `kb_root` 字段从未被读取 | P2 |
+| W8 | `src/orchestrator/checkpoint.rs` | 276 | `dead_code` | `rebuild_context_from_checkpoint` 方法从未使用 | P2 |
 
-**关键风险场景：**
-```
-target = /project/src/subdir/file
-base = /project  (canonicalized)
-```
-
-Walk 过程比较 `current == base` 时，`/project` 是原始路径，`base` 是 `/project`（已 canonicalize），但如果两者看似相同，实际路径中某层是 symlink 则不会被检测到。
-
-**更严重的问题：** 当 `normalized` 路径包含未解析的 symlink 时，`contains_symlink` 从 `normalized` 向上 walk 到 `base`，但由于 `normalized` 未经 symlink 解析，可能包含实际不存在的路径组件，导致 walk 到不存在的父目录后返回 `true`（安全但过于严格），或者因为路径比较字符串而非实际文件系统结构而返回 `false`（不安全）。
-
-**建议修复：** 
-- 在 `validate_path` 中，fallback 路径应先解析 symlink 再做检查
-- 或者使用 `canonicalize` 的 fallback 机制，确保路径的每个组件都经过 symlink 检查
-
-### 2. `src/tools/cache.rs` — `read_async` 使用写锁而非读锁导致死锁
-
-**严重程度: CRITICAL**
-
-**问题描述:**
-`read_async` 方法中，Step 1 使用 `self.cache.read().unwrap()` 获取读锁，如果缓存存在还会继续获取写锁。但代码注释说"先获取读锁检查缓存是否存在（不持有锁时做 IO）"，然而在 Step 1 中获取读锁后，如果决定返回 None（缓存过期），会**立即获取写锁** `self.cache.write().unwrap()` 来移除缓存条目。这会导致在持有读锁的情况下尝试获取写锁——**Rust 的 `RwLock` 在同一个线程中持有读锁时获取写锁会死锁**（`RwLock` 不是可重入的）。
-
-**影响：**
-所有使用 `read_async` 的流式读取路径，以及过期清理路径，都会导致死锁。
-
-**代码位置：**
-```rust
-// read_async 中 Step 1 + 过期清理
-let cache_check = {
-    let cache = self.cache.read().unwrap();  // 获取读锁
-    // ...
-};
-if expired {
-    let mut cache = self.cache.write().unwrap();  // 在持有读锁的线程中获取写锁 → 死锁！
-    cache.remove(&path_buf);
-}
-```
-
-**建议修复：** 
-- 在 Step 1 中如果发现缓存过期，先释放读锁，再获取写锁
-- 或者使用 `try_write` 并处理写锁获取失败的情况
-
-### 3. `src/tools/common.rs` — `sanitize_model_path_arg` 引号处理缺陷
-
-**严重程度: CRITICAL**
-
-**问题描述:**
-第 68 行：`let unquoted = trimmed.trim_matches(['"', '\'']).trim();` 使用 `trim_matches` 来去除引号，但 `trim_matches` 会**移除所有匹配的前导和尾随字符**，而不仅仅是匹配的引号对。
-
-**问题场景：**
-- 输入 `"src/main.rs`（只有左引号）→ `trim_matches` 移除所有 `"` 和 `'` → `src/main.rs`（被错误地清理了）
-- 输入 `src/main.rs"`（只有右引号）→ 同样的问题
-- 更重要的是，`trim_matches` 会移除所有匹配的字符，而不仅仅是成对的一个。例如 `"src/main.rs"` 正确，但 `"src/main.rs'` 会变成 `src/main.rs`（混合引号也被移除）
-
-**代码位置：** `src/tools/common.rs:68`
-```rust
-let unquoted = trimmed.trim_matches(['"', '\'']).trim();
-```
-
-**建议修复：** 
-- 使用 `strip_prefix` 和 `strip_suffix` 来确保成对匹配
-- 只有当第一个和最后一个字符是**相同且成对**的引号时才移除
-
-### 4. `src/tools/system_tools.rs` — `exec_command` 输出限制不足
-
-**严重程度: CRITICAL**
-
-**问题描述:**
-`exec_command_handler` 虽然设置了 `MAX_OUTPUT_BYTES = 10MB` 的输出限制，但这份限制是通过 `reader.take(MAX_OUTPUT_BYTES as u64)` 实现的，然而 `stdout_reader` 和 `stderr_reader` 上的 `take` 限制是**独立**的——每个都允许最多 10MB。这意味着一个恶意或 buggy 的命令可以产生总计 20MB 的输出。
-
-**更严重的问题：** 代码中 `stdout_reader` 和 `stderr_reader` 使用 `std::thread::spawn` 创建的线程来读取管道，但主线程通过 `mpsc::channel` 等待结果。如果子进程产生大量输出但读取线程尚未完成，所有输出都会被缓冲在内存中。
-
-**建议修复：**
-- 对 stdout + stderr 的总和施加限制，而不是各自独立限制
-- 考虑使用异步 IO 替代线程，减少内存占用
+**建议**: 所有 warning 均为 `dead_code`，建议在下一轮清理中移除或添加 `#[allow(dead_code)]` 明确标注意图。
 
 ---
 
-## 二、高严重性问题（HIGH）
+## 2. 测试状态
 
-### 5. `src/security/mod.rs` — `validate_path` 和 `validate_path_exists` 逻辑不一致
+### 2.1 总体
+- **通过**: 351 个
+- **失败**: 6 个（均在 `src/tools/file/symbol.rs`）
+- **跳过**: 0
 
-**严重程度: HIGH**
+### 2.2 失败测试分析
 
-**问题描述:**
-`validate_path` 和 `validate_path_exists` 在 fallback 路径中调用 `contains_symlink(&normalized, allowed)`，但 `normalized` 是未经 symlink 解析的路径。如果 `normalized` 本身包含 symlink 组件，`contains_symlink` 可以检测到。但如果 `normalized` 中的某个中间组件是 symlink 且指向 `allowed` 目录之外，这个 symlink 本身会被检测到，但 symlink **指向的目标** 不会被检查。
+| # | 测试名 | 断言 | 期望值 | 实际值 | 根因分析 |
+|---|--------|------|--------|--------|----------|
+| F1 | `scan_trait` | `symbols[0].name` | `"Into"` | `"into"` | 泛型 trait 名称解析问题：`pub trait Into<T>` 中泛型参数 `<T>` 导致名称截断或解析异常 |
+| F2 | `scan_const` | `symbols[0].name` | `"MAX"` | `"MAX:"` | 冒号处理：`const MAX: usize = 1024` 中类型注解的冒号被计入名称 |
+| F3 | `scan_module` | `symbols.len()` | 1 | 0 | 分号结尾的模块声明 `pub mod foo;` 未被识别 |
+| F4 | `pub_struct_with_visibility` | `symbols.len()` | 1 | 0 | `pub struct FooBar` 中 `pub` 可见性修饰符导致解析失败 |
+| F5 | `async_function` | `symbols.len()` | 1 | 0 | `pub async fn` 中 `async` 关键字未被识别 |
+| F6 | `pub_crate_struct` | `symbols.len()` | 1 | 0 | `pub(crate)` 复合可见性修饰符导致解析失败 |
 
-**示例：**
-```
-/project/link -> /outside/secret
-/project/link/file.txt
-```
+**根因总结**: `scan_symbols` 函数（`src/tools/file/symbol.rs`）的正则/行解析逻辑存在以下缺陷：
 
-`validate_path` 调用 `allowed.join(path)` 得到 `/project/link/file.txt`，`normalize_path` 不变。`contains_symlink` 从 `/project/link/file.txt` 向上 walk 到 `/project`，发现 `/project/link` 是 symlink，返回 `true`（安全）。但 walk 过程中检查的是 `symlink_metadata` 而非解析后的路径，因此如果 symlink 链很长，只检查直接 symlink 而不检查链的最终目标。
+1. **可见性修饰符未处理**：只处理了无修饰符的 `fn`/`struct`/`enum` 等，但 `pub fn`、`pub async fn`、`pub(crate) struct` 等均未被识别
+2. **泛型参数干扰**：`trait Into<T>` 中 `<T>` 导致名称解析为小写 `into`
+3. **冒号处理缺陷**：`const MAX: usize` 中类型注解的冒号被包含在名称中
+4. **分号模块遗漏**：`pub mod foo;` 这种分号结尾的模块声明未被识别
 
-**建议修复：**
-- 在 `contains_symlink` 中检测到 symlink 后，进一步检查其 resolve 目标是否在允许目录内
-- 或者优先使用 `canonicalize` 解析路径
-
-### 6. `src/tools/cache.rs` — TTL 基于 `accessed_at` 导致热数据永不失效
-
-**严重程度: HIGH**
-
-**问题描述:**
-`ReadCache::read` 和 `read_async` 的 TTL 检查逻辑基于 `accessed_at`（每次访问时更新），而不是基于 `created_at`（创建时间）。这意味着**频繁访问的缓存条目永远不会过期**，因为每次访问都会通过 `entry.touch()` 更新 `accessed_at`。
-
-**影响：**
-- 如果文件被修改但仍在被频繁读取，缓存会持续返回旧内容
-- TTL 的原本意图是"内容在 TTL 秒后需要重新验证"，但实际行为变成了"如果 TTL 秒内无人访问则过期"
-
-**代码位置：**
-```rust
-// 每次访问都更新 accessed_at
-fn touch(&mut self) {
-    self.accessed_at = now_timestamp();
-}
-
-// TTL 检查基于 accessed_at
-let expired = (now - entry.accessed_at) > self.config.ttl_seconds;
-```
-
-**建议修复：**
-- 使用 `created_at`（创建时间）或 `mtime`（文件修改时间）作为 TTL 基准
-- 或者将 TTL 逻辑改为："创建后 TTL 秒过期，每次访问延长 TTL"
-- 更好的做法：完全依赖 `mtime` 变化来判断缓存失效，不使用 TTL
-
-### 7. 全局可变状态导致测试间状态污染
-
-**严重程度: HIGH**
-
-**问题描述:**
-多个模块使用全局状态：
-- `GLOBAL_TASK_MANAGER`（`src/tools/task_tools.rs`）
-- `GLOBAL_SCHEDULER`（`src/scheduler/tools_handlers.rs`）
-- `PATTERNS`（`src/session/mod.rs` 的 `Lazy<SanitizePatterns>`）
-
-全局状态使得测试之间可能相互污染，且测试顺序不可控时可能导致间歇性失败。
-
-**影响：**
-- 测试套件不稳定
-- 依赖注入被绕过，难以测试不同配置
-- 多线程环境下可能出现竞态条件
-
-**建议修复：**
-- 考虑使用依赖注入替代全局状态
-- 在测试中使用 `#[serial]` 或测试隔离模式
-- 为 `GLOBAL_SCHEDULER` 添加测试重置方法
-
-### 8. `src/security/approval.rs` — 大段 `#[allow(dead_code)]` 代码
-
-**严重程度: HIGH**
-
-**问题描述:**
-`ApprovalRequirement`、`PermissionEntry`、`PermissionStore`、`ApprovalStatus`、`ApprovalType`、`ApprovalScope` 等大量结构和枚举均标记为 `#[allow(dead_code)]`，可能是"未来功能"的预留代码，但当前并未使用。这些代码占据了约 500 行，增加了维护负担。
-
-**影响：**
-- 代码可读性下降
-- 死代码不会被测试覆盖
-- 未来修改时可能引入不一致
-
-**建议修复：**
-- 删除未使用的代码，需要时从 git 历史恢复
-- 或在 ADR 中记录设计意图并添加清晰注释
-
-### 9. `src/tools/file/write.rs` — `fuzzy_find` 模糊匹配可能误替换
-
-**严重程度: HIGH**
-
-**问题描述:**
-`fuzzy_find` 函数实现的多级模糊匹配（exact → trimmed → dedented）在匹配成功时返回 `needle` 的长度，但实际匹配的文本长度可能因去除空白而不同。这可能导致 `edit_file` 替换时产生意外的结果。
-
-**问题场景：**
-`needle = "  line1\n  line2"`，`haystack` 中实际内容为 `"line1\nline2"`（无前导空格）。dedented 匹配成功，但返回的 `(pos, needle.len())` 中 `needle.len()` 包含了被去除的缩进空格，导致替换位置计算错误，替换后可能覆盖周围文本。
-
-**建议修复：**
-- 返回实际匹配文本的长度，而非原始 `needle` 的长度
-- 增加匹配后的内容验证，确保替换不会破坏周围文本
-
-### 10. `src/tools/retry.rs` — `BackoffConfig::retry` 同步闭包在异步上下文中执行
-
-**严重程度: HIGH**
-
-**问题描述:**
-`retry` 方法中 `tokio::time::sleep(delay).await` 是在异步函数中调用的，这是正确的。但 `retry` 方法中 `F` 是 `FnMut() -> Result<T, E>`（同步闭包），如果 `f()` 是耗时的同步操作（如文件 IO），会阻塞整个异步运行时。
-
-**建议修复：**
-- 为异步重试提供接受 `async FnMut` 的重载
-- 或在文档中明确说明 `retry` 适用于轻量同步操作
+**建议修复**: 在 `scan_symbols` 中添加对 `pub`、`pub(crate)`、`pub(super)`、`async`、`unsafe` 等修饰符的跳过逻辑，并修复上述解析缺陷。
 
 ---
 
-## 三、中等严重性问题（MEDIUM）
+## 3. 代码质量分析
 
-### 11. `#[allow(dead_code)]` 泛滥
+### 3.1 架构质量 ✅
+- **模块化清晰**: `agent/`、`tools/`、`llm/`、`scheduler/`、`security/` 等模块职责分明
+- **单层抽象**: main.rs 仅做入口，业务逻辑在 app.rs 和 repl.rs 中
+- **依赖注入**: 使用 `Arc<SecurityPolicy>` 共享安全策略，避免生命周期问题
+- **资源管理**: `Resources` 容器用于依赖注入，设计合理
 
-**严重程度: MEDIUM**
+### 3.2 代码异味
 
-**涉及文件:**
-- `src/agent/mod.rs`：AgentConfig、AgentResult、clear_display_messages、history_messages 等
-- `src/tools/async_tool.rs`：new_with_cache_config、register_definition 等
-- `src/ui/blocks.rs`：Divider、status_color、role_label 等
-- `src/security/approval.rs`：几乎所有结构
-- `src/scheduler/engine.rs`：整个文件
-- `src/scheduler/executor.rs`：整个文件
+#### 3.2.1 `src/app.rs` — 函数过长
+- `run_interactive()` 方法约 340 行，包含 slash 命令分发、模型切换、历史查看等复杂逻辑
+- 建议将 `/model`、`/history`、`/grep`、`/diff` 等命令处理提取为独立方法
 
-**问题描述:**
-总计约 **40+ 处** `#[allow(dead_code)]` 标记，包括结构体、枚举变体、方法、字段等。大量代码是"为未来预留"但从未被使用。
+#### 3.2.2 `src/repl.rs` — 命令处理分散
+- `handle_slash` 在 `repl.rs` 中，但 `/model`、`/history` 等命令在 `app.rs` 中处理
+- 命令分发逻辑分散在两处，维护成本高
+- 建议统一为命令注册表模式
 
-**建议修复：**
-- 逐步清理，为每个 `#[allow(dead_code)]` 添加 issue 追踪
-- 将"未来功能"的代码提取到单独模块并标记为 `#[cfg(feature = "future")]`
+#### 3.2.3 `src/agent/mod.rs` — Agent 类过大
+- `Agent` 结构体约 1500 行，承担了太多职责（LLM 交互、工具调用、流水线、摘要管理）
+- 建议将流水线逻辑（`run_pipeline` 及相关方法）提取到独立的 `PipelineRunner` 中
 
-### 12. `src/security/mod.rs` — 安全文件检测正则过于宽泛
+#### 3.2.4 `src/security/mod.rs` — 函数过长
+- `evaluate_command` 方法约 130 行，包含大量正则匹配和条件判断
+- 建议拆分为多个策略函数（`evaluate_rm_rf`、`evaluate_sudo`、`evaluate_shell` 等）
 
-**严重程度: MEDIUM**
-
-**问题描述:**
-`is_dangerous_file` 使用 `Regex::new(r"(?i)\.env$")` 检测 `.env` 文件，但此正则匹配任何以 `.env` 结尾的文件名，包括 `.env.production`、`.env.example`、`.env.local` 等。这些文件通常不是敏感文件，但会被阻止访问。
-
-**建议修复：**
-- 使用精确匹配：`Path::new(filename).file_name() == Some(".env")`
-- 或使用更精确的列表：`.env`, `.env.local`, `.env.production` 等
-
-### 13. `src/ui/input.rs` — `SlashCommand` 枚举和 `app.rs` 命令处理重复
-
-**严重程度: MEDIUM**
-
-**问题描述:**
-`SlashCommand` 枚举（`src/ui/input.rs`）和 `src/app.rs` 中的独立 slash 命令处理逻辑存在职责重叠。例如 `/model` 命令在 `SlashCommand::from_str` 中不解析，但在 `app.rs` 的 `run_interactive` 中显式处理。这种分散的处理逻辑导致：
-- 添加新命令时需要修改多个位置
-- 命令处理逻辑不一致（有些在 `SlashCommand::execute` 中，有些在 `app.rs` 中）
-
-**建议修复：**
-- 统一命令分发机制，所有命令通过 `SlashCommand` 枚举处理
-- 为需要动态上下文（如 `agent` 引用）的命令提供回调注册机制
-
-### 14. `src/tools/analysis.rs` — `analyze_codebase` 无文件数量上限
-
-**严重程度: MEDIUM**
-
-**问题描述:**
-`analyze_codebase_handler` 对文件数量没有上限保护。如果匹配到大量文件（如 `**/*.rs` 在一个大型项目中），调用 `find_files` 会遍历整个文件系统，可能导致内存溢出或长时间阻塞。
-
-**建议修复：**
-- 添加 `max_files` 参数（默认 1000）
-- 在 `find_files` 中提前终止遍历
-
-### 15. `src/scheduler/engine.rs` — 整个文件标记 `#[allow(dead_code)]`
-
-**严重程度: MEDIUM**
-
-**问题描述:**
-`src/scheduler/engine.rs` 和 `src/scheduler/executor.rs` 整个文件都标记了 `#[allow(dead_code)]`，意味着调度器的大部分代码未被使用。调度器在 `App::build` 中创建并注册到全局，但 `start()` 方法从未被调用，因此时间轮 tick 循环从未启动。
-
-**影响：**
-- 定时任务功能实际上不可用
-- 通过 `/schedule` 命令创建的任务会保存到存储，但永远不会被触发执行
-
-**建议修复：**
-- 在 `App::build` 或 `App::run` 中启动调度器
-- 或移除未使用的调度器代码
-
-### 16. `src/tools/file/write.rs` — `write_file` 和 `edit_file` 路径处理不一致
-
-**严重程度: MEDIUM**
-
-**问题描述:**
-`write_file_handler` 使用 `common::resolve_model_path` 处理路径，但 `edit_file_handler` 中 `fuzzy_find` 匹配成功后的替换操作使用 `normalize_newlines` 处理后的字符串，但写回文件时使用的是原始内容（未规范化）。这可能导致行尾不一致的问题。
-
-**建议修复：**
-- 统一文件的读取/写入/编辑使用相同的行尾规范
-- 或在编辑时保持原始行尾
+### 3.3 重复代码
+- `src/agent/identity.rs` 中 `default_tools()` 方法为每个身份重复了几乎相同的工具列表
+- 建议：定义公共工具集 + 各身份差异集，通过差集合并
 
 ---
 
-## 四、低严重性问题（LOW）
+## 4. 安全隐患
 
-### 17. `src/tools/io.rs` — `O_NOFOLLOW` 安全性但缺少注释
+### 4.1 已存在的安全机制 ✅
+- **路径遍历防护**: `normalize_path()` + `is_child_of()` + 符号链接检测
+- **命令风险评估**: 基于正则的 `DangerLevel` 评估（rm -rf、sudo、shell 注入等）
+- **审批机制**: Critical/High 级别操作需要用户确认
+- **文件描述符安全**: `FD_CLOEXEC` 标志防止 exec 后泄漏
 
-**严重程度: LOW**
+### 4.2 潜在风险
 
-Unix 上使用 `O_NOFOLLOW` 防止 symlink TOCTOU 攻击，这是一个很好的安全实践，但缺少注释说明为什么不是所有平台都这样做（Windows 没有 `O_NOFOLLOW`，但 Windows 有 `FILE_ATTRIBUTE_REPARSE_POINT`）。
+#### 4.2.1 `kb_store` 路径规范化 ✅（已修复）
+- 当前代码已添加 `trim_start_matches(".kb/")` 处理，防止路径重复拼接
+- 但 `update_index` 参数未验证，若传入 `true` 且路径被篡改可能导致索引不一致
 
-### 18. `src/tools/resources.rs` — `Cwd` 和 `DisplayCwd` 标记为 `#[allow(dead_code)]`
-
-**严重程度: LOW**
-
-`Cwd` 和 `DisplayCwd` 是预定义的资源类型，但当前未被任何工具使用。虽然设计意图是好的，但应该添加清晰的使用说明或移除。
-
-### 19. `src/agent/context.rs` — `get_display_messages` 方法可能跳过重复消息
-
-**严重程度: LOW**
-
-`get_display_messages` 方法中跳过了连续重复的 `(role, content)` 消息，但通过 `HashSet` 去重后，消息的顺序可能丢失。如果两个不同角色的消息有相同内容，后者会被错误地跳过。
-
-### 20. `src/tools/retry.rs` — `BackoffConfig::retry_with` 方法中的 `should_retry` 闭包命名不清晰
-
-**严重程度: LOW**
-
-`retry_with` 的参数 `should_retry` 实际上是一个"是否应该重试"的判断函数，而不是"是否应该继续"的判断函数。建议重命名为 `should_retry` 或添加更清晰的 doc 注释。
+#### 4.2.2 `exec_command` 的 sh -c 绕过
+- 虽然 `sh -c` 方式仍会经过安全评估，但 `sh` 本身是白名单命令
+- 建议：对 `sh -c` 的内容做更严格的危险命令检测
 
 ---
 
-## 五、总结与改进建议
+## 5. 性能评估
 
-### 关键改进方向
+### 5.1 优秀实践 ✅
+- **ReadCache**: 文件读取缓存，避免重复 IO
+- **异步文件工具**: `AsyncReadFileTool` 等不阻塞主循环
+- **原子计数器**: `AtomicUsize` 替代 `Mutex` 用于模型索引
 
-1. **安全路径检查**：`src/security/mod.rs` 中的 `contains_symlink` 和 `validate_path` 需要彻底重写，目前存在路径遍历绕过风险，是最严重的安全问题。
+### 5.2 潜在问题
 
-2. **缓存死锁**：`src/tools/cache.rs` 的 `read_async` 方法在持有读锁时尝试获取写锁，会导致死锁。这是最紧急的运行时问题。
+#### 5.2.1 `scan_symbols` 实现
+- 当前实现为纯行扫描 + 括号匹配，对复杂 Rust 语法的支持有限
+- 建议：考虑使用 `syn` crate 替代手写解析器，或在现有基础上增加更多测试用例
 
-3. **死代码清理**：合计约 **40+ 处** `#[allow(dead_code)]`，特别是调度器模块（`engine.rs`、`executor.rs`）整个文件标记为未使用，但定时任务功能是用户可见的。
+#### 5.2.2 会话日志存储
+- 日志文件存储在 `.dev-assistant-store/logs/`，但会话 session 日志文件仍在项目根目录
+- 大量 session 日志文件（已观察到 100+ 个）会污染项目根目录
 
-4. **全局状态依赖**：`GLOBAL_TASK_MANAGER` 和 `GLOBAL_SCHEDULER` 等全局变量导致测试不稳定和状态污染。
+---
 
-5. **测试覆盖**：从测试代码看，只覆盖了基础功能，安全模块的路径遍历检测、缓存死锁场景、调度器 tick 循环等关键路径没有测试覆盖。
+## 6. 测试覆盖
 
-### 建议优先级
+### 6.1 测试覆盖较好的模块
+- `src/agent/` — 有子代理创建、上下文管理、摘要等测试
+- `src/security/mod.rs` — 路径遍历、命令评估、审批流程覆盖较好
+- `src/prompt.rs` — 系统提示词构建的各个分支都有测试
+- `src/skills/mod.rs` — 技能解析、发现、格式化有完整测试
 
-| 优先级 | 建议 | 原因 |
-|-------|------|------|
-| P0 | 修复 `contains_symlink` 路径遍历漏洞 | 安全风险 |
-| P0 | 修复 `read_async` 写锁死锁 | 运行时崩溃 |
-| P1 | 启动调度器 tick 循环 | 功能不可用 |
-| P1 | 修复 `sanitize_model_path_arg` 引号处理 | 文件路径错误 |
-| P1 | 添加缓存 TTL 基于 `created_at` | 数据一致性 |
-| P2 | 清理死代码 | 可维护性 |
-| P2 | 消除全局状态 | 测试可靠性 |
-| P3 | 添加安全路径测试 | 回归防护 |
+### 6.2 测试覆盖不足的模块
+- `src/tools/file/` — 文件工具（read/write/edit）缺乏单元测试
+- `src/scheduler/` — 调度器各组件缺乏单元测试
+- `src/hooks/` — Hook 执行器缺乏网络/超时场景测试
+- `src/web/` — Web 界面缺乏集成测试
+
+---
+
+## 7. 总结与建议
+
+### 7.1 必须修复（P0）
+1. **6 个测试失败**：修复 `scan_symbols` 解析逻辑，处理 pub/async/泛型/冒号/分号模块
+2. 这是当前最严重的问题，影响 `read_symbol` 工具的可靠性
+
+### 7.2 建议修复（P1）
+1. **清理 dead_code 警告**：移除或标注未使用的代码
+2. **独立流水线逻辑**：从 `Agent` 中提取 `PipelineRunner` 模块
+3. **统一命令分发**：将 slash 命令处理集中到命令注册表模式
+
+### 7.3 优化建议（P2）
+1. **减少重复代码**：`default_tools()` 使用公共工具集 + 差异集
+2. **拆分过长函数**：`run_interactive()`、`evaluate_command()` 等
+3. **增加测试覆盖**：文件工具、调度器、Hook 执行器
+4. **会话日志存储**：统一到 `.dev-assistant-store/logs/` 目录

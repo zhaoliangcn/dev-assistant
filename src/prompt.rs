@@ -22,7 +22,10 @@ pub fn build_system_prompt(skills: &[Skill]) -> String {
     let skills_section = if skills_prompt.trim().is_empty() {
         String::new()
     } else {
-        format!("\n## 可用技能\n\n以下技能已安装，根据任务选择使用：\n\n{}", skills_prompt.trim())
+        format!(
+            "\n## 可用技能\n\n以下技能已安装。当用户请求匹配技能关键词时会自动激活，技能内容将附加到输入中。根据任务选择使用：\n\n{}",
+            skills_prompt.trim()
+        )
     };
 
     format!(
@@ -33,7 +36,7 @@ pub fn build_system_prompt(skills: &[Skill]) -> String {
 ### 安全策略
 1. **危险操作需要审批**：安全系统会自动评估每条命令的风险等级（Critical/High/Medium/Low）。
    Critical 和 High 级别需要用户确认后才能执行，等待用户确认即可。
-2. **不读取构建产物**：绝不读取 `target/`、`node_modules/`、`.git/`、`dist/`、`build/` 等目录中的文件（二进制产物，非源代码）。
+2. **不读取构建产物**：绝不读取 `target/`、`node_modules/`、`.git/`、`dist/`、`build/`、`__pycache__/`、`.venv/`、`venv/`、`.next/`、`.nuxt/`、`vendor/` 等目录中的文件（二进制产物、依赖或构建缓存，非源代码）。
 3. **遵守安全拦截**：若安全系统拦截了某操作，不要试图绕过，向用户说明原因。
 
 ### 工作流程
@@ -46,12 +49,30 @@ pub fn build_system_prompt(skills: &[Skill]) -> String {
 5. **避免无限循环**：同一文件读取超过 3 次、同一工具调用超过 3 次仍无进展时，停下来思考是否陷入了循环。
 
 ### 决定是否调用 `finish` 工具
-```
-用户输入
-  ├── 明确要求执行任务（改代码/分析/搜索/重构）→ 完成后调用 finish(summary=...)
-  ├── 只是提问/讨论/咨询意见 → 直接回答，不调用 finish
-  └── 不确定是否是任务 → 先问用户"这是否算完成任务"
-```
+
+**判断流程（按优先级 1-5 步）：**
+
+1. **只是提问/闲聊/咨询意见？**
+   → 直接回答，**不调用** finish。
+
+2. **是执行类任务吗？**（改代码/搜索/分析/重构/审查/调试）
+   → 是，继续下一步；否，回到第 1 步。
+
+3. **是多步骤任务吗？**（如"先读文件，再改代码，最后测试"）
+   → 是，完成所有步骤后再调用 finish，**不要中途提前结束**。每完成一个子步骤可以记录进度，但最终只调用一次 finish。
+   → 否，继续下一步。
+
+4. **是分析/研究类任务吗？**
+   → 需要输出正式报告（如架构分析、代码审查报告、技术方案）：输出报告后调用 `finish(summary="...")`，summary 中简述结论。
+   → 只需口头解释/简要说明：解释完毕后调用 `finish(summary="...")`。
+
+5. **不确定是否是任务？**
+   → 先问用户"这是否算完成任务"，根据回答决定。
+
+**关键原则：**
+- **分析/研究类任务属于执行任务**，完成后必须调用 finish
+- **多步骤任务**：规划好所有步骤，逐一完成，最后统一调用 finish
+- **finish 总结格式**：简洁（3-10 行），详细日志写入文件
 
 ### 错误处理
 1. **工具失败时**：① 阅读错误信息 ② 判断是临时错误（如网络超时）还是永久错误（如参数错误）
@@ -215,7 +236,27 @@ mod tests {
         let prompt = build_system_prompt(&[]);
 
         assert!(prompt.contains("决定是否调用 `finish` 工具"), "missing finish decision tree");
-        assert!(prompt.contains("明确要求执行任务"), "missing task criteria");
+        assert!(prompt.contains("执行类任务"), "missing task criteria");
         assert!(prompt.contains("不确定是否是任务"), "missing uncertainty handling");
+    }
+
+    #[test]
+    fn build_prompt_finish_tree_has_analysis_branch() {
+        let prompt = build_system_prompt(&[]);
+
+        // 分析/研究类任务分支
+        assert!(prompt.contains("分析/研究类任务"), "missing analysis/research branch");
+        assert!(prompt.contains("正式报告"), "missing formal report case");
+        assert!(prompt.contains("口头解释"), "missing verbal explanation case");
+    }
+
+    #[test]
+    fn build_prompt_finish_tree_has_multistep_guidance() {
+        let prompt = build_system_prompt(&[]);
+
+        // 多步骤任务指导
+        assert!(prompt.contains("多步骤任务"), "missing multistep task guidance");
+        assert!(prompt.contains("完成所有步骤后再调用 finish"), "missing multistep finish rule");
+        assert!(prompt.contains("不要中途提前结束"), "missing no-early-finish rule");
     }
 }

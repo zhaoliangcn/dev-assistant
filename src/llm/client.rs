@@ -23,6 +23,71 @@ const BACKOFF_MULTIPLIER: f64 = 2.0;
 /// 最大延迟上限（防止无限增长）。
 const MAX_DELAY: Duration = Duration::from_secs(120);
 
+/// 统一的指数退避 + 抖动重试循环。
+///
+/// 对 `429`（限流）和 `5xx`（服务端错误）自动重试，最多 `MAX_RETRIES` 次。
+/// 优先使用服务端建议的 `Retry-After`，否则使用指数退避 + 随机抖动。
+///
+/// `call` 与 `call_streaming` 共享此逻辑，避免重试/退避代码重复。
+async fn retry_with_backoff<T, F, Fut>(mut f: F) -> Result<T, AppError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, AppError>>,
+{
+    let mut attempt = 0u32;
+    loop {
+        match f().await {
+            Ok(v) => return Ok(v),
+            Err(ref e)
+                if (e.is_rate_limited() || e.is_server_error()) && attempt < MAX_RETRIES =>
+            {
+                attempt += 1;
+
+                // 优先使用服务端建议的 Retry-After，否则用指数退避
+                let delay = match e.retry_after() {
+                    Some(server_delay) if server_delay <= MAX_DELAY => server_delay,
+                    _ => {
+                        let base = BASE_DELAY_MS as f64
+                            * BACKOFF_MULTIPLIER.powi(attempt as i32 - 1);
+                        let jitter_range = (base * 0.25) as u64;
+                        let jitter = if jitter_range > 0 {
+                            rand::rng().random_range(0..=jitter_range)
+                        } else {
+                            0
+                        };
+                        Duration::from_millis(base as u64 + jitter).min(MAX_DELAY)
+                    }
+                };
+
+                let error_type = if e.is_rate_limited() { "429" } else { "5xx" };
+
+                info!(
+                    attempt = attempt,
+                    max_retries = MAX_RETRIES,
+                    delay_ms = delay.as_millis() as u64,
+                    error_type = error_type,
+                    "API 请求失败（{}），等待后重试",
+                    error_type,
+                );
+
+                if attempt >= 3 {
+                    warn!(
+                        attempt = attempt,
+                        max_retries = MAX_RETRIES,
+                        delay_ms = delay.as_millis() as u64,
+                        error_type = error_type,
+                        "API 持续返回 {}，准备故障转移",
+                        error_type,
+                    );
+                }
+
+                tokio::time::sleep(delay).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// 多 provider 容器，支持运行时切换模型。
 ///
 /// `active_idx` 使用 `AtomicUsize`，无锁且无中毒风险，
@@ -148,61 +213,10 @@ impl LlmClient {
                 max_tokens: cfg.max_tokens.unwrap_or(8192),
             };
 
-            let mut attempt = 0u32;
-
-            loop {
-                match provider.chat(&self.http_client, &request).await {
-                    Ok(resp) => return Ok(resp),
-                    Err(ref e) if (e.is_rate_limited() || e.is_server_error()) && attempt < MAX_RETRIES => {
-                        attempt += 1;
-
-                        // 优先使用服务端建议的 Retry-After，否则用指数退避
-                        let delay = match e.retry_after() {
-                            Some(server_delay) if server_delay <= MAX_DELAY => server_delay,
-                            _ => {
-                                let base = BASE_DELAY_MS as f64 * BACKOFF_MULTIPLIER.powi(attempt as i32 - 1);
-                                let jitter_range = (base * 0.25) as u64;
-                                let jitter = if jitter_range > 0 {
-                                    rand::rng().random_range(0..=jitter_range)
-                                } else {
-                                    0
-                                };
-                                Duration::from_millis(base as u64 + jitter).min(MAX_DELAY)
-                            }
-                        };
-
-                        let error_type = if e.is_rate_limited() { "429" } else { "5xx" };
-
-                        info!(
-                            attempt = attempt,
-                            max_retries = MAX_RETRIES,
-                            delay_ms = delay.as_millis() as u64,
-                            error_type = error_type,
-                            model = %cfg.name,
-                            "API 请求失败（{}），等待后重试",
-                            error_type,
-                        );
-
-                        if attempt >= 3 {
-                            warn!(
-                                attempt = attempt,
-                                max_retries = MAX_RETRIES,
-                                delay_ms = delay.as_millis() as u64,
-                                error_type = error_type,
-                                model = %cfg.name,
-                                "API 持续返回 {}，准备故障转移",
-                                error_type,
-                            );
-                        }
-
-                        tokio::time::sleep(delay).await;
-                        continue;
-                    }
-                    Err(e) => {
-                        // retries exhausted or non-retryable error
-                        last_error = Some(e);
-                        break;
-                    }
+            match retry_with_backoff(|| provider.chat(&self.http_client, &request)).await {
+                Ok(resp) => return Ok(resp),
+                Err(e) => {
+                    last_error = Some(e);
                 }
             }
 
@@ -263,67 +277,11 @@ impl LlmClient {
                 max_tokens: cfg.max_tokens.unwrap_or(8192),
             };
 
-            let mut attempt = 0u32;
-
-            let result = loop {
-                match provider.chat_stream(&self.http_client, &request).await {
+            match retry_with_backoff(|| provider.chat_stream(&self.http_client, &request)).await {
                 Ok(stream) => return Ok(stream),
-                Err(ref e) if (e.is_rate_limited() || e.is_server_error()) && attempt < MAX_RETRIES => {
-                    attempt += 1;
-
-                    // 优先使用服务端建议的 Retry-After，否则用指数退避
-                    let delay = match e.retry_after() {
-                        Some(server_delay) if server_delay <= MAX_DELAY => server_delay,
-                        _ => {
-                            let base = BASE_DELAY_MS as f64 * BACKOFF_MULTIPLIER.powi(attempt as i32 - 1);
-                            let jitter_range = (base * 0.25) as u64;
-                            let jitter = if jitter_range > 0 {
-                                rand::rng().random_range(0..=jitter_range)
-                            } else {
-                                0
-                            };
-                            Duration::from_millis(base as u64 + jitter).min(MAX_DELAY)
-                        }
-                    };
-
-                    let error_type = if e.is_rate_limited() { "429" } else { "5xx" };
-
-                    info!(
-                        attempt = attempt,
-                        max_retries = MAX_RETRIES,
-                        delay_ms = delay.as_millis() as u64,
-                        error_type = error_type,
-                        model = %cfg.name,
-                        "API 请求失败（{}），等待后重试",
-                        error_type,
-                    );
-
-                    if attempt >= 3 {
-                        warn!(
-                            attempt = attempt,
-                            max_retries = MAX_RETRIES,
-                            delay_ms = delay.as_millis() as u64,
-                            error_type = error_type,
-                            model = %cfg.name,
-                            "API 持续返回 {}，准备故障转移",
-                            error_type,
-                        );
-                    }
-
-                    tokio::time::sleep(delay).await;
-                    continue;
-                }
                 Err(e) => {
-                    // retries exhausted or non-retryable error
                     last_error = Some(e);
-                    break Err(());
                 }
-            }
-            };
-
-            // 如果成功，返回流
-            if let Ok(stream) = result {
-                return Ok(stream);
             }
 
             // 如果这是最后一个 provider，不再继续尝试

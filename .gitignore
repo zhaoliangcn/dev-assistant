@@ -10,3 +10,5 @@ target/
 dev-assistant
 
 .kb/
+# ins-code AIGC 分析缓存
+.inscode/

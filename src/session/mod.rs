@@ -56,10 +56,19 @@ pub struct SessionLogger {
 impl SessionLogger {
     /// 在指定目录下创建一个新的会话日志文件。
     /// 文件名格式: `.dev-assistant-session-{YYYYMMDD-HHMMSS}.log`
+    ///
+    /// 日志文件存储在 `.dev-assistant-store/logs/` 目录下，避免项目根目录被大量日志文件污染。
     pub fn create(working_dir: &Path) -> Result<Self, AppError> {
         let timestamp = Local::now().format("%Y%m%d-%H%M%S");
+        let log_dir = working_dir.join(".dev-assistant-store").join("logs");
+        std::fs::create_dir_all(&log_dir).map_err(|e: std::io::Error| {
+            AppError::Io(std::io::Error::new(
+                e.kind(),
+                format!("创建会话日志目录失败 ({}): {}", log_dir.display(), e),
+            ))
+        })?;
         let filename = format!(".dev-assistant-session-{}.log", timestamp);
-        let path = working_dir.join(&filename);
+        let path = log_dir.join(&filename);
 
         let mut options = OpenOptions::new();
         options.create(true).append(true);

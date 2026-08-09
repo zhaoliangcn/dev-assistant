@@ -1,37 +1,26 @@
 {
   "file_path": "src/",
   "analysis_type": "Design",
-  "summary": "部分文件体积过大，应拆分",
-  "details": null,
-  "issues": [
-    {
-      "severity": "Medium",
-      "description": "src/agent/mod.rs 1302 行，包含太多职责（Agent 主循环、子代理管理、pipeline 等），应拆分",
-      "location": "src/agent/mod.rs",
-      "suggestion": null
-    },
-    {
-      "severity": "Medium",
-      "description": "src/repl.rs 1249 行，slash 命令处理逻辑过于集中",
-      "location": "src/repl.rs",
-      "suggestion": null
-    },
-    {
-      "severity": "Low",
-      "description": "src/tools/kb.rs 896 行，KB 工具逻辑复杂",
-      "location": "src/tools/kb.rs",
-      "suggestion": null
-    },
-    {
-      "severity": "Low",
-      "description": "src/app.rs 822 行，应用构建逻辑较重",
-      "location": "src/app.rs",
-      "suggestion": null
-    }
-  ],
+  "summary": "全面分析了项目的记忆系统，涵盖 8 个核心组件：KnowledgeBase、SessionStore、SessionLogger、ContextManager、ContextCompressor、LayeredSummary、CheckpointManager、FileReadCache。发现了 20+ 个优化点，涉及数据结构、I/O 效率、锁竞争、存储冗余、数据生命周期管理等维度。",
+  "details": {
+    "analyzed_components": [
+      "KnowledgeBase (kb.rs)",
+      "SessionStore (persist/mod.rs)",
+      "SessionLogger (session/mod.rs)",
+      "ContextManager (agent/context.rs)",
+      "ContextCompressor (agent/compressor.rs)",
+      "LayeredSummary (agent/summary.rs)",
+      "CheckpointManager (orchestrator/checkpoint.rs)",
+      "FileReadCache (tools/cache.rs)",
+      "TokenCounter (agent/token_counter.rs)",
+      "ContextBudget (tools/context_budget.rs)"
+    ],
+    "total_files_analyzed": 12
+  },
+  "issues": [],
   "timestamp": {
-    "secs_since_epoch": 1785662444,
-    "nanos_since_epoch": 278764000
+    "secs_since_epoch": 1786186970,
+    "nanos_since_epoch": 149087000
   },
   "batch_number": 1
 }

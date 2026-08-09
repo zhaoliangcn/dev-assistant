@@ -61,6 +61,7 @@ pub struct PhaseSummary {
 
 /// 全部层级摘要（恢复时按需回溯使用）。
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)] // constructed only by SummaryStore::load_all (reserved for checkpoint recovery)
 pub struct LayeredSummaries {
     /// 轮次摘要（升序）
     pub rounds: Vec<RoundSummary>,
@@ -75,6 +76,7 @@ pub struct LayeredSummaries {
 /// 管理 `.kb/summaries/{session_id}/` 目录下的轮次/阶段/会话摘要文件。
 pub struct SummaryStore {
     /// 会话 ID
+    #[allow(dead_code)] // reserved for future use
     session_id: String,
     /// 摘要根目录（`.kb/summaries/{session_id}`）
     root: PathBuf,
@@ -98,11 +100,13 @@ impl SummaryStore {
     }
 
     /// 会话 ID。
+    #[allow(dead_code)] // reserved for future use
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
     /// 摘要根目录。
+    #[allow(dead_code)] // reserved for future use
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -193,6 +197,7 @@ impl SummaryStore {
     }
 
     /// 加载会话摘要（若有）。
+    #[allow(dead_code)] // reserved for checkpoint recovery
     pub fn load_final(&self) -> Result<Option<String>, AppError> {
         let path = self.root.join(FINAL_FILE);
         if !path.exists() {
@@ -203,6 +208,7 @@ impl SummaryStore {
     }
 
     /// 加载全部层级摘要（用于恢复时按需回溯）。
+    #[allow(dead_code)] // reserved for checkpoint recovery
     pub fn load_all(&self) -> Result<LayeredSummaries, AppError> {
         Ok(LayeredSummaries {
             rounds: self.load_rounds()?,

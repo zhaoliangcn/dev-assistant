@@ -98,6 +98,8 @@ pub struct SessionStore {
     file: File,
     path: PathBuf,
     session_id: String,
+    /// 连续写入失败次数。达到阈值后升级日志级别。
+    consecutive_write_failures: u32,
 }
 
 impl SessionStore {
@@ -143,6 +145,7 @@ impl SessionStore {
             file,
             path,
             session_id: timestamp.to_string(),
+            consecutive_write_failures: 0,
         })
     }
 
@@ -164,14 +167,29 @@ impl SessionStore {
     fn append_event(&mut self, event: &SessionEvent) {
         match serde_json::to_string(event) {
             Ok(json) => {
-                if let Err(e) = writeln!(self.file, "{}", json) {
+                let write_ok = writeln!(self.file, "{}", json).is_ok();
+                let flush_ok = self.file.flush().is_ok();
+                if write_ok && flush_ok {
+                    // 写入成功，重置连续失败计数
+                    self.consecutive_write_failures = 0;
+                    return;
+                }
+                // 写入或 flush 失败：累计连续失败次数，达到阈值后升级为 error 级别日志，
+                // 避免会话数据在磁盘满/权限变更等场景下静默丢失。
+                self.consecutive_write_failures += 1;
+                if self.consecutive_write_failures >= 3 {
+                    tracing::error!(
+                        consecutive_failures = self.consecutive_write_failures,
+                        file = %self.path.display(),
+                        "会话持久化连续写入失败（可能磁盘已满或权限变更），后续事件可能丢失"
+                    );
+                } else {
                     tracing::warn!(
-                        error = %e,
+                        error = write_ok.then_some("flush").unwrap_or("write"),
                         file = %self.path.display(),
                         "写入会话持久化事件失败"
                     );
                 }
-                let _ = self.file.flush();
             }
             Err(e) => {
                 tracing::warn!(

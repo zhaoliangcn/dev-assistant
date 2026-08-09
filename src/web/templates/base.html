@@ -4,63 +4,236 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Dev-Assistant{% endblock %}</title>
+    <!-- PWA 元标签（P4） -->
+    <meta name="theme-color" content="#ffffff">
+    <meta name="description" content="Dev-Assistant - AI 编程助手">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Dev-Assistant">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192x192.png">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <!-- highlight.js 主题样式：由 app.js 按当前主题切换（暗色 github-dark / 亮色 github） -->
+    <!-- highlight.js 主题样式：由 theme.js 按当前主题切换（暗色 github-dark / 亮色 github） -->
     <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <link rel="stylesheet" href="/static/css/app.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+    <!-- 模块化脚本：Store / 主题 → 工具函数 → 国际化 → 性能监控 → 侧栏组件 → 聊天组件 → 文件浏览器。
+         注意：Alpine 必须放在所有模块脚本之后，因为模块脚本需在 alpine:init 前注册 store/全局组件，
+         而 Alpine CDN 会在自身脚本执行后立即启动（queueMicrotask），若提前加载会错过这些注册。 -->
+    <script type="module" src="/static/js/theme.js"></script>
+    <script type="module" src="/static/js/utils.js"></script>
+    <script type="module" src="/static/js/i18n.js"></script>
+    <script type="module" src="/static/js/sidebar.js"></script>
+    <script type="module" src="/static/js/chat.js"></script>
+    <script type="module" src="/static/js/file-explorer.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="/static/js/app.js"></script>
+    <!-- P3: Service Worker 注册（离线缓存） -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/js/sw.js')
+                    .then((reg) => console.log('[SW] 注册成功:', reg.scope))
+                    .catch((err) => console.log('[SW] 注册失败:', err));
+            });
+        }
+    </script>
+    <!-- P4: PWA 安装提示 -->
+    <script>
+        let deferredPrompt = null;
+        let installPromptShown = false;
+        
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            // 延迟显示安装提示，避免打扰用户
+            setTimeout(() => {
+                if (deferredPrompt && !installPromptShown) {
+                    showInstallPrompt();
+                }
+            }, 30000); // 30 秒后显示
+        });
+        
+        function showInstallPrompt() {
+            if (installPromptShown || !deferredPrompt) return;
+            installPromptShown = true;
+            
+            // 创建安装提示横幅
+            const banner = document.createElement('div');
+            banner.className = 'pwa-install-banner';
+            banner.innerHTML = `
+                <div class="pwa-install-content">
+                    <span class="pwa-install-icon">📱</span>
+                    <div class="pwa-install-text">
+                        <strong>安装 Dev-Assistant</strong>
+                        <p>添加到主屏幕，获得更好的体验</p>
+                    </div>
+                    <div class="pwa-install-actions">
+                        <button class="pwa-install-btn" id="pwa-install-accept">安装</button>
+                        <button class="pwa-install-dismiss" id="pwa-install-dismiss">稍后</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(banner);
+            
+            // 绑定事件
+            document.getElementById('pwa-install-accept').addEventListener('click', async () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    console.log('[PWA] 安装结果:', outcome);
+                    deferredPrompt = null;
+                }
+                banner.remove();
+            });
+            
+            document.getElementById('pwa-install-dismiss').addEventListener('click', () => {
+                banner.remove();
+            });
+        }
+        
+        // 应用安装成功
+        window.addEventListener('appinstalled', () => {
+            console.log('[PWA] 应用已安装');
+            deferredPrompt = null;
+            const banner = document.querySelector('.pwa-install-banner');
+            if (banner) banner.remove();
+        });
+    </script>
 </head>
 <body>
     <header class="container-fluid">
         <nav x-data="{}">
             <ul>
-                <li><strong><a href="/" class="contrast">🤖 Dev-Assistant</a></strong></li>
-            </ul>
-            <ul>
-                <li>
-                    <span class="status-indicator"
-                          :class="$store.connection.connected ? 'online' : 'offline'">
-                        <span class="status-dot"></span>
-                        <span x-text="$store.connection.connected ? '在线' : '离线'"></span>
-                    </span>
-                </li>
-                <li>
-                    <!-- W15: 模型切换下拉框 -->
-                    <select class="model-select"
-                            x-model="$store.models.active"
-                            x-show="$store.models.loaded && $store.models.list.length > 1"
-                            @change="$store.models.switchModel($store.models.active)"
-                            :title="'当前模型: ' + $store.models.active">
-                        <template x-for="m in $store.models.list" :key="m.name">
-                            <option :value="m.name" x-text="m.name"></option>
-                        </template>
-                    </select>
-                    <span class="model-label" x-show="$store.models.loaded && $store.models.list.length <= 1"
-                          x-text="$store.models.active ? ('模型: ' + $store.models.active) : ''"></span>
-                </li>
-                <li>
-                    <span class="token-usage" x-show="$store.tokenUsage.total > 0"
-                          :title="$store.tokenUsage.detail()" style="font-size:0.8em;opacity:0.7;">
-                        <span x-text="$store.tokenUsage.label()"></span>
-                    </span>
-                </li>
-                <li>
-                    <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
-                            @click="$store.theme.toggle()" :title="$store.theme.modeLabel()" aria-label="切换主题">
-                        <span x-text="$store.theme.label()"></span>
-                    </button>
-                </li>
-                <li><a href="/" role="button" class="outline secondary">对话</a></li>
-                <li><a href="/files" role="button" class="outline secondary">文件</a></li>
-            </ul>
-        </nav>
-    </header>
+                            <li><strong><a href="/" class="contrast">🤖 Dev-Assistant</a></strong></li>
+                            <li x-show="window.innerWidth <= 480">
+                                <button class="outline secondary mobile-menu-btn"
+                                        @click="$store.sidebar.toggle()"
+                                        :aria-label="$store.i18n.menu">
+                                    ☰
+                                </button>
+                            </li>
+                            <!-- 语言切换（P4） -->
+                            <li>
+                                <select class="model-select"
+                                        x-model="$store.i18n.currentLang"
+                                        @change="$store.i18n.setLanguage($store.i18n.currentLang)"
+                                        :aria-label="$store.i18n.search">
+                                    <template x-for="lang in $store.i18n.availableLanguages" :key="lang.code">
+                                        <option :value="lang.code" x-text="lang.name"></option>
+                                    </template>
+                                </select>
+                            </li>
+                        </ul>
+                        <ul>
+                            <li>
+                                <span class="status-indicator"
+                                      :class="$store.connection.connected ? 'online' : 'offline'"
+                                      :title="$store.connection.connected ? $store.i18n.online : $store.i18n.offline">
+                                    <span class="status-dot" aria-hidden="true"></span>
+                                    <span x-text="$store.connection.connected ? $store.i18n.online : $store.i18n.offline"></span>
+                                </span>
+                            </li>
+                            <li>
+                                <select class="model-select"
+                                        x-model="$store.models.active"
+                                        x-show="$store.models.loaded && $store.models.list.length > 1"
+                                        @change="$store.models.switchModel($store.models.active)"
+                                        :title="$store.i18n.model + ': ' + $store.models.active"
+                                        :aria-label="$store.i18n.model">
+                                    <template x-for="m in $store.models.list" :key="m.name">
+                                        <option :value="m.name" x-text="m.name"></option>
+                                    </template>
+                                </select>
+                                <span class="model-label" x-show="$store.models.loaded && $store.models.list.length <= 1"
+                                      x-text="$store.models.active ? ($store.i18n.model + ': ' + $store.models.active) : ''"></span>
+                            </li>
+                            <li>
+                                <span class="token-usage" x-show="$store.tokenUsage.total > 0"
+                                      :title="$store.tokenUsage.detail()" style="font-size:0.8em;opacity:0.7;">
+                                    <span x-text="$store.tokenUsage.label()"></span>
+                                </span>
+                            </li>
+                            <li>
+                                <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
+                                        @click="$store.theme.toggle()" :title="$store.theme.modeLabel()" :aria-label="$store.i18n.theme">
+                                    <span x-text="$store.theme.label()"></span>
+                                </button>
+                            </li>
+                            <!-- P5: 主题定制按钮 -->
+                            <li>
+                                <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
+                                        @click="$store.customization.visible = !$store.customization.visible"
+                                        title="主题定制" aria-label="主题定制">
+                                    🎨
+                                </button>
+                            </li>
+                            <!-- 性能监控按钮（P5） -->
+                            <li>
+                                <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
+                                        @click="$store.performance.toggle()"
+                                        :title="$store.i18n.performance + ': FPS ' + $store.performance.fps"
+                                        :aria-label="$store.i18n.performance">
+                                    📊
+                                </button>
+                            </li>
+                            <li><a href="/" role="button" class="outline secondary" x-text="$store.i18n.chat"></a></li>
+                            <li><a href="/files" role="button" class="outline secondary" x-text="$store.i18n.files"></a></li>
+                        </ul>
+                    </nav>
+                </header>
     <main class="container-fluid">
         {% block content %}{% endblock %}
     </main>
+    <!-- 性能监控面板（P5） -->
+    <div id="performance-panel" class="performance-panel" x-show="$store.performance.visible" x-cloak>
+        <div class="performance-header">
+            <strong>📊 性能监控</strong>
+            <button type="button" class="copy-btn" @click="$store.performance.toggle()">✕</button>
+        </div>
+        <div class="performance-metrics">
+            <div class="metric">
+                <span class="metric-label">FPS</span>
+                <span class="metric-value" id="perf-fps">0</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">内存</span>
+                <span class="metric-value" id="perf-memory">N/A</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">事件监听器</span>
+                <span class="metric-value" id="perf-listeners">0</span>
+            </div>
+        </div>
+    </div>
+    <!-- 主题定制面板（P5） -->
+    <div id="customization-panel" class="customization-panel" x-show="$store.customization.visible" x-cloak>
+        <div class="customization-header">
+            <strong>🎨 主题定制</strong>
+            <button type="button" class="copy-btn" @click="$store.customization.visible = false">✕</button>
+        </div>
+        <div class="customization-body">
+            <div class="customize-item">
+                <label>字体大小</label>
+                <input type="range" min="12" max="20" step="1" 
+                       x-model="$store.customization.fontSize"
+                       @input="$store.customization.updateFontSize($store.customization.fontSize)">
+                <span x-text="$store.customization.fontSize + 'px'"></span>
+            </div>
+            <div class="customize-item">
+                <label>圆角大小</label>
+                <input type="range" min="0" max="16" step="1" 
+                       x-model="$store.customization.borderRadius"
+                       @input="$store.customization.updateRadius($store.customization.borderRadius)">
+                <span x-text="$store.customization.borderRadius + 'px'"></span>
+            </div>
+            <div class="customize-item">
+                <label>主题色</label>
+                <input type="color" x-model="$store.customization.primaryColor"
+                       @input="$store.customization.updatePrimaryColor($store.customization.primaryColor)">
+            </div>
+        </div>
+    </div>
     <footer class="container-fluid">
         <small>Dev-Assistant-RS — 本地 AI 编程助手</small>
     </footer>

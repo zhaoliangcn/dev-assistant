@@ -206,7 +206,8 @@ pub fn kb_query_tool() -> ToolDefinition {
 fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, AppError> {
     let path = args.arguments["path"]
         .as_str()
-        .ok_or_else(|| AppError::Llm("kb_store: 'path' is required".to_string()))?;
+        .ok_or_else(|| AppError::Llm("kb_store: 'path' is required".to_string()))?
+        .to_string();
 
     // SECURITY: 验证路径不包含 `..` 遍历
     if path.contains("..") {
@@ -221,6 +222,13 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
             "kb_store: path must end with '.md', got: '{}'", path
         )));
     }
+
+    // 规范化路径：去除开头的 ".kb/" 或 ".kb\\" 前缀，防止 `kb_root.join(path)`
+    // 把路径重复拼成 `.kb/.kb/...`。LLM 有时会传入完整路径 ".kb/decisions/foo.md"
+    // 而非相对路径 "decisions/foo.md"，必须统一为相对路径。
+    let path = path
+        .trim_start_matches(".kb/")
+        .trim_start_matches(".kb\\");
 
     let content = args.arguments["content"]
         .as_str()

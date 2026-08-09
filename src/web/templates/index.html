@@ -3,28 +3,76 @@
 {% block title %}Dev-Assistant 对话{% endblock %}
 
 {% block content %}
-<div class="grid chat-layout" x-data="chatApp()">
-    <!-- 左侧：会话列表 + 文件树 -->
-    <div class="session-sidebar">
+<a href="#main-chat" class="skip-nav">跳转到主内容</a>
+<div class="grid chat-layout" x-data="chatApp()"
+     @session-selected.window="selectSession($event.detail.id)"
+     @new-chat.window="newChat()"
+     @session-deleted.window="deleteSession($event.detail.id)"
+     @session-renamed.window="renameSession($event.detail.id, $event.detail.title)"
+     @file-opened.window="openSideFile($event.detail.path)">
+    <!-- 移动端侧栏遮罩层 -->
+    <div class="sidebar-overlay"
+         :class="$store.sidebar.open ? 'sidebar-visible' : ''"
+         @click="$store.sidebar.close()"
+         x-show="$store.sidebar.open"
+         x-cloak
+         role="presentation"></div>
+
+    <!-- 左侧：共享侧栏组件 -->
+    <div class="session-sidebar"
+         :class="$store.sidebar.open ? 'sidebar-open' : ''"
+         x-data="sidebarWidget()"
+         role="complementary"
+         aria-label="侧边栏">
+        <!-- 移动端侧栏头部（关闭按钮） -->
+        <div class="mobile-sidebar-header" x-show="$store.sidebar.isMobile">
+            <strong x-text="$store.i18n.menu"></strong>
+            <button type="button" class="copy-btn" @click="$store.sidebar.close()">✕</button>
+        </div>
         <!-- D1: Tab 切换 -->
         <div class="sidebar-tabs">
-            <button type="button" class="sidebar-tab" :class="{ 'tab-active': sidebarTab === 'sessions' }"
-                    @click="switchSidebarTab('sessions')">💬 会话</button>
-            <button type="button" class="sidebar-tab" :class="{ 'tab-active': sidebarTab === 'files' }"
-                    @click="switchSidebarTab('files')">📁 文件</button>
+            <button type="button" class="sidebar-tab" :class="{ 'tab-active': activeTab === 'sessions' }"
+                    @click="switchTab('sessions')">💬 <span x-text="$store.i18n.chat"></span></button>
+            <button type="button" class="sidebar-tab" :class="{ 'tab-active': activeTab === 'files' }"
+                    @click="switchTab('files')">📁 <span x-text="$store.i18n.files"></span></button>
         </div>
 
         <!-- 会话历史 Tab -->
-        <div x-show="sidebarTab === 'sessions'" class="sidebar-panel">
+        <div x-show="activeTab === 'sessions'" class="sidebar-panel">
             <div class="session-header">
-                <strong>💬 会话历史</strong>
-                <button type="button" class="copy-btn" @click="loadSessions()">🔄</button>
+                <strong>💬 <span x-text="$store.i18n.session_history"></span></strong>
+                <div>
+                    <!-- P5: 导出按钮 -->
+                    <button type="button" class="copy-btn" 
+                            @click="exportSession('md')" 
+                            :disabled="!activeSessionId"
+                            title="Export Markdown">📥 MD</button>
+                    <button type="button" class="copy-btn" 
+                            @click="exportSession('json')" 
+                            :disabled="!activeSessionId"
+                            title="Export JSON">📥 JSON</button>
+                    <button type="button" class="copy-btn" @click="loadSessions()">🔄</button>
+                </div>
             </div>
-            <button type="button" class="session-new" @click="newChat()">＋ 新对话</button>
+            <button type="button" class="session-new" @click="newChat()">＋ <span x-text="$store.i18n.new_chat"></span></button>
+            <!-- 骨架屏加载状态 -->
+            <div x-show="loadingSessions && sessions.length === 0" class="skeleton-container sidebar-skeleton">
+                <template x-for="i in 5" :key="i">
+                    <div class="skeleton-session-item">
+                        <div class="skeleton-line skeleton-line-short"></div>
+                        <div class="skeleton-line skeleton-line-medium"></div>
+                    </div>
+                </template>
+            </div>
             <div class="session-list">
                 <template x-for="s in sessions" :key="s.id">
                     <div class="session-item"
+                         role="button"
+                         tabindex="0"
+                         :aria-label="'打开会话 ' + (s.title || ('会话 ' + s.id))"
                          @click="selectSession(s.id)"
+                         @keydown.enter.prevent="selectSession(s.id)"
+                         @keydown.space.prevent="selectSession(s.id)"
                          :class="{ 'session-active': activeSessionId === s.id }">
                         <div class="session-item-main">
                             <!-- 重命名编辑态：内联输入框 -->
@@ -48,23 +96,21 @@
                         </div>
                         <div class="session-item-actions">
                             <button type="button" class="copy-btn small"
-                                    @click.stop="startRename(s)">✏️</button>
+                                    @click.stop="startRename(s)" aria-label="重命名会话">✏️</button>
                             <button type="button" class="copy-btn small session-delete"
-                                    @click.stop="deleteSession(s.id)">🗑</button>
+                                    @click.stop="deleteSession(s.id)" aria-label="删除会话">🗑</button>
                         </div>
                     </div>
                 </template>
-                <div class="session-empty" x-show="!loadingSessions && sessions.length === 0">
-                    暂无历史会话
-                </div>
-                <div class="session-empty" x-show="loadingSessions">加载中...</div>
+                <div class="session-empty" x-show="!loadingSessions && sessions.length === 0" x-text="$store.i18n.no_sessions"></div>
+                <div class="session-empty" x-show="loadingSessions" x-text="$store.i18n.loading"></div>
             </div>
         </div>
 
         <!-- 文件树 Tab -->
-        <div x-show="sidebarTab === 'files'" class="sidebar-panel">
+        <div x-show="activeTab === 'files'" class="sidebar-panel">
             <div class="session-header">
-                <strong>📁 文件树</strong>
+                <strong>📁 <span x-text="$store.i18n.file_tree"></span></strong>
                 <button type="button" class="copy-btn" @click="loadFileDir(treePath)">🔄</button>
             </div>
             <div class="file-nav">
@@ -72,27 +118,69 @@
                 <button type="button" class="copy-btn" @click="loadFileDir(treeParent())"
                         x-show="treePath !== '.'" title="上一级">⬆</button>
             </div>
+            <!-- 文件树骨架屏 -->
+            <div x-show="treeLoading" class="skeleton-container sidebar-skeleton">
+                <template x-for="i in 6" :key="i">
+                    <div class="skeleton-file-item">
+                        <div class="skeleton-line skeleton-line-short"></div>
+                    </div>
+                </template>
+            </div>
             <div class="session-list file-tree-list">
                 <template x-for="entry in treeEntries" :key="entry.path">
                     <div class="session-item"
-                         @click="entry.is_dir ? loadFileDir(entry.path) : openSideFile(entry.path)">
+                         role="button"
+                         tabindex="0"
+                         :aria-label="entry.is_dir ? ('打开目录 ' + entry.name) : ('打开文件 ' + entry.name)"
+                         @click="entry.is_dir ? loadFileDir(entry.path) : openFile(entry.path)"
+                         @keydown.enter.prevent="entry.is_dir ? loadFileDir(entry.path) : openFile(entry.path)"
+                         @keydown.space.prevent="entry.is_dir ? loadFileDir(entry.path) : openFile(entry.path)">
                         <span x-text="entry.is_dir ? '📁 ' + entry.name : '📄 ' + entry.name"></span>
                         <span class="file-size" x-show="!entry.is_dir" x-text="formatSize(entry.size)"></span>
                     </div>
                 </template>
-                <div class="session-empty" x-show="!treeLoading && treeEntries.length === 0">（空目录）</div>
-                <div class="session-empty" x-show="treeLoading">加载中...</div>
+                <div class="session-empty" x-show="!treeLoading && treeEntries.length === 0" x-text="$store.i18n.file_empty"></div>
+                <div class="session-empty" x-show="treeLoading" x-text="$store.i18n.loading"></div>
             </div>
         </div>
     </div>
 
     <!-- 右侧：对话面板 -->
-    <div class="chat-panel">
+    <div class="chat-panel" id="main-chat" role="main" :aria-label="$store.i18n.chat">
+        <!-- 连接错误提示（P3） -->
+        <div x-show="connectionError" class="connection-error-toast" x-transition role="alert" aria-live="assertive">
+            <span x-text="connectionError"></span>
+            <button type="button" class="copy-btn small" @click="connectionError = null" :aria-label="$store.i18n.close">✕</button>
+        </div>
+
+        <!-- 搜索面板（P2） -->
+        <div x-show="searchPanelOpen" class="search-panel" role="search" :aria-label="$store.i18n.search">
+            <div class="search-header">
+                <input type="text"
+                       class="search-input"
+                       x-model="searchQuery"
+                       @input.debounce.300ms="performSearch()"
+                       :placeholder="$store.i18n.search_placeholder"
+                       x-ref="searchInput"
+                       :aria-label="$store.i18n.search">
+                <span class="search-count" x-show="searchResultCount > 0" aria-live="polite">
+                    <span x-text="searchCurrentIndex + 1"></span> / <span x-text="searchResultCount"></span>
+                </span>
+                <button type="button" class="copy-btn" @click="closeSearch()" :aria-label="$store.i18n.close">✕</button>
+            </div>
+            <div class="search-actions" x-show="searchHasResults">
+                <button type="button" class="copy-btn" @click="prevSearchResult()" x-text="$store.i18n.search_prev">↑ 上一个</button>
+                <button type="button" class="copy-btn" @click="nextSearchResult()" x-text="$store.i18n.search_next">↓ 下一个</button>
+            </div>
+        </div>
+
         <!-- C1: 工具活动区（独立容器，tool-call / tool-result） -->
         <div class="tool-activity" x-ref="toolList"
-             x-show="toolMessages.length > 0 || pendingStatus !== null">
+             x-show="toolMessages.length > 0 || pendingStatus !== null"
+             role="region"
+             aria-label="工具活动区">
             <div class="tool-activity-header">
-                <span>🔧 工具活动</span>
+                <span>🔧 <span x-text="$store.i18n.tool_call"></span></span>
                 <span class="tool-activity-count" x-text="toolMessages.length ? toolMessages.length + ' 项' : ''"></span>
             </div>
             <!-- 可替换状态条（思考/状态，不进入消息列表） -->
@@ -102,104 +190,201 @@
             </div>
             <div class="tool-activity-list">
                 <template x-for="msg in toolMessages" :key="msg._id">
-                    <!-- 工具结果（折叠展示） -->
-                    <div x-show="msg.role === 'tool-result'" class="tool-item tool-result">
-                        <details class="collapsible" :open="msg.content.length < 200">
-                            <summary>🔧 工具结果</summary>
-                            <div class="collapsible-content tool-content" x-text="msg.content"></div>
-                        </details>
-                    </div>
-                    <!-- 工具调用 -->
-                    <div x-show="msg.role === 'tool-call'" class="tool-item tool-call">
-                        <span class="tool-call-name">🔧 <span x-text="msg.content"></span></span>
+                    <div>
+                        <!-- 工具结果（折叠展示） -->
+                        <div x-show="msg.role === 'tool-result'" class="tool-item tool-result">
+                            <details class="collapsible" :open="msg.content.length < 200">
+                                <summary>🔧 工具结果</summary>
+                                <div class="collapsible-content tool-content" x-text="msg.content"></div>
+                            </details>
+                        </div>
+                        <!-- 工具调用 -->
+                        <div x-show="msg.role === 'tool-call'" class="tool-item tool-call">
+                            <span class="tool-call-name">🔧 <span x-text="msg.content"></span></span>
+                        </div>
                     </div>
                 </template>
             </div>
         </div>
 
         <!-- C1: 对话区（独立容器，user / assistant / system / error） -->
-        <div id="message-list" class="message-list" x-ref="list">
+        <div id="message-list" class="message-list" x-ref="list"
+             @scroll="onChatScroll($event)"
+             role="log"
+             aria-label="对话消息列表"
+             aria-live="polite">
+            <!-- 骨架屏加载状态（会话历史加载中） -->
+            <div x-show="loadingSessions && chatMessages.length === 0" class="skeleton-container">
+                <template x-for="i in 4" :key="i">
+                    <div class="skeleton-message" :class="i % 2 === 0 ? 'skeleton-user' : 'skeleton-assistant'">
+                        <div class="skeleton-avatar"></div>
+                        <div class="skeleton-body">
+                            <div class="skeleton-line skeleton-line-short"></div>
+                            <div class="skeleton-line"></div>
+                            <div class="skeleton-line skeleton-line-medium"></div>
+                        </div>
+                    </div>
+                </template>
+            </div>
             <!-- 欢迎消息 -->
-            <div class="message system" x-show="chatMessages.length === 0">
+            <div class="message system" x-show="chatMessages.length === 0 && !loadingSessions">
                 <div class="message-body">
-                    <p>👋 你好！我是 Dev-Assistant，你的 AI 编程助手。</p>
-                    <p>发送消息开始对话，我会使用各种工具帮助你完成任务。</p>
+                    <p👋 <span x-text="$store.i18n.assistant"></span>！<span x-text="$store.i18n.chat"></span></p>
                 </div>
             </div>
 
-            <!-- 消息列表 -->
-            <template x-for="msg in chatMessages" :key="msg._id">
-                <div>
-                    <!-- 用户消息 -->
-                    <div x-show="msg.role === 'user'" class="message user">
-                        <div class="message-avatar">👤</div>
-                        <div class="message-body">
-                            <div class="message-header">
-                                <span class="message-role">你</span>
-                                <span class="message-time" x-text="msg.time || ''"></span>
+            <!-- 消息列表（支持虚拟滚动，仅当消息数较多时启用） -->
+            <template x-if="chatTotalCount > 100">
+                <div class="virtual-scroll-container">
+                    <!-- 顶部占位（视口外的历史消息） -->
+                    <div x-show="showVirtualSpacerTop" class="virtual-spacer"
+                         :style="'height:' + virtualSpacerTopHeight + 'px'"></div>
+                    <!-- 可见消息 -->
+                    <template x-for="msg in visibleChatMessages" :key="msg._id">
+                        <div>
+                            <!-- 用户消息 -->
+                            <div x-show="msg.role === 'user'" class="message user">
+                                <div class="message-avatar">👤</div>
+                                <div class="message-body">
+                                    <div class="message-header">
+                                        <span class="message-role">你</span>
+                                        <span class="message-time" x-text="msg.time || ''"></span>
+                                    </div>
+                                    <div class="message-content" x-text="msg.content"></div>
+                                </div>
                             </div>
-                            <div class="message-content" x-text="msg.content"></div>
-                        </div>
-                    </div>
 
-                    <!-- 助手消息（流式时带 streaming 边框） -->
-                    <div x-show="msg.role === 'assistant'"
-                         class="message assistant"
-                         :class="{ 'streaming': msg.streaming }">
-                        <div class="message-avatar">🤖</div>
-                        <div class="message-body">
-                            <div class="message-header">
-                                <span class="message-role">助手</span>
-                                <span class="message-time" x-text="msg.time || ''"></span>
-                                <button type="button" class="copy-btn small"
-                                        @click="copyMessage(msg.content)"
-                                        x-text="copiedMessageId ? '✅ 已复制' : '📋 复制'"></button>
+                            <!-- 助手消息（流式时带 streaming 边框） -->
+                            <div x-show="msg.role === 'assistant'"
+                                 class="message assistant"
+                                 :class="{ 'streaming': msg.streaming }">
+                                <div class="message-avatar">🤖</div>
+                                <div class="message-body">
+                                    <div class="message-header">
+                                        <span class="message-role">助手</span>
+                                        <span class="message-time" x-text="msg.time || ''"></span>
+                                        <button type="button" class="copy-btn small"
+                                                @click="copyMessage(msg.content)"
+                                                x-text="copiedMessageId ? '✅ 已复制' : '📋 复制'"></button>
+                                    </div>
+                                    <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
+                                </div>
                             </div>
-                            <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
-                        </div>
-                    </div>
 
-                    <!-- 系统/状态 -->
-                    <div x-show="msg.role === 'system'" class="message system" style="font-size:0.85em;opacity:0.7;">
-                        <div class="message-body">
-                            <div class="message-content" x-text="msg.content"></div>
-                        </div>
-                    </div>
+                            <!-- 系统/状态 -->
+                            <div x-show="msg.role === 'system'" class="message system" style="font-size:0.85em;opacity:0.7;">
+                                <div class="message-body">
+                                    <div class="message-content" x-text="msg.content"></div>
+                                </div>
+                            </div>
 
-                    <!-- 错误 -->
-                    <div x-show="msg.role === 'error'" class="message" style="align-self:center;color:var(--pico-del-color);">
-                        <div class="message-body">
-                            <div class="message-content" x-text="msg.content"></div>
+                            <!-- 错误 -->
+                            <div x-show="msg.role === 'error'" class="message error-message" style="align-self:center;color:var(--pico-del-color);">
+                                <div class="message-body">
+                                    <div class="message-content" x-text="msg.content"></div>
+                                    <!-- P3: 错误重试按钮 -->
+                                    <button type="button" class="copy-btn small retry-btn"
+                                            @click="retryLastAction()"
+                                            x-show="canRetry">
+                                        重试
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    </template>
+                    <!-- 底部占位（视口外的新消息） -->
+                    <div x-show="showVirtualSpacerBottom" class="virtual-spacer"
+                         :style="'height:' + virtualSpacerBottomHeight + 'px'"></div>
                 </div>
+            </template>
+
+            <!-- 兼容旧版：当消息数较少时使用 flat 列表 -->
+            <template x-if="chatTotalCount > 0 && chatTotalCount <= 100">
+                <template x-for="msg in chatMessages" :key="msg._id">
+                    <div>
+                        <!-- 用户消息 -->
+                        <div x-show="msg.role === 'user'" class="message user">
+                            <div class="message-avatar">👤</div>
+                            <div class="message-body">
+                                <div class="message-header">
+                                    <span class="message-role">你</span>
+                                    <span class="message-time" x-text="msg.time || ''"></span>
+                                </div>
+                                <div class="message-content" x-text="msg.content"></div>
+                            </div>
+                        </div>
+
+                        <!-- 助手消息 -->
+                        <div x-show="msg.role === 'assistant'"
+                             class="message assistant"
+                             :class="{ 'streaming': msg.streaming }">
+                            <div class="message-avatar">🤖</div>
+                            <div class="message-body">
+                                <div class="message-header">
+                                    <span class="message-role">助手</span>
+                                    <span class="message-time" x-text="msg.time || ''"></span>
+                                    <button type="button" class="copy-btn small"
+                                            @click="copyMessage(msg.content)"
+                                            x-text="copiedMessageId ? '✅ 已复制' : '📋 复制'"></button>
+                                </div>
+                                <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
+                            </div>
+                        </div>
+
+                        <!-- 系统/状态 -->
+                        <div x-show="msg.role === 'system'" class="message system" style="font-size:0.85em;opacity:0.7;">
+                            <div class="message-body">
+                                <div class="message-content" x-text="msg.content"></div>
+                            </div>
+                        </div>
+
+                        <!-- 错误 -->
+                        <div x-show="msg.role === 'error'" class="message error-message" style="align-self:center;color:var(--pico-del-color);">
+                            <div class="message-body">
+                                <div class="message-content" x-text="msg.content"></div>
+                                <!-- P3: 错误重试按钮 -->
+                                <button type="button" class="copy-btn small retry-btn"
+                                        @click="retryLastAction()"
+                                        x-show="canRetry">
+                                    重试
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
             </template>
         </div>
 
         <!-- 输入区域 -->
-        <div class="input-area">
-            <form class="input-form"
-                  @submit.prevent="sendMessage()">
-                <div class="grid">
-                    <textarea x-model="input"
-                              placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
-                              rows="2"
-                              autofocus
-                              required
-                              @keydown="onInputKeydown($event)"></textarea>
-                    <!-- W10: 生成中显示停止按钮，否则显示发送按钮 -->
-                    <button type="submit" class="primary" :disabled="!input.trim() || busy"
-                            x-show="!busy">
-                        发送
-                    </button>
-                    <button type="button" class="secondary stop-btn"
-                            x-show="busy"
-                            @click="stopGeneration()">
-                        ⏹ 停止
-                    </button>
+                <div class="input-area">
+                    <form class="input-form"
+                          @submit.prevent="sendMessage()">
+                        <div class="grid">
+                            <textarea x-model="input"
+                                      :placeholder="$store.i18n.chat_placeholder"
+                                      rows="2"
+                                      autofocus
+                                      required
+                                      @keydown="onInputKeydown($event)"></textarea>
+                            <!-- W10: 生成中显示停止按钮，否则显示发送按钮 -->
+                            <button type="submit" class="primary" :disabled="!input.trim() || busy"
+                                    x-show="!busy" x-text="$store.i18n.send">
+                            </button>
+                            <button type="button" class="secondary stop-btn"
+                                    x-show="busy"
+                                    @click="stopGeneration()">
+                                ⏹ <span x-text="$store.i18n.stop"></span>
+                            </button>
+                            <!-- P2: 搜索按钮 -->
+                            <button type="button" class="secondary search-toggle-btn"
+                                    @click="toggleSearch()"
+                                    :class="{ 'search-active': searchPanelOpen }"
+                                    title="搜索消息 (Ctrl+/)">
+                                🔍
+                            </button>
+                        </div>
+                    </form>
                 </div>
-            </form>
-        </div>
     </div>
 </div>
 {% endblock %}

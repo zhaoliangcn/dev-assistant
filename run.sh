@@ -8,4 +8,4 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-exec "$SCRIPT_DIR/target/debug/dev-assistant" --config .dev-assistant-models.toml "$@"
+exec "$SCRIPT_DIR/target/debug/dev-assistant" --config .dev-assistant-models.toml --max-tokens 1000000 "$@"

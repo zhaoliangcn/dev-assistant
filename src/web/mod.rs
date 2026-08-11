@@ -100,7 +100,7 @@ impl Default for WebConfig {
             config: None,
             verbose: false,
             max_iterations: 8,
-            max_tokens: 8192,
+            max_tokens: 262144,
             provider: "openai".to_string(),
             model: None,
             no_approval: false,

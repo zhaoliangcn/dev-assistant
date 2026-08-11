@@ -1,164 +1,236 @@
-# Dev-Assistant-RS 代码自查报告
+# 代码审查报告
 
-**日期**: 2026-08-04  
-**范围**: 全部 `src/` 目录（Rust 源代码）  
-**检查项**: 编译警告、测试失败、代码质量、安全、架构
-
----
-
-## 1. 编译状态
-
-### 1.1 编译通过 ✅
-- `cargo check` 编译通过，无 error
-- 存在 **7 个 warning**（均为 `dead_code`）
-
-### 1.2 编译警告详情
-
-| # | 文件 | 行号 | 类型 | 说明 | 优先级 |
-|---|------|------|------|------|--------|
-| W1 | `src/agent/context.rs` | 159 | `dead_code` | `ContextBudgetManager::should_compress` 方法从未使用 | P2 |
-| W2 | `src/agent/context.rs` | 167 | `dead_code` | `ContextBudgetManager::set_memory_tokens` 方法从未使用 | P2 |
-| W3 | `src/agent/context.rs` | 244 | `dead_code` | `ContextManager::set_memory_tokens` 方法从未使用 | P2 |
-| W4 | `src/agent/summary.rs` | 64 | `dead_code` | `LayeredSummaries` 结构体从未被构造 | P2 |
-| W5 | `src/agent/summary.rs` | 78 | `dead_code` | `session_id` 字段从未被读取 | P2 |
-| W6 | `src/agent/summary.rs` | 101 | `dead_code` | `session_id()`, `root()`, `load_final()`, `load_all()` 方法从未使用 | P2 |
-| W7 | `src/orchestrator/checkpoint.rs` | 118 | `dead_code` | `kb_root` 字段从未被读取 | P2 |
-| W8 | `src/orchestrator/checkpoint.rs` | 276 | `dead_code` | `rebuild_context_from_checkpoint` 方法从未使用 | P2 |
-
-**建议**: 所有 warning 均为 `dead_code`，建议在下一轮清理中移除或添加 `#[allow(dead_code)]` 明确标注意图。
+**审查范围**: 17 个文件，+1157 / -697 行  
+**编译状态**: `cargo check` 通过（4 个 dead_code 警告，均为新 dream 模块中预留的扩展点）  
+**测试状态**: 384 passed, 0 failed  
+**Clippy**: 4 个 `redundant_static_lifetimes` 警告（`pipeline_stages.rs`，非本次变更引入）
 
 ---
 
-## 2. 测试状态
+## 一、整体架构评价
 
-### 2.1 总体
-- **通过**: 351 个
-- **失败**: 6 个（均在 `src/tools/file/symbol.rs`）
-- **跳过**: 0
+本次提交是一次**大规模重构与功能增强**，涵盖 7 个核心主题：
 
-### 2.2 失败测试分析
+| 主题 | 变更文件 | 质量 |
+|------|---------|------|
+| 🆕 Dream 记忆系统（新模块） | `src/dream/*`, `src/main.rs`, `src/app.rs`, `src/scheduler/handler.rs` | ⭐⭐⭐⭐ |
+| 🧠 分层摘要注入 + 检查点恢复 | `src/agent/context.rs`, `src/agent/summary.rs`, `src/agent/mod.rs`, `src/orchestrator/*` | ⭐⭐⭐⭐⭐ |
+| 📝 会话日志统一持久化 | `src/session/mod.rs`, `src/app.rs`, `src/repl.rs` | ⭐⭐⭐⭐⭐ |
+| ⚡ 缓存系统重构 | `src/tools/cache.rs` | ⭐⭐⭐⭐⭐ |
+| 🔍 KB 搜索增强 | `src/tools/kb.rs` | ⭐⭐⭐⭐ |
+| 🔧 压缩策略优化 | `src/agent/compressor.rs`, `src/agent/mod.rs` | ⭐⭐⭐⭐ |
+| 📊 Token 计数器改进 | `src/agent/token_counter.rs` | ⭐⭐⭐⭐⭐ |
 
-| # | 测试名 | 断言 | 期望值 | 实际值 | 根因分析 |
-|---|--------|------|--------|--------|----------|
-| F1 | `scan_trait` | `symbols[0].name` | `"Into"` | `"into"` | 泛型 trait 名称解析问题：`pub trait Into<T>` 中泛型参数 `<T>` 导致名称截断或解析异常 |
-| F2 | `scan_const` | `symbols[0].name` | `"MAX"` | `"MAX:"` | 冒号处理：`const MAX: usize = 1024` 中类型注解的冒号被计入名称 |
-| F3 | `scan_module` | `symbols.len()` | 1 | 0 | 分号结尾的模块声明 `pub mod foo;` 未被识别 |
-| F4 | `pub_struct_with_visibility` | `symbols.len()` | 1 | 0 | `pub struct FooBar` 中 `pub` 可见性修饰符导致解析失败 |
-| F5 | `async_function` | `symbols.len()` | 1 | 0 | `pub async fn` 中 `async` 关键字未被识别 |
-| F6 | `pub_crate_struct` | `symbols.len()` | 1 | 0 | `pub(crate)` 复合可见性修饰符导致解析失败 |
-
-**根因总结**: `scan_symbols` 函数（`src/tools/file/symbol.rs`）的正则/行解析逻辑存在以下缺陷：
-
-1. **可见性修饰符未处理**：只处理了无修饰符的 `fn`/`struct`/`enum` 等，但 `pub fn`、`pub async fn`、`pub(crate) struct` 等均未被识别
-2. **泛型参数干扰**：`trait Into<T>` 中 `<T>` 导致名称解析为小写 `into`
-3. **冒号处理缺陷**：`const MAX: usize` 中类型注解的冒号被包含在名称中
-4. **分号模块遗漏**：`pub mod foo;` 这种分号结尾的模块声明未被识别
-
-**建议修复**: 在 `scan_symbols` 中添加对 `pub`、`pub(crate)`、`pub(super)`、`async`、`unsafe` 等修饰符的跳过逻辑，并修复上述解析缺陷。
+**整体评价**: 代码质量高，架构设计清晰，测试全面覆盖。以下逐项深入分析。
 
 ---
 
-## 3. 代码质量分析
+## 二、逐项审查
 
-### 3.1 架构质量 ✅
-- **模块化清晰**: `agent/`、`tools/`、`llm/`、`scheduler/`、`security/` 等模块职责分明
-- **单层抽象**: main.rs 仅做入口，业务逻辑在 app.rs 和 repl.rs 中
-- **依赖注入**: 使用 `Arc<SecurityPolicy>` 共享安全策略，避免生命周期问题
-- **资源管理**: `Resources` 容器用于依赖注入，设计合理
+### 2.1 Dream 记忆系统（新模块）
 
-### 3.2 代码异味
+**文件**: `src/dream/`（mod.rs, ingest.rs, consolidate.rs, dedup.rs, forget.rs, report.rs）
 
-#### 3.2.1 `src/app.rs` — 函数过长
-- `run_interactive()` 方法约 340 行，包含 slash 命令分发、模型切换、历史查看等复杂逻辑
-- 建议将 `/model`、`/history`、`/grep`、`/diff` 等命令处理提取为独立方法
+**优点**:
+- ✅ 模块化良好：6 个阶段各自独立文件，职责清晰
+- ✅ 安全约束严格：只写 `.kb/`，不碰源码，永不删除只归档
+- ✅ 容错设计：各阶段独立容错，单阶段失败记录 `has_errors` 后继续
+- ✅ 支持 `--dry-run` 预演模式，可安全预览
+- ✅ undo 快照机制：运行前备份 `index.json`
 
-#### 3.2.2 `src/repl.rs` — 命令处理分散
-- `handle_slash` 在 `repl.rs` 中，但 `/model`、`/history` 等命令在 `app.rs` 中处理
-- 命令分发逻辑分散在两处，维护成本高
-- 建议统一为命令注册表模式
+**问题与建议**:
 
-#### 3.2.3 `src/agent/mod.rs` — Agent 类过大
-- `Agent` 结构体约 1500 行，承担了太多职责（LLM 交互、工具调用、流水线、摘要管理）
-- 建议将流水线逻辑（`run_pipeline` 及相关方法）提取到独立的 `PipelineRunner` 中
+1. **🔴 未使用的变量** (`src/dream/ingest.rs:121`)
+   ```rust
+   let mut last_failure_ts: Option<String> = None;
+   ```
+   `last_failure_ts` 赋值后从未被读取。检查是否应在 `extract_candidates` 中用于跟踪连续失败的时间窗口。建议：要么实现时间窗口逻辑，要么移除。
 
-#### 3.2.4 `src/security/mod.rs` — 函数过长
-- `evaluate_command` 方法约 130 行，包含大量正则匹配和条件判断
-- 建议拆分为多个策略函数（`evaluate_rm_rf`、`evaluate_sudo`、`evaluate_shell` 等）
+2. **🔴 未使用的公开方法** (`src/dream/mod.rs:50`, `src/dream/mod.rs:80`, `src/dream/report.rs:39`)
+   - `DreamConfig::with_llm` — 将来 `app.rs` 的 `/dream` 命令会用到，但当前 `app.rs` 中直接构造 `DreamConfig` 而非调用此方法
+   - `DreamResult::total_actions` — 对外接口，但当前消费者未使用
+   - `DreamReport::add_detail` — 供各阶段记录明细，但当前各阶段直接操作 `report.details`
+   - **建议**: 保留 `#[allow(dead_code)]` 注解并注明用途，或移除暂不需要的方法
 
-### 3.3 重复代码
-- `src/agent/identity.rs` 中 `default_tools()` 方法为每个身份重复了几乎相同的工具列表
-- 建议：定义公共工具集 + 各身份差异集，通过差集合并
+3. **⚠️ ingest.rs 中 `extract_candidates` 函数签名** (line 116)
+   ```rust
+   pub fn extract_candidates(
+       session_id: &str,
+       events: &[SessionEvent],
+   ) -> Vec<ExperienceCandidate>
+   ```
+   函数体较长（约 115 行），内部通过 `events.iter()` 扫描，建议拆分为「扫描+提取」两个阶段，或加注释说明核心扫描逻辑。
+
+### 2.2 分层摘要注入 + 检查点恢复
+
+**文件**: `src/agent/context.rs`, `src/agent/summary.rs`, `src/agent/mod.rs`, `src/orchestrator/mod.rs`, `src/orchestrator/checkpoint.rs`
+
+**优点**:
+- ✅ **架构设计优秀**: `inject_historical_summaries` 在 `Agent::new` 中自动调用，对调用方透明
+- ✅ **预算感知**: 按 `max_tokens` 动态计算可用预算，从高到低层级注入（final → phase → round）
+- ✅ **幂等性**: 仅在新会话（空历史）时注入，已恢复的会话跳过
+- ✅ **单次目录遍历**: `scan_directory` 方法避免 `load_rounds` + `load_phases` 各自全量扫描（P2 性能优化）
+- ✅ **检查点恢复集成**: `rebuild_context_from_checkpoint` 重建 Agent 上下文，通过 `restored_context` 注入子代理
+
+**问题与建议**:
+
+1. **⚠️ 摘要注入与恢复的重复代码** (`summary.rs` 的 `build_summary_messages` vs `checkpoint.rs` 的 `rebuild_context_from_checkpoint`)
+   - 两者都实现了「按预算从 final → phase → round 加载摘要」的相同逻辑，但格式略有不同
+   - **建议**: 将摘要注入逻辑统一到 `SummaryStore::build_summary_messages` 中，`checkpoint.rs` 调用此方法后追加恢复通知，消除重复。当前有约 30 行重复代码。
+
+2. **⚠️ `rebuild_context_from_checkpoint` 的 `task_description` 处理**
+   ```rust
+   let mut budget_remaining = max_tokens.saturating_sub(system_tokens + task_tokens + existing_tokens);
+   ```
+   计算了 `task_tokens` 预算但后续未将 `task_description` 注入消息列表。**建议**: 将 task_description 作为 system 消息注入，或移除预算计算中的 `task_tokens` 避免混淆。
+
+3. **✅ 好的做法**: `checkpoint.rs` 中使用 `#[allow(dead_code)]` 并注明 `reserved for checkpoint recovery; covered by tests`，文档化充分。
+
+### 2.3 会话日志统一持久化
+
+**文件**: `src/session/mod.rs` (-330 行), `src/app.rs`, `src/repl.rs`
+
+**优点**:
+- ✅ **消除冗余**: 移除 `SessionLogger`（~243 行），统一到 `SessionStore` JSONL 作为唯一写入源
+- ✅ **按需渲染**: 会话结束时从 JSONL 生成可读日志，而非实时并行写入
+- ✅ **脱敏保留**: `sanitize` 函数保留，日志安全不降级
+
+**问题与建议**:
+
+1. **⚠️ 会话结束时日志生成可能丢失异常退出场景**
+   ```rust
+   // app.rs 中会话结束时的逻辑
+   if let Some(store_path) = self.agent.session_store_path() {
+       match crate::session::generate_readable_log(store_path) {
+   ```
+   如果进程异常退出（如 SIGKILL），`run()` 函数的结束代码不会执行，可读日志不会生成。
+   - **建议**: 考虑在 `restart.rs` 或进程启动时，检查是否有未渲染的 JSONL 并补充生成。
+
+### 2.4 缓存系统重构
+
+**文件**: `src/tools/cache.rs` (-253 行)
+
+**优点**:
+- ✅ **消除重复代码**: 提取 `lookup`、`handle_hit`、`evict`、`write_impl` 四个共用方法，消除同步/异步约 200 行重复代码
+- ✅ **锁粒度优化**: `lookup` 只持有读锁，`handle_hit` 在需要时才获取写锁
+- ✅ **代码可读性大幅提升**: 核心逻辑清晰，注释充分
+
+**问题与建议**:
+
+1. **⚠️ `handle_hit` 中 `touch()` 使用写锁可能成为瓶颈**
+   ```rust
+   Some(_) => {
+       if let Ok(mut cache) = self.cache.write() {
+           if let Some(entry) = cache.get_mut(&path_buf) {
+               entry.touch();
+           }
+       }
+   }
+   ```
+   高并发读命中时，每次命中都获取写锁更新访问时间，可能成为竞争热点。
+   - **建议**: 考虑使用 `RwLock` 的升级模式（如果 Rust 支持），或使用 `AtomicU64` 记录最后访问时间而非每次写锁。
+
+2. **✅ 好的做法**: `write_impl` 接受由调用方预先获取的 `mtime`，使同步/异步调用方各自负责 IO 获取，职责清晰。
+
+### 2.5 KB 搜索增强
+
+**文件**: `src/tools/kb.rs` (+255 行)
+
+**优点**:
+- ✅ **分词引擎**: 支持中英文混合分词（英文按单词+驼峰拆分，中文按单字）
+- ✅ **前缀模糊匹配**: 支持 `"arch"` 命中 `"architecture"`，但只做单向避免误匹配
+- ✅ **增量索引跳过**: 元数据完全一致时跳过序列化写盘，避免 O(n) IO
+- ✅ **归档过滤**: 新增 `archived` 字段和 `include_archived` 参数，配合遗忘机制
+- ✅ **字段加权打分**: 标题+5、ID+3、路径+2、标签+2，排序合理
+
+**问题与建议**:
+
+1. **⚠️ `tokenize` 函数中驼峰拆分边界条件**
+   ```rust
+   if c.is_uppercase()
+       && !ascii_word.is_empty()
+       && ascii_word.chars().last()
+           .map(|l| l.is_lowercase() || l.is_ascii_digit())
+           .unwrap_or(false)
+   {
+       flush(&mut tokens, &mut ascii_word);
+   }
+   ```
+   驼峰边界判断合理，但 `"HTMLParser"` 会被拆分为 `"h" "t" "m" "l" "parser"` 而非 `"html" "parser"`（连续大写字母每个单独拆分）。
+   - **建议**: 添加连续大写处理：连续大写字母作为一个 token，除非遇到小写字母表明新词开始（如 `"XMLParser" → "xml" "parser"`）。
+
+2. **⚠️ 测试覆盖**: `tokenize` 和 `field_score` 函数没有独立单元测试，仅通过 `search_entries` 间接测试。
+   - **建议**: 添加针对 `tokenize` 的单元测试（中英文混合、驼峰、标点等边界情况）。
+
+### 2.6 压缩策略优化
+
+**文件**: `src/agent/compressor.rs`, `src/agent/mod.rs`
+
+**优点**:
+- ✅ **压力感知策略**: Warning 用 LLM 摘要（保留语义），Critical/Exhausted 用截断（快速释放空间）
+- ✅ **安全回退**: Summarize 失败时自动回退到 Truncate
+
+**问题与建议**:
+
+1. **⚠️ `compress_if_needed_async` 的 `threshold` 计算**
+   ```rust
+   let threshold = (max_tokens as f64 * MAX_CONVERSATION_TOKENS_RATIO) as usize;
+   ```
+   确认 `MAX_CONVERSATION_TOKENS_RATIO` 的值合理（建议在 0.7~0.8 之间，避免压缩过早触发或过晚）。
+
+### 2.7 Token 计数器改进
+
+**文件**: `src/agent/token_counter.rs`
+
+**优点**:
+- ✅ **逐字符分类**: CJK 按 1.5/字符，非 CJK 按 0.25/字符，空格不计
+- ✅ **消息角色开销**: 每条消息计入 `ROLE_OVERHEAD_TOKENS`（2 tokens），更接近真实 tokenizer
+- ✅ **测试同步更新**: 测试用例随实现调整
+
+**无问题发现** — 代码质量高，实现清晰。
 
 ---
 
-## 4. 安全隐患
+## 三、综合评价
 
-### 4.1 已存在的安全机制 ✅
-- **路径遍历防护**: `normalize_path()` + `is_child_of()` + 符号链接检测
-- **命令风险评估**: 基于正则的 `DangerLevel` 评估（rm -rf、sudo、shell 注入等）
-- **审批机制**: Critical/High 级别操作需要用户确认
-- **文件描述符安全**: `FD_CLOEXEC` 标志防止 exec 后泄漏
+### 安全性
+- ✅ 日志脱敏保留（API Key、密码、JWT 等）
+- ✅ Dream 只写 `.kb/` 不碰源码
+- ✅ 永不删除，只归档
+- ✅ undo 快照机制
 
-### 4.2 潜在风险
+### 性能
+- ✅ 缓存锁粒度优化，减少写锁持有时间
+- ✅ KB 索引增量跳过，避免 O(n) 写盘
+- ✅ 单次目录遍历替代多次扫描
+- ⚠️ 高并发下 `touch()` 写锁仍有优化空间（P2）
 
-#### 4.2.1 `kb_store` 路径规范化 ✅（已修复）
-- 当前代码已添加 `trim_start_matches(".kb/")` 处理，防止路径重复拼接
-- 但 `update_index` 参数未验证，若传入 `true` 且路径被篡改可能导致索引不一致
+### 可维护性
+- ✅ 消除 ~200 行缓存重复代码
+- ✅ 消除 ~243 行 SessionLogger 冗余代码
+- ✅ 模块化设计，职责清晰
+- ✅ 注释充分，架构决策有文档化
 
-#### 4.2.2 `exec_command` 的 sh -c 绕过
-- 虽然 `sh -c` 方式仍会经过安全评估，但 `sh` 本身是白名单命令
-- 建议：对 `sh -c` 的内容做更严格的危险命令检测
-
----
-
-## 5. 性能评估
-
-### 5.1 优秀实践 ✅
-- **ReadCache**: 文件读取缓存，避免重复 IO
-- **异步文件工具**: `AsyncReadFileTool` 等不阻塞主循环
-- **原子计数器**: `AtomicUsize` 替代 `Mutex` 用于模型索引
-
-### 5.2 潜在问题
-
-#### 5.2.1 `scan_symbols` 实现
-- 当前实现为纯行扫描 + 括号匹配，对复杂 Rust 语法的支持有限
-- 建议：考虑使用 `syn` crate 替代手写解析器，或在现有基础上增加更多测试用例
-
-#### 5.2.2 会话日志存储
-- 日志文件存储在 `.dev-assistant-store/logs/`，但会话 session 日志文件仍在项目根目录
-- 大量 session 日志文件（已观察到 100+ 个）会污染项目根目录
+### 测试覆盖
+- ✅ 384 测试全部通过
+- ⚠️ 新 dream 模块缺乏单元测试（当前以集成测试为主）
+- ⚠️ tokenize 函数缺乏独立测试
 
 ---
 
-## 6. 测试覆盖
+## 四、必须修复项（Critical）
 
-### 6.1 测试覆盖较好的模块
-- `src/agent/` — 有子代理创建、上下文管理、摘要等测试
-- `src/security/mod.rs` — 路径遍历、命令评估、审批流程覆盖较好
-- `src/prompt.rs` — 系统提示词构建的各个分支都有测试
-- `src/skills/mod.rs` — 技能解析、发现、格式化有完整测试
+1. **`src/dream/ingest.rs:121`** — `last_failure_ts` 赋值后未使用，移除或实现时间窗口逻辑
+2. **`src/orchestrator/checkpoint.rs` 与 `src/agent/summary.rs` 的摘要注入重复代码** — 约 30 行重复逻辑，建议统一到 `build_summary_messages`
 
-### 6.2 测试覆盖不足的模块
-- `src/tools/file/` — 文件工具（read/write/edit）缺乏单元测试
-- `src/scheduler/` — 调度器各组件缺乏单元测试
-- `src/hooks/` — Hook 执行器缺乏网络/超时场景测试
-- `src/web/` — Web 界面缺乏集成测试
+## 五、建议修复项（High）
 
----
+1. **`src/tools/kb.rs` 的 `tokenize` 驼峰边界** — 连续大写字母（如 `HTMLParser`）应聚合为 `"html" "parser"` 而非逐字拆分
+2. **`src/orchestrator/checkpoint.rs` 的 `task_description` 预算计算** — 预算扣除了 `task_tokens` 但未注入内容，建议修正
+3. **异常退出时日志渲染丢失** — 考虑启动时检查未渲染的 JSONL
 
-## 7. 总结与建议
+## 六、可选优化项（Medium）
 
-### 7.1 必须修复（P0）
-1. **6 个测试失败**：修复 `scan_symbols` 解析逻辑，处理 pub/async/泛型/冒号/分号模块
-2. 这是当前最严重的问题，影响 `read_symbol` 工具的可靠性
-
-### 7.2 建议修复（P1）
-1. **清理 dead_code 警告**：移除或标注未使用的代码
-2. **独立流水线逻辑**：从 `Agent` 中提取 `PipelineRunner` 模块
-3. **统一命令分发**：将 slash 命令处理集中到命令注册表模式
-
-### 7.3 优化建议（P2）
-1. **减少重复代码**：`default_tools()` 使用公共工具集 + 差异集
-2. **拆分过长函数**：`run_interactive()`、`evaluate_command()` 等
-3. **增加测试覆盖**：文件工具、调度器、Hook 执行器
-4. **会话日志存储**：统一到 `.dev-assistant-store/logs/` 目录
+1. 为 `tokenize` 和 `field_score` 添加独立单元测试
+2. 在 `ingest.rs` 中拆分 `extract_candidates` 长函数（~115 行）
+3. 考虑 `Cache::handle_hit` 中使用原子操作替代写锁更新访问时间

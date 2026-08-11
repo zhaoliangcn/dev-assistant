@@ -1,0 +1,272 @@
+//! 记忆遗忘（Dream 阶段 ④）。
+//!
+//! 健康分 = 时效衰减 × 类型权重 + 状态加成。
+//! 低分条目 → `archived=true`（只归档不删，`kb_query` 可搜索、可恢复）。
+//!
+//! 归档操作：
+//! 1. 在 `.kb/index.json` 中置 `archived: true`
+//! 2. 在条目 Markdown 文件的 frontmatter 中写入 `archived: true`（保持一致性）
+//! 3. 返回归档动作列表，供报告阶段记录与 undo 快照
+
+use std::path::Path;
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::tools::kb::KbIndexEntry;
+use crate::utils::error::AppError;
+
+/// 归档阈值：健康分低于此值的条目将被归档。
+pub const ARCHIVE_THRESHOLD: f64 = 0.25;
+
+/// 时效半衰期（天）：updated 距今每经过一个半衰期，时效分减半。
+const RECENCY_HALF_LIFE_DAYS: f64 = 90.0;
+
+/// 条目类型权重：决策类最值得保留，工具/临时类权重低。
+fn type_weight(entry_type: &str) -> f64 {
+    match entry_type {
+        "decision" => 1.0,
+        "summary" => 0.9,
+        "interface" => 0.8,
+        "analysis" | "report" => 0.7,
+        _ => 0.5,
+    }
+}
+
+/// 状态加成：已接受的决策/完成项加分，废弃/草稿减分。
+fn status_bonus(status: &str) -> f64 {
+    match status {
+        "accepted" | "completed" => 0.2,
+        "draft" | "proposed" => -0.1,
+        "deprecated" | "superseded" => -0.3,
+        _ => 0.0,
+    }
+}
+
+/// 单条归档动作。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveAction {
+    /// 条目 ID
+    pub id: String,
+    /// 条目路径（相对 `.kb/`）
+    pub path: String,
+    /// 计算的健康分
+    pub health: f64,
+    /// 归档原因说明
+    pub reason: String,
+}
+
+/// 遗忘阶段结果。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ForgetResult {
+    /// 归档动作列表
+    pub archived: Vec<ArchiveAction>,
+}
+
+impl ForgetResult {
+    /// 本轮归档的条目数。
+    pub fn count(&self) -> usize {
+        self.archived.len()
+    }
+}
+
+/// 对 KB 索引执行遗忘：计算健康分，低分条目归档（只归档不删）。
+///
+/// `kb_root` 为 `.kb/` 目录。`dry_run` 为 true 时只计算并返回动作，
+/// 不修改任何文件（预演模式）。
+pub fn run_forget(kb_root: &Path, dry_run: bool) -> Result<ForgetResult, AppError> {
+    let index_path = kb_root.join("index.json");
+    if !index_path.exists() {
+        return Ok(ForgetResult::default());
+    }
+
+    let content = std::fs::read_to_string(&index_path).map_err(|e| {
+        AppError::Io(std::io::Error::other(format!("读取 KB 索引失败: {}", e)))
+    })?;
+    let mut index: crate::tools::kb::KbIndex = serde_json::from_str(&content)
+        .map_err(|e| AppError::Config(format!("解析 KB 索引失败: {}", e)))?;
+
+    let now = Utc::now();
+    let mut actions = Vec::new();
+
+    for (id, entry) in index.entries.iter() {
+        if entry.archived {
+            continue; // 已归档的跳过
+        }
+        let health = compute_health(entry, now);
+        if health < ARCHIVE_THRESHOLD {
+            actions.push(ArchiveAction {
+                id: id.clone(),
+                path: entry.path.clone(),
+                health,
+                reason: format!("健康分 {:.2} 低于阈值 {}", health, ARCHIVE_THRESHOLD),
+            });
+        }
+    }
+
+    if dry_run {
+        return Ok(ForgetResult { archived: actions });
+    }
+
+    // 正式归档：置 archived 标记并写回索引
+    for action in &actions {
+        if let Some(entry) = index.entries.get_mut(&action.id) {
+            entry.archived = true;
+        }
+        // 同步更新条目文件的 frontmatter（尽力而为，失败不阻断归档）
+        let file_path = kb_root.join(&action.path);
+        if file_path.exists() {
+            if let Ok(fm_text) = std::fs::read_to_string(&file_path) {
+                if let Some(updated) = mark_archived_in_frontmatter(&fm_text) {
+                    let _ = std::fs::write(&file_path, updated);
+                }
+            }
+        }
+    }
+
+    index.updated = now.to_rfc3339();
+    let index_json = serde_json::to_string_pretty(&index).map_err(AppError::Json)?;
+    std::fs::write(&index_path, index_json).map_err(|e| {
+        AppError::Io(std::io::Error::other(format!("写入 KB 索引失败: {}", e)))
+    })?;
+
+    Ok(ForgetResult { archived: actions })
+}
+
+/// 计算条目的健康分。
+///
+/// 公式：`健康分 = 时效衰减 × 类型权重 + 状态加成`，结果夹在 `[0, 1.5]`。
+/// 时效衰减按 updated 距今天数指数衰减（半衰期 `RECENCY_HALF_LIFE_DAYS`）。
+pub fn compute_health(entry: &KbIndexEntry, now: DateTime<Utc>) -> f64 {
+    // 时效衰减：updated 距今天数，指数衰减
+    let days = entry
+        .updated
+        .as_deref()
+        .and_then(|u| DateTime::parse_from_rfc3339(u).ok())
+        .map(|dt| {
+            let dt = dt.with_timezone(&Utc);
+            (now - dt).num_days().max(0) as f64
+        })
+        .unwrap_or(0.0);
+    let recency = 0.5f64.powf(days / RECENCY_HALF_LIFE_DAYS);
+
+    let health = recency * type_weight(&entry.entry_type) + status_bonus(&entry.status);
+    health.clamp(0.0, 1.5)
+}
+
+/// 在 Markdown 的 frontmatter 中写入 `archived: true`（保留原字段）。
+fn mark_archived_in_frontmatter(content: &str) -> Option<String> {
+    let fm = crate::utils::frontmatter::parse_frontmatter(content).ok()?;
+    let body = crate::utils::frontmatter::extract_body(content);
+    let mut fields = fm;
+    fields.insert("archived".to_string(), "true".to_string());
+    Some(crate::utils::frontmatter::build_document(&fields, &body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// 构造一个测试条目。
+    fn entry(entry_type: &str, status: &str, updated_days_ago: i64) -> KbIndexEntry {
+        let updated = (Utc::now() - chrono::Duration::days(updated_days_ago)).to_rfc3339();
+        KbIndexEntry {
+            path: format!("decisions/test-{}.md", entry_type),
+            entry_type: entry_type.to_string(),
+            title: "Test".to_string(),
+            tags: vec!["test".to_string()],
+            status: status.to_string(),
+            archived: false,
+            relates_to: None,
+            depends_on: None,
+            supersedes: None,
+            author: None,
+            created: Some(updated.clone()),
+            updated: Some(updated),
+        }
+    }
+
+    #[test]
+    fn recent_accepted_decision_has_high_health() {
+        let e = entry("decision", "accepted", 1);
+        let health = compute_health(&e, Utc::now());
+        assert!(health >= 1.0, "近期已接受的决策健康分应很高，got {}", health);
+    }
+
+    #[test]
+    fn old_draft_entry_has_low_health() {
+        let e = entry("issue", "draft", 400);
+        let health = compute_health(&e, Utc::now());
+        assert!(health < ARCHIVE_THRESHOLD, "400 天前的草稿应低于归档阈值，got {}", health);
+    }
+
+    #[test]
+    fn deprecated_entry_decays_fast() {
+        let e = entry("decision", "deprecated", 200);
+        let health = compute_health(&e, Utc::now());
+        assert!(
+            health < 0.3,
+            "废弃条目即使类型权重高也应低分，got {}",
+            health
+        );
+    }
+
+    #[test]
+    fn run_forget_archives_old_entries() {
+        let dir = tempdir().unwrap();
+        let kb_root = dir.path().join(".kb");
+        std::fs::create_dir_all(&kb_root).unwrap();
+
+        let now = Utc::now();
+        let old = entry("issue", "draft", 500);
+        let fresh = entry("decision", "accepted", 2);
+        let mut index = crate::tools::kb::KbIndex::default();
+        index.entries.insert("OLD-001".to_string(), old.clone());
+        index.entries.insert("FRESH-001".to_string(), fresh.clone());
+        std::fs::write(
+            kb_root.join("index.json"),
+            serde_json::to_string_pretty(&index).unwrap(),
+        )
+        .unwrap();
+        let _ = now;
+
+        let result = run_forget(&kb_root, false).unwrap();
+        assert_eq!(result.count(), 1, "应只归档旧条目");
+        assert_eq!(result.archived[0].id, "OLD-001");
+
+        // 验证索引已更新
+        let updated: crate::tools::kb::KbIndex =
+            serde_json::from_str(&std::fs::read_to_string(kb_root.join("index.json")).unwrap())
+                .unwrap();
+        assert!(updated.entries["OLD-001"].archived);
+        assert!(!updated.entries["FRESH-001"].archived);
+    }
+
+    #[test]
+    fn run_forget_dry_run_does_not_modify() {
+        let dir = tempdir().unwrap();
+        let kb_root = dir.path().join(".kb");
+        std::fs::create_dir_all(&kb_root).unwrap();
+
+        let old = entry("issue", "draft", 500);
+        let mut index = crate::tools::kb::KbIndex::default();
+        index.entries.insert("OLD-001".to_string(), old);
+        let original = serde_json::to_string_pretty(&index).unwrap();
+        std::fs::write(kb_root.join("index.json"), &original).unwrap();
+
+        let result = run_forget(&kb_root, true).unwrap();
+        assert_eq!(result.count(), 1, "dry-run 应仍能识别可归档条目");
+
+        let after = std::fs::read_to_string(kb_root.join("index.json")).unwrap();
+        assert_eq!(original, after, "dry-run 不应修改索引文件");
+    }
+
+    #[test]
+    fn mark_archived_adds_frontmatter_flag() {
+        let content = "---\nid: ADR-001\ntype: decision\ntitle: Test\n---\n# Body";
+        let updated = mark_archived_in_frontmatter(content).unwrap();
+        assert!(updated.contains("archived: true"));
+        assert!(updated.contains("# Body"));
+    }
+}

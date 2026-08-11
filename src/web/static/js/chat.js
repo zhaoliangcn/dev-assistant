@@ -674,6 +674,12 @@ function chatApp() {
             this.busy = true;
             this.scrollToBottomLater();
 
+            // 发送后保持输入框聚焦，便于连续对话
+            this.$nextTick(() => {
+                const input = this.$refs.chatInput || document.querySelector('textarea[x-model="input"]');
+                if (input) input.focus();
+            });
+
             if (wsInstance && wsInstance.readyState === WebSocket.OPEN) {
                 wsInstance.send(JSON.stringify({
                     type: 'user_message',
@@ -697,6 +703,7 @@ function chatApp() {
         },
 
         onInputKeydown(event) {
+            // Enter / Ctrl+Enter / Cmd+Enter 发送；Shift+Enter 换行；IME 组合中不触发
             if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
                 event.preventDefault();
                 this.sendMessage();

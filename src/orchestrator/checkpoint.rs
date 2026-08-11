@@ -167,10 +167,27 @@ impl CheckpointManager {
     /// 1. 将当前任务图保存为最新检查点
     /// 2. 如果已有最新检查点，先将其存档
     /// 3. 清理过期的存档检查点
+    ///
+    /// 无会话 ID（等价于 `save_with_session(graph, running, "")`）。
+    /// 保留为无会话场景的兼容入口（测试与历史调用使用）。
+    #[allow(dead_code)]
     pub fn save(
         &self,
         graph: &DependencyGraph,
         running: &[RunningTask],
+    ) -> Result<(), AppError> {
+        self.save_with_session(graph, running, "")
+    }
+
+    /// 保存当前检查点，并记录会话 ID。
+    ///
+    /// `session_id` 用于崩溃恢复时定位分层摘要（`.kb/summaries/{session_id}/`），
+    /// 从而重建 Agent 上下文。其余行为与 [`Self::save`] 相同。
+    pub fn save_with_session(
+        &self,
+        graph: &DependencyGraph,
+        running: &[RunningTask],
+        session_id: &str,
     ) -> Result<(), AppError> {
         // 确保目录存在
         fs::create_dir_all(&self.checkpoint_dir).map_err(|e| {
@@ -205,7 +222,7 @@ impl CheckpointManager {
             in_progress: running.to_vec(),
             progress_summary: graph.progress_summary(),
             context_summary: None,
-            session_id: String::new(),
+            session_id: session_id.to_string(),
             metadata: None,
         };
 

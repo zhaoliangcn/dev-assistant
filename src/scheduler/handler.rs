@@ -32,7 +32,13 @@ pub trait ScheduledTaskHandler: Send + Sync {
 }
 
 /// Agent 任务处理器：通过 spawn_subagent 执行。
-pub struct AgentTaskHandler;
+///
+/// 支持特殊指令 `dream` / `dream:memory`：直接调用 DreamEngine（纯规则模式）
+/// 执行一轮记忆整理，用于 cron 定时触发。
+pub struct AgentTaskHandler {
+    /// 工作目录（定位 `.kb/` 与 `.dev-assistant-store/`）
+    pub working_dir: PathBuf,
+}
 
 #[async_trait]
 impl ScheduledTaskHandler for AgentTaskHandler {
@@ -48,7 +54,8 @@ impl ScheduledTaskHandler for AgentTaskHandler {
         info!("Executing Agent task {}: {}", task.id, instruction);
 
         // 执行 Agent 任务
-        let result = execute_agent_task(&task.id, &instruction, task.max_retries).await;
+        let result =
+            execute_agent_task(&task.id, &instruction, task.max_retries, &self.working_dir).await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         match result {
@@ -78,20 +85,26 @@ impl ScheduledTaskHandler for AgentTaskHandler {
 
 /// 执行一个 Agent 任务。
 ///
-/// 由于当前环境没有直接的 Agent 运行上下文，我们返回一个模拟执行结果。
-/// 在实际生产环境中，这里会创建子 Agent 来执行任务。
+/// 特殊指令 `dream` / `dream:memory` 触发一轮 Dream 记忆整理（纯规则模式，
+/// 定时任务无 LLM 上下文）；其余指令返回模拟执行结果（当前环境无 Agent 运行上下文）。
 async fn execute_agent_task(
     task_id: &str,
     instruction: &str,
     _max_retries: u32,
+    working_dir: &PathBuf,
 ) -> Result<String, AppError> {
-    // Agent 任务的执行逻辑：
-    // 1. 创建一个子 Agent（使用 spawn_subagent）
-    // 2. 传入指令让子 Agent 执行
-    // 3. 收集执行结果
-    //
-    // 当前实现简化处理：记录任务执行，返回成功。
-    // 未来可扩展为真正的子代理执行。
+    // 特殊指令：dream 记忆整理（cron 定时触发，纯规则模式）
+    let trimmed = instruction.trim();
+    if trimmed == "dream" || trimmed == "dream:memory" || trimmed.starts_with("dream ") {
+        let cfg = crate::dream::DreamConfig::rules_only(working_dir.clone());
+        let result = crate::dream::run_dream(&cfg, None).await?;
+        return Ok(format!(
+            "Dream 记忆整理完成：采集 {} 候选，巩固 {} 条，合并 {} 对，归档 {} 条",
+            result.ingested, result.consolidated, result.deduplicated, result.archived
+        ));
+    }
+
+    // 普通 Agent 任务：当前实现简化处理，记录任务执行，返回成功。
     debug!("Agent task {}: {}", task_id, instruction);
     Ok(format!("任务 `{}` 执行完成", instruction.chars().take(50).collect::<String>()))
 }
@@ -227,7 +240,9 @@ mod tests {
             0,
         );
 
-        let handler = AgentTaskHandler;
+        let handler = AgentTaskHandler {
+            working_dir: PathBuf::from("."),
+        };
         let record = handler.execute(&task).await.unwrap();
         assert!(record.success);
         assert_eq!(record.task_id, "test_agent");

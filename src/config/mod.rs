@@ -66,7 +66,7 @@ pub fn load_models(explicit_path: Option<&Path>) -> Result<Vec<ProviderConfig>, 
     let max_tokens: usize = env::var("LLM_MAX_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(8192);
+        .unwrap_or(262144);
 
     Ok(vec![ProviderConfig {
         name: "default".to_string(),
@@ -95,7 +95,7 @@ pub fn load_llm_config() -> Result<LlmConfig, AppError> {
     let max_tokens: usize = env::var("LLM_MAX_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(8192);
+        .unwrap_or(262144);
 
     Ok(LlmConfig {
         provider,

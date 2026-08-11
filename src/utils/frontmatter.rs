@@ -59,6 +59,12 @@ pub fn parse_frontmatter(content: &str) -> Result<HashMap<String, String>, AppEr
             let key_str = key.as_str().unwrap_or_default().to_string();
             if let Some(val_str) = value.as_str() {
                 frontmatter.insert(key_str, val_str.to_string());
+            } else if let Some(b) = value.as_bool() {
+                // 处理布尔值（如 archived: true）
+                frontmatter.insert(key_str, b.to_string());
+            } else if let Some(n) = value.as_i64() {
+                // 处理整数（如 phase: 2、version: 1）
+                frontmatter.insert(key_str, n.to_string());
             } else if value.as_hash().is_some() {
                 // 处理嵌套 map（如 metadata: { author, version }）
                 if let Some(sub_hash) = value.as_hash() {

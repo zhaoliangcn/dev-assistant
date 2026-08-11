@@ -69,6 +69,33 @@ impl ContextCompressor {
         Self::truncate(history)
     }
 
+    /// 异步压缩：超过阈值时根据上下文压力等级选择策略。
+    ///
+    /// - `Warning`：使用 Summarize（LLM 摘要，保留语义；此时仍有空间，可承受一次 LLM 调用）
+    /// - `Critical` / `Exhausted`：使用 Truncate（快速截断，释放空间优先；
+    ///   调用方应配合 `auto_save_round_summary` 先把关键信息落盘）
+    ///
+    /// 未超过阈值时不压缩（no-op）。Summarize 失败时内部自动回退到 Truncate。
+    pub async fn compress_if_needed_async(
+        history: &mut ConversationHistory,
+        max_tokens: usize,
+        llm: &LlmClient,
+        pressure: crate::agent::context::ContextPressure,
+    ) -> Result<CompressionInfo, AppError> {
+        let threshold = (max_tokens as f64 * MAX_CONVERSATION_TOKENS_RATIO) as usize;
+
+        if history.used_tokens < threshold {
+            return Ok(Self::no_op(history));
+        }
+
+        match pressure {
+            crate::agent::context::ContextPressure::Warning => {
+                Self::summarize(history, llm).await
+            }
+            _ => Self::truncate(history),
+        }
+    }
+
     /// 截断压缩：保留最近 `ROUNDS_TO_KEEP` 轮，丢弃更早的。
     pub fn truncate(history: &mut ConversationHistory) -> Result<CompressionInfo, AppError> {
         let original_messages = history.messages.len();

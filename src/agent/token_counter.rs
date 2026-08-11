@@ -2,41 +2,62 @@
 //!
 //! 估算策略：
 //! - CJK 字符约 1.5 tokens/字符
-//! - 非 CJK 单词约 0.25 tokens/字符（约 4 字符/token）
+//! - 非 CJK（ASCII 字母/数字/标点）约 0.25 tokens/字符（约 4 字符/token）
+//! - 空格不计入；连续 ASCII 与 CJK 混合时按字符分类分别估算
+//!
+//! 消息列表额外计入每条消息的角色/分隔固定开销（约 2 tokens/条），
+//! 使估算更接近真实 tokenizer 行为（role 字段本身也占用 token）。
 
 use crate::llm::LlmMessage;
+
+/// 每条消息的角色/分隔等固定开销。
+const ROLE_OVERHEAD_TOKENS: usize = 2;
+
+/// 判断字符是否为 CJK 字符（中文/日文/韩文）。
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{4E00}'..='\u{9FFF}' |
+        '\u{3400}'..='\u{4DBF}' |
+        '\u{3000}'..='\u{303F}' |
+        '\u{3040}'..='\u{309F}' |
+        '\u{30A0}'..='\u{30FF}' |
+        '\u{AC00}'..='\u{D7AF}'
+    )
+}
 
 /// Token 计数器。无状态，所有方法都是关联函数。
 pub struct TokenCounter;
 
 impl TokenCounter {
     /// 估算字符串的 token 数。
+    ///
+    /// 逐字符分类：CJK 按 1.5/字符，非 CJK 按 0.25/字符（连续段向上取整），
+    /// 空格不计。空字符串返回 1，避免除零场景。
     pub fn estimate(text: &str) -> usize {
-        let mut tokens = 0usize;
+        let mut tokens = 0.0f64;
+        let mut ascii_run = 0usize;
 
-        for word in text.split_whitespace() {
-            let is_cjk = word.chars().any(|c| {
-                matches!(c,
-                    '\u{4E00}'..='\u{9FFF}' |
-                    '\u{3400}'..='\u{4DBF}' |
-                    '\u{3000}'..='\u{303F}' |
-                    '\u{3040}'..='\u{309F}' |
-                    '\u{30A0}'..='\u{30FF}' |
-                    '\u{AC00}'..='\u{D7AF}'
-                )
-            });
-
-            if is_cjk {
-                tokens += (word.chars().count() as f64 * 1.5).ceil() as usize;
+        for c in text.chars() {
+            if is_cjk(c) {
+                // 先结算累计的 ASCII 段
+                tokens += ascii_run as f64 * 0.25;
+                ascii_run = 0;
+                tokens += 1.5;
+            } else if c.is_whitespace() {
+                tokens += ascii_run as f64 * 0.25;
+                ascii_run = 0;
             } else {
-                tokens += (word.chars().count() as f64 * 0.25).ceil() as usize;
+                ascii_run += 1;
             }
         }
+        tokens += ascii_run as f64 * 0.25;
 
-        tokens.max(1)
+        (tokens.ceil() as usize).max(1)
     }
 
     /// 估算整个消息列表的 token 总数。
+    ///
+    /// 每条消息计入 `ROLE_OVERHEAD_TOKENS` 固定开销（role 字段与分隔符）。
     pub fn estimate_messages(messages: &[LlmMessage]) -> usize {
         messages
             .iter()
@@ -48,7 +69,7 @@ impl TokenCounter {
                     .and_then(|tc| serde_json::to_string(tc).ok())
                     .map(|s| Self::estimate(&s))
                     .unwrap_or(0);
-                content_tokens + tool_calls_tokens
+                ROLE_OVERHEAD_TOKENS + content_tokens + tool_calls_tokens
             })
             .sum()
     }
@@ -104,7 +125,8 @@ mod tests {
         ];
         let total = TokenCounter::estimate_messages(&msgs);
         let sum = TokenCounter::estimate("Hello") + TokenCounter::estimate("World");
-        assert_eq!(total, sum);
+        // 每条消息计入 ROLE_OVERHEAD_TOKENS（2）固定开销
+        assert_eq!(total, sum + ROLE_OVERHEAD_TOKENS * msgs.len());
     }
 
     #[test]
@@ -116,7 +138,11 @@ mod tests {
             tool_call_id: None,
         }];
         // None content 通过 unwrap_or("") 得到空字符串，estimate("") 返回 .max(1) = 1
-        assert_eq!(TokenCounter::estimate_messages(&msgs), 1);
+        // 加上角色固定开销 = 3
+        assert_eq!(
+            TokenCounter::estimate_messages(&msgs),
+            ROLE_OVERHEAD_TOKENS + 1
+        );
     }
 
     #[test]

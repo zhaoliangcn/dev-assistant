@@ -144,56 +144,12 @@ impl SummaryStore {
 
     /// 加载所有轮次摘要（按 round 升序）。
     pub fn load_rounds(&self) -> Result<Vec<RoundSummary>, AppError> {
-        let mut rounds: BTreeMap<usize, RoundSummary> = BTreeMap::new();
-        for entry in std::fs::read_dir(&self.root).map_err(AppError::Io)? {
-            let entry = entry.map_err(AppError::Io)?;
-            let fname = entry.file_name().to_string_lossy().to_string();
-            if !fname.starts_with(ROUND_PREFIX) || !fname.ends_with(".md") {
-                continue;
-            }
-            let num: usize = fname
-                .trim_start_matches(ROUND_PREFIX)
-                .trim_end_matches(".md")
-                .parse()
-                .unwrap_or(0);
-            if num == 0 {
-                continue;
-            }
-            let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
-            let body = strip_frontmatter(&content);
-            rounds.insert(
-                num,
-                RoundSummary {
-                    round: num,
-                    content: body.to_string(),
-                    tokens: TokenCounter::estimate(body),
-                },
-            );
-        }
-        Ok(rounds.into_values().collect())
+        Ok(self.scan_directory()?.0)
     }
 
     /// 加载所有阶段摘要（按 phase 升序）。
     pub fn load_phases(&self) -> Result<Vec<PhaseSummary>, AppError> {
-        let mut phases: BTreeMap<usize, PhaseSummary> = BTreeMap::new();
-        for entry in std::fs::read_dir(&self.root).map_err(AppError::Io)? {
-            let entry = entry.map_err(AppError::Io)?;
-            let fname = entry.file_name().to_string_lossy().to_string();
-            if !fname.starts_with(PHASE_PREFIX) || !fname.ends_with(".md") {
-                continue;
-            }
-            let num: usize = fname
-                .trim_start_matches(PHASE_PREFIX)
-                .trim_end_matches(".md")
-                .parse()
-                .unwrap_or(0);
-            if num == 0 {
-                continue;
-            }
-            let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
-            phases.insert(num, parse_phase_meta(&content, num));
-        }
-        Ok(phases.into_values().collect())
+        Ok(self.scan_directory()?.1)
     }
 
     /// 加载会话摘要（若有）。
@@ -208,13 +164,142 @@ impl SummaryStore {
     }
 
     /// 加载全部层级摘要（用于恢复时按需回溯）。
+    ///
+    /// 单次目录遍历收集轮次/阶段/会话摘要，避免 `load_rounds` + `load_phases`
+    /// 各自全量扫描目录（P2 性能优化：O(n) 扫描只执行一次）。
     #[allow(dead_code)] // reserved for checkpoint recovery
     pub fn load_all(&self) -> Result<LayeredSummaries, AppError> {
+        let (rounds, phases, final_summary) = self.scan_directory()?;
         Ok(LayeredSummaries {
-            rounds: self.load_rounds()?,
-            phases: self.load_phases()?,
-            final_summary: self.load_final()?,
+            rounds,
+            phases,
+            final_summary,
         })
+    }
+
+    /// 单次目录遍历：分类收集全部层级的摘要文件。
+    ///
+    /// 返回 `(轮次摘要, 阶段摘要, 会话摘要)`，轮次/阶段按编号升序。
+    /// 相比逐个调用 `load_rounds` / `load_phases` / `load_final`，
+    /// 只遍历一次目录，避免 O(n) 扫描被重复执行。
+    fn scan_directory(
+        &self,
+    ) -> Result<(Vec<RoundSummary>, Vec<PhaseSummary>, Option<String>), AppError> {
+        let mut rounds: BTreeMap<usize, RoundSummary> = BTreeMap::new();
+        let mut phases: BTreeMap<usize, PhaseSummary> = BTreeMap::new();
+        let mut final_summary: Option<String> = None;
+
+        for entry in std::fs::read_dir(&self.root).map_err(AppError::Io)? {
+            let entry = entry.map_err(AppError::Io)?;
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if !fname.ends_with(".md") {
+                continue;
+            }
+            let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
+            let body = strip_frontmatter(&content);
+
+            if let Some(num) = fname
+                .strip_prefix(ROUND_PREFIX)
+                .and_then(|s| s.strip_suffix(".md"))
+                .and_then(|s| s.parse::<usize>().ok())
+                .filter(|n| *n > 0)
+            {
+                rounds.insert(
+                    num,
+                    RoundSummary {
+                        round: num,
+                        content: body.to_string(),
+                        tokens: TokenCounter::estimate(body),
+                    },
+                );
+            } else if let Some(num) = fname
+                .strip_prefix(PHASE_PREFIX)
+                .and_then(|s| s.strip_suffix(".md"))
+                .and_then(|s| s.parse::<usize>().ok())
+                .filter(|n| *n > 0)
+            {
+                phases.insert(num, parse_phase_meta(&content, num));
+            } else if fname == FINAL_FILE {
+                final_summary = Some(body.to_string());
+            }
+        }
+
+        Ok((
+            rounds.into_values().collect(),
+            phases.into_values().collect(),
+            final_summary,
+        ))
+    }
+
+    /// 构建跨会话记忆注入消息：按预算从高到低层级加载摘要
+    /// （final → phase → round），返回 system 角色消息列表。
+    ///
+    /// `budget_tokens` 为可用的 token 预算（通常是 max_tokens 减去系统提示词、
+    /// 工具 schema 等固定开销）。高优先级摘要（final）优先注入，预算耗尽即停，
+    /// 避免注入内容挤占正常工作上下文。
+    pub fn build_summary_messages(&self, budget_tokens: usize) -> Vec<LlmMessage> {
+        let mut messages = Vec::new();
+        let mut budget_remaining = budget_tokens;
+
+        // 加载全部层级摘要（final / phase / round）；失败时静默返回空
+        let summaries = match self.load_all() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("加载分层摘要失败: {}", e);
+                return messages;
+            }
+        };
+
+        // 1. final.md（层级 3，会话摘要），优先注入
+        if let Some(ref final_s) = summaries.final_summary {
+            let tokens = TokenCounter::estimate(final_s);
+            if tokens <= budget_remaining {
+                messages.push(LlmMessage {
+                    role: "system".to_string(),
+                    content: Some(format!("【会话摘要】\n{}", final_s)),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                budget_remaining = budget_remaining.saturating_sub(tokens);
+            }
+        }
+
+        // 2. 阶段摘要（层级 2），从最新开始，直到预算不足
+        if budget_remaining > 0 {
+            for phase in summaries.phases.iter().rev() {
+                if phase.tokens > budget_remaining {
+                    break;
+                }
+                messages.push(LlmMessage {
+                    role: "system".to_string(),
+                    content: Some(format!(
+                        "【阶段 {} 摘要】（轮次 {}-{}）\n{}",
+                        phase.phase, phase.round_start, phase.round_end, phase.content
+                    )),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                budget_remaining = budget_remaining.saturating_sub(phase.tokens);
+            }
+        }
+
+        // 3. 轮次摘要（层级 1），从最新开始，直到预算不足
+        if budget_remaining > 0 {
+            for round in summaries.rounds.iter().rev() {
+                if round.tokens > budget_remaining {
+                    break;
+                }
+                messages.push(LlmMessage {
+                    role: "system".to_string(),
+                    content: Some(format!("【轮次 {} 摘要】\n{}", round.round, round.content)),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                budget_remaining = budget_remaining.saturating_sub(round.tokens);
+            }
+        }
+
+        messages
     }
 
     /// 写入带 frontmatter 的摘要文件。

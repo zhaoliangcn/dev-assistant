@@ -12,7 +12,6 @@ use crate::persist::SessionStore;
 use crate::prompt::build_system_prompt;
 use crate::scheduler::engine::{Scheduler, SchedulerConfig};
 use crate::security::SecurityPolicy;
-use crate::session::SessionLogger;
 use crate::skills::{discover_all_skills, Skill};
 use crate::tools::{async_tool::AsyncToolRegistry, ToolRegistry};
 use crate::ui::{self, CliMessageOutput, MarkdownRenderer};
@@ -193,6 +192,30 @@ impl App {
         // 注册到全局，供 slash 命令和工具处理器访问
         crate::scheduler::tools_handlers::set_global_scheduler(scheduler.clone());
 
+        // 内置 cron：注册每日 dream 记忆整理任务（纯规则模式，零 LLM 成本）。
+        // 固定 ID "builtin-dream"，已存在则跳过（防止重启后重复注册）。
+        {
+            use crate::scheduler::task::{ScheduleType, ScheduledTask, TaskExecutionMode};
+            if scheduler.get_task("builtin-dream").unwrap_or(None).is_none() {
+                let dream_task = ScheduledTask::new(
+                    "builtin-dream".to_string(),
+                    "Dream 记忆整理".to_string(),
+                    ScheduleType::Cron("0 3 * * *".to_string()),
+                    TaskExecutionMode::Agent {
+                        instruction: "dream:memory".to_string(),
+                    },
+                    1,
+                    vec!["dream".to_string(), "memory".to_string()],
+                    600, // 10 分钟超时
+                );
+                if let Err(e) = scheduler.schedule_task(&dream_task) {
+                    tracing::warn!(error = %e, "注册内置 dream 定时任务失败");
+                } else {
+                    tracing::info!("已注册内置 dream 定时任务（每日 03:00 记忆整理）");
+                }
+            }
+        }
+
         Ok(Self {
             agent,
             config,
@@ -304,7 +327,7 @@ impl App {
                 api_key: Some("test".to_string()),
                 model: "test-model".to_string(),
                 temperature: Some(0.7),
-                max_tokens: Some(8192),
+                max_tokens: Some(262144),
             }
         ])?);
 
@@ -349,10 +372,6 @@ impl App {
         println!("🚀 Dev-Assistant Rust CLI");
         println!("Project: {}", self.config.working_dir.display());
         println!("Type '/exit' or '/quit' to quit.\n");
-
-        let mut session_log = SessionLogger::create(&self.config.working_dir)?;
-        session_log.log_status("信息", &format!("项目目录: {}", self.config.working_dir.display()));
-        session_log.log_status("信息", &format!("模型: {}", self.agent.active_model()));
 
         let mut round_num: usize = 0;
 
@@ -409,6 +428,50 @@ impl App {
                         Err(e) => {
                             let block = ui::MessageBlock::Error {
                                 content: format!("流水线执行失败: {}", e),
+                            };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        }
+                    }
+                    continue;
+                }
+
+                // 优先处理 /dream 命令（需要异步上下文 + LLM）
+                if input.starts_with("/dream") {
+                    let args = input.strip_prefix("/dream").unwrap_or("").trim();
+                    let dry_run = args.contains("--dry-run")
+                        || args.contains("--preview")
+                        || args.contains("--dryrun");
+                    let block = ui::MessageBlock::System {
+                        content: if dry_run {
+                            "🧠 Dream 记忆整理（预演模式）开始...".to_string()
+                        } else {
+                            "🧠 Dream 记忆整理开始...".to_string()
+                        },
+                    };
+                    ui::render_block(&block, &markdown_renderer)?;
+
+                    // LLM 预算：交互命令默认分配 20k tokens（可通过参数覆盖）
+                    let budget: usize = args
+                        .split_whitespace()
+                        .find_map(|a| {
+                            a.strip_prefix("--budget=").and_then(|b| b.parse().ok())
+                        })
+                        .unwrap_or(20_000);
+                    let cfg = crate::dream::DreamConfig {
+                        working_dir: working_dir.clone(),
+                        llm_budget_tokens: if dry_run { 0 } else { budget },
+                        dry_run,
+                    };
+                    match crate::dream::run_dream(&cfg, Some(self.agent.llm_client())).await {
+                        Ok(result) => {
+                            let block = ui::MessageBlock::System {
+                                content: format!("```\n{}\n```", result.summarize(dry_run)),
+                            };
+                            ui::render_block(&block, &markdown_renderer)?;
+                        }
+                        Err(e) => {
+                            let block = ui::MessageBlock::Error {
+                                content: format!("Dream 执行失败: {}", e),
                             };
                             ui::render_block(&block, &markdown_renderer)?;
                         }
@@ -678,7 +741,6 @@ impl App {
             let action = process_user_message(
                 &mut self.agent,
                 &input,
-                &mut session_log,
                 &working_dir,
                 &restart_args,
                 verbose,
@@ -700,6 +762,28 @@ impl App {
             match action {
                 ReplAction::Continue => continue,
                 ReplAction::Quit => break,
+            }
+        }
+
+        // 会话结束：按需从 SessionStore 的 JSONL 生成可读日志（统一持久化方案，
+        // 不再由 SessionLogger 独立并行写入）。
+        if let Some(store_path) = self.agent.session_store_path() {
+            match crate::session::generate_readable_log(store_path) {
+                Ok(log) => {
+                    let log_dir = working_dir.join(".dev-assistant-store").join("logs");
+                    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+                        tracing::warn!(error = %e, "创建会话日志目录失败");
+                    } else {
+                        let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+                        let log_path = log_dir.join(format!(".dev-assistant-session-{}.log", ts));
+                        if let Err(e) = std::fs::write(&log_path, log) {
+                            tracing::warn!(error = %e, "写入可读会话日志失败");
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "生成可读会话日志失败");
+                }
             }
         }
 

@@ -72,6 +72,10 @@ pub struct KbIndexEntry {
     /// 状态：proposed / accepted / deprecated / superseded / draft / completed
     #[serde(default)]
     pub status: String,
+    /// 是否已归档（dream 遗忘机制置位，默认 active）。
+    /// `kb_query` 默认过滤归档条目，传 `include_archived=true` 可检索。
+    #[serde(default)]
+    pub archived: bool,
     /// 关联条目 ID 列表
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relates_to: Option<Vec<String>>,
@@ -182,6 +186,11 @@ pub fn kb_query_tool() -> ToolDefinition {
                 "include_content": {
                     "type": "boolean",
                     "description": "Whether to include entry content",
+                    "default": false
+                },
+                "include_archived": {
+                    "type": "boolean",
+                    "description": "Whether to include archived entries (default false, archived entries are filtered out)",
                     "default": false
                 }
             },
@@ -337,6 +346,10 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         .as_bool()
         .unwrap_or(false);
 
+    let include_archived = args.arguments["include_archived"]
+        .as_bool()
+        .unwrap_or(false);
+
     let kb_root = context.working_dir.join(".kb");
     let index_path = kb_root.join("index.json");
 
@@ -369,6 +382,7 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         type_filter.as_deref(),
         tag_filter.as_deref(),
         max_results,
+        include_archived,
     );
 
     // 如果需要内容，加载每个条目的正文
@@ -410,7 +424,8 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
 /// 更新索引文件中的条目。
 ///
 /// 从条目的 frontmatter 中提取元数据，更新或添加到 index.json。
-fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str) -> Result<(), AppError> {
+/// `pub(crate)`：供 dream 模块（consolidate 阶段写入新条目后纳入索引）复用。
+pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str) -> Result<(), AppError> {
     let index_path = kb_root.join("index.json");
 
     // 加载现有索引，或创建新索引
@@ -484,12 +499,16 @@ fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str) -> Result
 
     let now = Utc::now().to_rfc3339();
 
+    // 解析 archived 字段（frontmatter 可写 archived: true，默认 false）
+    let archived = fm.get("archived").map(|s| s.trim().eq_ignore_ascii_case("true")).unwrap_or(false);
+
     let entry = KbIndexEntry {
         path: entry_path.to_string(),
         entry_type: fm.get("type").cloned().unwrap_or_else(|| "unknown".to_string()),
         title: fm.get("title").cloned().unwrap_or_else(|| id.clone()),
         tags,
         status: fm.get("status").cloned().unwrap_or_else(|| "draft".to_string()),
+        archived,
         relates_to,
         depends_on,
         supersedes,
@@ -497,6 +516,26 @@ fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str) -> Result
         created: fm.get("created").cloned(),
         updated: Some(now.clone()),
     };
+
+    // 增量优化：若条目已存在且元数据完全一致（仅 updated 时间戳不同），
+    // 跳过全量序列化与写盘，避免 KB 增长后每次 kb_store 都产生 O(n) IO。
+    if let Some(existing) = index.entries.get(&id) {
+        let unchanged = existing.path == entry.path
+            && existing.entry_type == entry.entry_type
+            && existing.title == entry.title
+            && existing.tags == entry.tags
+            && existing.status == entry.status
+            && existing.archived == entry.archived
+            && existing.relates_to == entry.relates_to
+            && existing.depends_on == entry.depends_on
+            && existing.supersedes == entry.supersedes
+            && existing.author == entry.author
+            && existing.created == entry.created;
+        if unchanged {
+            debug!(id = %id, "KB 索引条目无变化，跳过写盘");
+            return Ok(());
+        }
+    }
 
     index.entries.insert(id, entry);
     index.updated = now;
@@ -520,9 +559,93 @@ fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str) -> Result
 // 检索算法
 // ---------------------------------------------------------------------------
 
+/// 判断字符是否为 CJK 字符（中文/日文/韩文）。
+fn is_cjk_char(c: char) -> bool {
+    matches!(c,
+        '\u{4E00}'..='\u{9FFF}' |
+        '\u{3400}'..='\u{4DBF}' |
+        '\u{3000}'..='\u{303F}' |
+        '\u{3040}'..='\u{309F}' |
+        '\u{30A0}'..='\u{30FF}' |
+        '\u{AC00}'..='\u{D7AF}'
+    )
+}
+
+/// 将文本拆分为可搜索的 token 列表。
+///
+/// 规则：
+/// - 连续 ASCII 字母/数字累积为一个单词 token（转小写）
+/// - 驼峰边界拆分：`SyncToolCache` → `sync` `tool` `cache`
+/// - CJK 字符按单字切分（中文无空格分词，按字匹配最稳）
+/// - 其他字符（空格、标点、下划线等）作为分隔符
+fn tokenize(text: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut ascii_word = String::new();
+
+    let flush = |tokens: &mut Vec<String>, word: &mut String| {
+        if !word.is_empty() {
+            tokens.push(word.clone());
+            word.clear();
+        }
+    };
+
+    for c in text.chars() {
+        if is_cjk_char(c) {
+            flush(&mut tokens, &mut ascii_word);
+            tokens.push(c.to_string());
+        } else if c.is_alphanumeric() {
+            // 驼峰边界：大写字母前一个字符是小写/数字时拆分（SyncTool → Sync + Tool）
+            if c.is_uppercase()
+                && !ascii_word.is_empty()
+                && ascii_word
+                    .chars()
+                    .last()
+                    .map(|l| l.is_lowercase() || l.is_ascii_digit())
+                    .unwrap_or(false)
+            {
+                flush(&mut tokens, &mut ascii_word);
+            }
+            ascii_word.push(c.to_lowercase().next().unwrap_or(c));
+        } else {
+            flush(&mut tokens, &mut ascii_word);
+        }
+    }
+    flush(&mut tokens, &mut ascii_word);
+
+    tokens
+}
+
+/// 判断查询 token 是否命中条目 token（精确匹配或前缀匹配）。
+///
+/// 前缀匹配支持部分查询（如 "arch" 命中 "architecture"），
+/// 但只做单向（查询词是完整词的前缀），避免短查询词误匹配海量条目。
+fn token_hit(query_token: &str, entry_token: &str) -> bool {
+    entry_token == query_token || entry_token.starts_with(query_token)
+}
+
+/// 计算单个条目在给定字段 token 上的命中得分。
+///
+/// 精确命中得 `exact` 分，前缀命中得 `prefix` 分（降权）。
+fn field_score(query_tokens: &[String], field_tokens: &[String], exact: i32, prefix: i32) -> i32 {
+    let mut score = 0i32;
+    for qt in query_tokens {
+        for et in field_tokens {
+            if et == qt {
+                score += exact;
+            } else if token_hit(qt, et) {
+                score += prefix;
+            }
+        }
+    }
+    score
+}
+
 /// 在索引中搜索匹配的条目。
 ///
-/// 使用简单的标签 + 关键词匹配，不依赖外部向量数据库。
+/// 使用分词 + 归一化 + 前缀模糊匹配：
+/// - 中英文分词（英文按单词+驼峰拆分，中文按单字）
+/// - 标题/ID/路径/标签字段加权打分（标题+5、ID+3、路径+2、标签+2）
+/// - 前缀匹配支持部分关键词（如 "arch" 命中 "architecture"）
 /// 返回按分数降序排列的结果。
 fn search_entries(
     index: &KbIndex,
@@ -530,11 +653,17 @@ fn search_entries(
     type_filter: Option<&str>,
     tag_filter: Option<&[String]>,
     max_results: usize,
+    include_archived: bool,
 ) -> Vec<KbQueryResult> {
-    let query_lower = query.to_lowercase();
+    let query_tokens = tokenize(query);
     let mut scored: Vec<(i32, &str, &KbIndexEntry)> = Vec::new();
 
     for (id, entry) in &index.entries {
+        // 0. 归档过滤：默认排除归档条目（dream 遗忘机制的产物）
+        if entry.archived && !include_archived {
+            continue;
+        }
+
         let mut score = 0i32;
 
         // 1. 类型过滤
@@ -544,7 +673,7 @@ fn search_entries(
             }
         }
 
-        // 2. 标签匹配（高权重）
+        // 2. 标签过滤（精确匹配）
         if let Some(tags) = tag_filter {
             if !tags.iter().any(|t| entry.tags.contains(t)) {
                 continue;
@@ -552,21 +681,21 @@ fn search_entries(
             score += 10;
         }
 
-        // 3. 关键词匹配
-        if !query_lower.is_empty() {
-            if entry.title.to_lowercase().contains(&query_lower) {
-                score += 5; // 标题命中
-            }
-            if id.to_lowercase().contains(&query_lower) {
-                score += 3; // ID 命中
-            }
-            if entry.path.to_lowercase().contains(&query_lower) {
-                score += 2; // 路径命中
-            }
-            // 标签匹配也加分
-            if entry.tags.iter().any(|t| t.to_lowercase().contains(&query_lower)) {
-                score += 2;
-            }
+        // 3. 关键词匹配（分词 + 归一化 + 前缀模糊）
+        if !query_tokens.is_empty() {
+            let title_tokens = tokenize(&entry.title);
+            let id_tokens = tokenize(id);
+            let path_tokens = tokenize(&entry.path);
+            let tag_tokens: Vec<String> = entry
+                .tags
+                .iter()
+                .flat_map(|t| tokenize(t))
+                .collect();
+
+            score += field_score(&query_tokens, &title_tokens, 5, 3); // 标题命中
+            score += field_score(&query_tokens, &id_tokens, 3, 2); // ID 命中
+            score += field_score(&query_tokens, &path_tokens, 2, 1); // 路径命中
+            score += field_score(&query_tokens, &tag_tokens, 2, 1); // 标签命中
         }
 
         // 4. 状态优先级
@@ -575,7 +704,7 @@ fn search_entries(
         }
 
         // 无查询条件时给一个基础分，确保所有条目都被返回
-        if query_lower.is_empty() && tag_filter.is_none() {
+        if query.is_empty() && tag_filter.is_none() {
             score = 1;
         }
 
@@ -758,6 +887,50 @@ mod tests {
     }
 
     #[test]
+    fn kb_store_identical_entry_skips_index_write() {
+        let dir = tempdir().unwrap();
+        let ctx = kb_test_context(dir.path());
+
+        // 首次写入
+        let args = make_args(serde_json::json!({
+            "path": "decisions/ADR-100.md",
+            "content": "---\nid: ADR-100\ntype: decision\ntitle: Skip Write\ntags: [test]\nstatus: proposed\n---\nBody",
+            "update_index": true
+        }));
+        kb_store_handler(&args, &ctx).unwrap();
+
+        let index_path = dir.path().join(".kb/index.json");
+        let first = fs::read_to_string(&index_path).unwrap();
+
+        // 等一小段时间，确保 updated 时间戳若被写入必然不同
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        // 相同内容重复写入：元数据无变化，应跳过写盘
+        let args2 = make_args(serde_json::json!({
+            "path": "decisions/ADR-100.md",
+            "content": "---\nid: ADR-100\ntype: decision\ntitle: Skip Write\ntags: [test]\nstatus: proposed\n---\nBody",
+            "update_index": true
+        }));
+        kb_store_handler(&args2, &ctx).unwrap();
+
+        let second = fs::read_to_string(&index_path).unwrap();
+        assert_eq!(first, second, "无变化条目不应重写索引文件");
+
+        // 内容变化后应更新索引
+        let args3 = make_args(serde_json::json!({
+            "path": "decisions/ADR-100.md",
+            "content": "---\nid: ADR-100\ntype: decision\ntitle: Skip Write Updated\ntags: [test]\nstatus: accepted\n---\nBody 2",
+            "update_index": true
+        }));
+        kb_store_handler(&args3, &ctx).unwrap();
+        let third = fs::read_to_string(&index_path).unwrap();
+        assert_ne!(first, third, "内容变化后应重写索引文件");
+        let index: KbIndex = serde_json::from_str(&third).unwrap();
+        assert_eq!(index.entries["ADR-100"].title, "Skip Write Updated");
+        assert_eq!(index.entries["ADR-100"].status, "accepted");
+    }
+
+    #[test]
     fn kb_store_id_from_filename_when_no_id_in_frontmatter() {
         let dir = tempdir().unwrap();
         let ctx = kb_test_context(dir.path());
@@ -886,6 +1059,48 @@ mod tests {
 
         let result = kb_query_handler(&args, &ctx).unwrap();
         assert!(result.content.contains("找到 3 个匹配条目"), "Should limit to 3 results");
+    }
+
+    #[test]
+    fn kb_query_excludes_archived_by_default() {
+        let dir = tempdir().unwrap();
+        let ctx = kb_test_context(dir.path());
+
+        // 正常条目
+        store_test_entry(&ctx, "decisions/ADR-200.md", "ADR-200", "decision", "Active Decision", &["test"]);
+
+        // 归档条目：content 中带 archived: true frontmatter
+        let archived_content = "---\nid: ADR-201\ntype: decision\ntitle: Archived Decision\ntags: [test]\nstatus: completed\narchived: true\n---\n# Archived\n\nBody.";
+        let args_store = make_args(serde_json::json!({
+            "path": "decisions/ADR-201.md",
+            "content": archived_content,
+            "update_index": true
+        }));
+        kb_store_handler(&args_store, &ctx).unwrap();
+
+        // 默认查询：应只返回活跃条目
+        let args = make_args(serde_json::json!({
+            "query": "Decision",
+            "max_results": 10
+        }));
+        let result = kb_query_handler(&args, &ctx).unwrap();
+        assert!(result.content.contains("Active Decision"), "Should find active entry");
+        assert!(
+            !result.content.contains("Archived Decision"),
+            "Archived entry should be excluded by default"
+        );
+
+        // include_archived=true：应包含归档条目
+        let args2 = make_args(serde_json::json!({
+            "query": "Decision",
+            "max_results": 10,
+            "include_archived": true
+        }));
+        let result2 = kb_query_handler(&args2, &ctx).unwrap();
+        assert!(
+            result2.content.contains("Archived Decision"),
+            "Archived entry should be included when include_archived=true"
+        );
     }
 
     // 辅助函数：创建测试条目

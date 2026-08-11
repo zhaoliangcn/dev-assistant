@@ -27,13 +27,14 @@ mod checkpoint;
 pub use task::{Task, TaskId, TaskStatus, DependencyGraph};
 pub use checkpoint::CheckpointManager;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::agent::{Agent, AgentIdentity};
+use crate::agent::{Agent, AgentIdentity, ContextManager};
 use crate::llm::LlmClient;
 use crate::tools::ToolRegistry;
 use crate::utils::error::AppError;
@@ -108,6 +109,10 @@ pub struct TaskOrchestrator {
     running_tasks: Vec<RunningTask>,
     /// 最大并行任务数
     max_concurrent: usize,
+    /// 会话 ID（用于分层摘要定位与检查点恢复，默认 "default"）
+    session_id: String,
+    /// 从检查点重建的 Agent 上下文（task_id → ContextManager）
+    restored_contexts: HashMap<String, ContextManager>,
 }
 
 impl TaskOrchestrator {
@@ -124,11 +129,13 @@ impl TaskOrchestrator {
             llm,
             tools,
             max_iterations: 15,
-            max_tokens: 8192,
+            max_tokens: 262144,
             checkpoint_enabled: true,
             checkpoint_interval: 5,
             running_tasks: Vec::new(),
             max_concurrent: MAX_CONCURRENT_TASKS,
+            session_id: "default".to_string(),
+            restored_contexts: HashMap::new(),
         }
     }
 
@@ -294,6 +301,8 @@ impl TaskOrchestrator {
                 let max_iterations = self.max_iterations;
                 let max_tokens = self.max_tokens;
                 let spawned_id = task.id.clone();
+                // 崩溃恢复：若该任务在检查点重建过 Agent 上下文，则注入子代理
+                let restored_context = self.restored_contexts.get(&task.id).cloned();
 
                 handles.push((spawned_id, tokio::spawn(async move {
                     execute_single_task(
@@ -302,6 +311,7 @@ impl TaskOrchestrator {
                         tools,
                         max_iterations,
                         max_tokens,
+                        restored_context,
                     ).await
                 })));
             }
@@ -434,10 +444,18 @@ impl TaskOrchestrator {
 
     /// 保存当前检查点。
     pub fn save_checkpoint(&self) -> Result<(), AppError> {
-        self.checkpoint.save(&self.graph, &self.running_tasks)
+        self.checkpoint
+            .save_with_session(&self.graph, &self.running_tasks, &self.session_id)
     }
 
     /// 从检查点恢复。
+    ///
+    /// 1. 恢复任务依赖图
+    /// 2. 恢复 running_tasks 列表
+    /// 3. 为每个进行中的任务重建 Agent 上下文（分层摘要 → 上下文注入）
+    ///
+    /// 重建后的上下文存入 `restored_contexts`，由 `execute()` 在重新执行
+    /// 对应任务时注入子代理，实现崩溃后的断点续传（不再从零开始）。
     pub fn restore_from_checkpoint(&mut self) -> Result<bool, AppError> {
         match self.checkpoint.load() {
             Ok(Some(checkpoint)) => {
@@ -448,6 +466,32 @@ impl TaskOrchestrator {
 
                 // 恢复 running_tasks 列表
                 self.running_tasks = checkpoint.in_progress.clone();
+
+                // 为每个进行中的任务重建 Agent 上下文
+                self.restored_contexts.clear();
+                for running in &checkpoint.in_progress {
+                    let task_desc = running.description.clone();
+                    let agent_type = running.agent_type.as_ref()
+                        .and_then(|t| AgentIdentity::from_str(t))
+                        .unwrap_or(AgentIdentity::General);
+                    let system_prompt = agent_type.system_prompt();
+                    match self.checkpoint.rebuild_context_from_checkpoint(
+                        &system_prompt,
+                        self.max_tokens,
+                        &task_desc,
+                    ) {
+                        Ok(Some(ctx)) => {
+                            info!("任务 {} 已重建 Agent 上下文（分层摘要注入）", running.task_id);
+                            self.restored_contexts.insert(running.task_id.clone(), ctx);
+                        }
+                        Ok(None) => {
+                            debug!("任务 {} 无可用摘要，从头开始", running.task_id);
+                        }
+                        Err(e) => {
+                            warn!("任务 {} 重建上下文失败: {}，从头开始", running.task_id, e);
+                        }
+                    }
+                }
 
                 // 标记所有正在进行的任务为 Pending（需要重新执行）
                 for running in &checkpoint.in_progress {
@@ -504,12 +548,16 @@ impl TaskOrchestrator {
 /// 执行单个任务。
 ///
 /// 创建一个子 Agent 来执行任务，并返回执行结果。
+///
+/// `restored_context` 为崩溃恢复时重建的上下文（可选），提供时子代理直接
+/// 从恢复点继续执行（跳过任务消息注入），否则从头开始。
 async fn execute_single_task(
     task: Task,
     llm: Arc<LlmClient>,
     tools: ToolRegistry,
     max_iterations: usize,
     max_tokens: usize,
+    restored_context: Option<ContextManager>,
 ) -> TaskExecutionResult {
     let task_id = task.id.clone();
     let description = task.description.clone();
@@ -550,6 +598,7 @@ async fn execute_single_task(
         max_tokens,
         agent_type,
         parent_budget: None,
+        restored_context,
     }) {
         Ok(agent) => agent,
         Err(e) => {

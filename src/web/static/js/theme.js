@@ -122,6 +122,11 @@ document.addEventListener('alpine:init', () => {
                     ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css'
                     : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
             }
+            // 同步 PWA 状态栏/浏览器主题色，避免亮暗切换后残留白色状态栏
+            const meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) {
+                meta.setAttribute('content', this.dark ? '#0f1117' : '#ffffff');
+            }
         },
 
         toggle() {

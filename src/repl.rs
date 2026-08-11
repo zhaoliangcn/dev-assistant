@@ -4,7 +4,6 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use crate::agent::{Agent, AgentStep};
-use crate::session::SessionLogger;
 use crate::ui::{self, UIMessageOutput, MarkdownRenderer};
 use crate::utils::message_level::MessageLevel;
 use crate::utils::message_output::MessageOutput;
@@ -565,7 +564,6 @@ fn render_block_batch(
 pub async fn process_user_message(
     agent: &mut Agent,
     input: &str,
-    session_log: &mut SessionLogger,
     working_dir: &Path,
     restart_args: &[String],
     verbose: bool,
@@ -577,7 +575,6 @@ pub async fn process_user_message(
 
     // ── Step-by-step agent loop with real-time UI updates ──
     let mut output = UIMessageOutput::new(verbose);
-    session_log.log_user(input);
     agent.start_turn(input.to_string(), &mut output);
 
     // 渲染用户消息
@@ -610,8 +607,6 @@ pub async fn process_user_message(
 
         // Drain buffered messages and render blocks
         for (level, msg) in output.drain() {
-            let label = level.label();
-            session_log.log_status(label, &msg);
             agent.add_display_message(level, &msg);
 
             // 根据消息级别渲染不同类型的块
@@ -657,7 +652,6 @@ pub async fn process_user_message(
         let status = derive_thinking_status(output.last_message());
         step_round += 1;
         let spinner = if step_round.is_multiple_of(2) { "⏳" } else { "⌛" };
-        session_log.log_thinking();
         ui::render_input_panel(Some(&format!("{} {}", spinner, status)))?;
 
         tokio::select! {
@@ -668,14 +662,12 @@ pub async fn process_user_message(
                     Err(e) => {
                         let msg = format!("LLM API 错误: {}", e);
                         output.error(&msg);
-                        session_log.log_status("错误", &msg);
                         break None;
                     }
                 }
             }
             _ = tokio::signal::ctrl_c() => {
                 output.info("操作已取消");
-                session_log.log_status("警告", "用户中断了当前操作");
                 break None;
             }
         }
@@ -687,8 +679,6 @@ pub async fn process_user_message(
 
     // Flush remaining messages
     for (level, msg) in output.drain() {
-        let label = level.label();
-        session_log.log_status(label, &msg);
         agent.add_display_message(level, &msg);
 
         // 渲染到终端（与主循环使用相同的分类逻辑）
@@ -755,9 +745,8 @@ pub async fn process_user_message(
             None,
             None,
         );
-        session_log.log_assistant(&result.message);
     } else {
-        session_log.log_status("完成", &result.message);
+        // finish 结果无需额外处理（已作为工具结果渲染）
     }
 
     // 渲染上一轮流式完成后的助手内容（未在循环中消费时，如 Done 后直接跳出）
@@ -784,7 +773,6 @@ pub async fn process_user_message(
     // 渲染累计的 Token 消耗统计：独立于交互消息流，统一在末尾展示
     if let Some((prompt, completion, total)) = output.take_token_usage() {
         let msg = format!("🔤 Token 消耗: prompt={} · completion={} · total={}", prompt, completion, total);
-        session_log.log_status("用量", &msg);
         let block = ui::MessageBlock::System { content: msg };
         ui::render_block(&block, markdown_renderer)?;
     }

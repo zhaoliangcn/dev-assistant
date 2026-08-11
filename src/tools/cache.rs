@@ -100,155 +100,117 @@ impl ReadCache {
     /// 2. 如果存在，释放读锁，再进行 IO 检查 mtime
     /// 3. 如果 IO 确认未修改，再获取写锁更新访问时间
     pub fn read(&self, path: &Path) -> Option<String> {
+        let Some((content, cached_mtime, expired)) = self.lookup(path) else {
+            *self.misses.write().unwrap() += 1;
+            return None;
+        };
+        if expired {
+            self.evict(path, "Cache entry expired (TTL)");
+            return None;
+        }
+        let current_mtime = std::fs::metadata(path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        self.handle_hit(path, content, cached_mtime, current_mtime)
+    }
+
+    /// 查找缓存条目，返回 `(content, cached_mtime, expired)`；未命中返回 None。
+    ///
+    /// 只持有读锁，不进行任何 IO。
+    fn lookup(&self, path: &Path) -> Option<(String, Timestamp, bool)> {
         if !self.config.enabled {
             return None;
         }
-
         let path_buf = path.to_path_buf();
+        let cache = self.cache.read().unwrap();
+        cache.get(&path_buf).map(|entry| {
+            let now = now_timestamp();
+            let expired = (now - entry.created_at) > self.config.ttl_seconds;
+            (entry.content.clone(), entry.mtime, expired)
+        })
+    }
 
-        // Step 1: 获取读锁检查缓存是否存在且未过期（不持有锁时做 IO）
-        let cache_check = {
-            let cache = self.cache.read().unwrap();
-            cache.get(&path_buf).map(|entry| {
-                let now = now_timestamp();
-                let expired = (now - entry.created_at) > self.config.ttl_seconds;
-                (entry.content.clone(), entry.mtime, expired)
-            })
-        };
-
-        // Step 2: 如果缓存存在，读锁已释放，进行 IO 检查 mtime
-        if let Some((content, cached_mtime, expired)) = cache_check {
-            if expired {
-                // TTL 过期，移除缓存
+    /// 缓存命中后的 mtime 校验与状态更新（同步/异步共用）。
+    ///
+    /// - `current_mtime = Some(m)` 且 `m > cached_mtime`：文件已修改，移除缓存
+    /// - `current_mtime = Some(_)`：确认未修改，touch 后命中
+    /// - `current_mtime = None`：文件不可访问，移除缓存
+    fn handle_hit(
+        &self,
+        path: &Path,
+        content: String,
+        cached_mtime: Timestamp,
+        current_mtime: Option<Timestamp>,
+    ) -> Option<String> {
+        let path_buf = path.to_path_buf();
+        match current_mtime {
+            Some(current) if current > cached_mtime => {
                 let mut cache = self.cache.write().unwrap();
                 cache.remove(&path_buf);
                 *self.misses.write().unwrap() += 1;
-                debug!(path = ?path, "Cache entry expired (TTL)");
-                return None;
+                debug!(path = ?path, "Cache entry invalidated (file modified)");
+                None
             }
-
-            // 检查文件是否被修改（IO 操作，不持有锁）
-            match std::fs::metadata(path) {
-                Ok(metadata) => {
-                    let current_mtime = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-
-                    if current_mtime > cached_mtime {
-                        // 文件已修改，移除缓存
-                        let mut cache = self.cache.write().unwrap();
-                        cache.remove(&path_buf);
-                        *self.misses.write().unwrap() += 1;
-                        debug!(path = ?path, "Cache entry invalidated (file modified)");
-                        return None;
+            Some(_) => {
+                // IO 确认未修改，获取写锁更新访问时间
+                if let Ok(mut cache) = self.cache.write() {
+                    if let Some(entry) = cache.get_mut(&path_buf) {
+                        entry.touch();
                     }
                 }
-                Err(_) => {
-                    // 文件不存在或无法访问，移除缓存
-                    let mut cache = self.cache.write().unwrap();
-                    cache.remove(&path_buf);
-                    *self.misses.write().unwrap() += 1;
-                    debug!(path = ?path, "Cache entry invalidated (file unavailable)");
-                    return None;
-                }
+                *self.hits.write().unwrap() += 1;
+                debug!(path = ?path, "Cache hit");
+                Some(content)
             }
-
-            // Step 3: IO 确认未修改，获取写锁更新访问时间
-            if let Ok(mut cache) = self.cache.write() {
-                if let Some(entry) = cache.get_mut(&path_buf) {
-                    entry.touch();
-                }
+            None => {
+                let mut cache = self.cache.write().unwrap();
+                cache.remove(&path_buf);
+                *self.misses.write().unwrap() += 1;
+                debug!(path = ?path, "Cache entry invalidated (file unavailable)");
+                None
             }
-            *self.hits.write().unwrap() += 1;
-            debug!(path = ?path, "Cache hit");
-            return Some(content);
         }
+    }
 
+    /// 移除指定路径的缓存并累计一次 miss（同步/异步共用）。
+    fn evict(&self, path: &Path, reason: &str) {
+        let path_buf = path.to_path_buf();
+        let mut cache = self.cache.write().unwrap();
+        cache.remove(&path_buf);
         *self.misses.write().unwrap() += 1;
-        None
+        debug!(path = ?path, "{}", reason);
     }
 
     /// 异步从缓存读取文件内容
     /// 
     /// 返回 Some(content) 表示命中缓存
     /// 返回 None 表示需要从磁盘读取
+    ///
+    /// 与 [`Self::read`] 共用 `lookup` / `handle_hit`，仅 metadata 获取使用异步 IO。
     pub async fn read_async(&self, path: &Path) -> Option<String> {
-        if !self.config.enabled {
+        let Some((content, cached_mtime, expired)) = self.lookup(path) else {
+            *self.misses.write().unwrap() += 1;
+            return None;
+        };
+        if expired {
+            self.evict(path, "Cache entry expired (TTL)");
             return None;
         }
-
-        let path_buf = path.to_path_buf();
-        
-        // Step 1: 获取读锁检查缓存是否存在且未过期（不持有锁时做 IO）
-        let cache_check = {
-            let cache = self.cache.read().unwrap();
-            cache.get(&path_buf).map(|entry| {
-                let now = now_timestamp();
-                let expired = (now - entry.created_at) > self.config.ttl_seconds;
-                (entry.content.clone(), entry.mtime, expired)
-            })
-        };
-
-        // Step 2: 如果缓存存在，读锁已释放，进行 IO 检查 mtime
-        if let Some((content, cached_mtime, expired)) = cache_check {
-            if expired {
-                // TTL 过期，移除缓存
-                let mut cache = self.cache.write().unwrap();
-                cache.remove(&path_buf);
-                *self.misses.write().unwrap() += 1;
-                debug!(path = ?path, "Cache entry expired (TTL)");
-                return None;
-            }
-
-            // 检查文件是否被修改（IO 操作，不持有锁）
-            match tokio::fs::metadata(path).await {
-                Ok(metadata) => {
-                    let current_mtime = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-
-                    if current_mtime > cached_mtime {
-                        // 文件已修改，移除缓存
-                        let mut cache = self.cache.write().unwrap();
-                        cache.remove(&path_buf);
-                        *self.misses.write().unwrap() += 1;
-                        debug!(path = ?path, "Cache entry invalidated (file modified)");
-                        return None;
-                    }
-                }
-                Err(_) => {
-                    // 文件不存在或无法访问，移除缓存
-                    let mut cache = self.cache.write().unwrap();
-                    cache.remove(&path_buf);
-                    *self.misses.write().unwrap() += 1;
-                    debug!(path = ?path, "Cache entry invalidated (file unavailable)");
-                    return None;
-                }
-            }
-
-            // Step 3: IO 确认未修改，获取写锁更新访问时间
-            if let Ok(mut cache) = self.cache.write() {
-                if let Some(entry) = cache.get_mut(&path_buf) {
-                    entry.touch();
-                }
-            }
-            *self.hits.write().unwrap() += 1;
-            debug!(path = ?path, "Cache hit");
-            return Some(content);
-        }
-
-        *self.misses.write().unwrap() += 1;
-        None
+        let current_mtime = tokio::fs::metadata(path)
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        self.handle_hit(path, content, cached_mtime, current_mtime)
     }
 
-    /// 将文件内容写入缓存
-    pub fn write(&self, path: &Path, content: &str) {
+    /// 将文件内容写入缓存（同步/异步共用核心）。
+    ///
+    /// `mtime` 由调用方预先获取（同步或异步 IO），本方法只做内存操作。
+    fn write_impl(&self, path: &Path, content: &str, mtime: Timestamp) {
         if !self.config.enabled {
             return;
         }
@@ -260,15 +222,6 @@ impl ReadCache {
         }
 
         let path_buf = path.to_path_buf();
-        
-        // 获取文件 mtime
-        let mtime = std::fs::metadata(path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(now_timestamp());
-
         let mut cache = self.cache.write().unwrap();
 
         // 如果缓存已满，进行清理
@@ -280,20 +233,22 @@ impl ReadCache {
         debug!(path = ?path, "Cache written");
     }
 
+    /// 将文件内容写入缓存
+    pub fn write(&self, path: &Path, content: &str) {
+        // 获取文件 mtime
+        let mtime = std::fs::metadata(path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or_else(now_timestamp);
+        self.write_impl(path, content, mtime);
+    }
+
     /// 异步将文件内容写入缓存
+    ///
+    /// 与 [`Self::write`] 共用 `write_impl`，仅 metadata 获取使用异步 IO。
     pub async fn write_async(&self, path: &Path, content: &str) {
-        if !self.config.enabled {
-            return;
-        }
-
-        // 检查文件大小限制
-        if content.len() > self.config.max_file_size {
-            debug!(path = ?path, size = content.len(), "File too large for cache");
-            return;
-        }
-
-        let path_buf = path.to_path_buf();
-        
         // 先获取文件 mtime（异步），避免持有锁时进行 IO
         let mtime = tokio::fs::metadata(path)
             .await
@@ -301,18 +256,8 @@ impl ReadCache {
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
-            .unwrap_or(now_timestamp());
-
-        // 获取锁并写入缓存
-        let mut cache = self.cache.write().unwrap();
-
-        // 如果缓存已满，进行清理
-        if cache.len() >= self.config.max_entries {
-            self.cleanup(&mut cache);
-        }
-
-        cache.insert(path_buf, CacheEntry::new(content.to_string(), mtime));
-        debug!(path = ?path, "Cache written");
+            .unwrap_or_else(now_timestamp);
+        self.write_impl(path, content, mtime);
     }
 
     /// 移除指定路径的缓存

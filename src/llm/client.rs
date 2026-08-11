@@ -210,7 +210,7 @@ impl LlmClient {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
                 temperature: cfg.temperature.unwrap_or(0.2),
-                max_tokens: cfg.max_tokens.unwrap_or(8192),
+                max_tokens: cfg.max_tokens.unwrap_or(262144),
             };
 
             match retry_with_backoff(|| provider.chat(&self.http_client, &request)).await {
@@ -274,7 +274,7 @@ impl LlmClient {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
                 temperature: cfg.temperature.unwrap_or(0.2),
-                max_tokens: cfg.max_tokens.unwrap_or(8192),
+                max_tokens: cfg.max_tokens.unwrap_or(262144),
             };
 
             match retry_with_backoff(|| provider.chat_stream(&self.http_client, &request)).await {

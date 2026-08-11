@@ -14,6 +14,7 @@
 mod agent;
 mod app;
 mod config;
+mod dream;
 mod hooks;
 mod llm;
 mod orchestrator;
@@ -120,8 +121,8 @@ struct Cli {
     #[arg(long)]
     max_iterations: Option<usize>,
 
-    /// 上下文窗口的最大 token 数
-    #[arg(long, default_value_t = 8192)]
+    /// 上下文窗口的最大 token 数（默认 256K）
+    #[arg(long, default_value_t = 262144)]
     max_tokens: usize,
 
     /// 从上次保存的状态恢复对话（restart 后由子进程传入）

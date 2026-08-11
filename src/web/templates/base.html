@@ -17,6 +17,20 @@
     <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <link rel="stylesheet" href="/static/css/app.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- 首屏主题防闪烁：在 Alpine 加载前按 localStorage 提前应用主题，
+         避免暗色用户先看到一帧白屏（FOUC） -->
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('dev-assistant-theme') || 'auto';
+                var dark = theme === 'dark' ||
+                    (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                if (dark) {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                }
+            } catch (e) { /* localStorage 不可用时静默忽略 */ }
+        })();
+    </script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
     <!-- 模块化脚本：Store / 主题 → 工具函数 → 国际化 → 性能监控 → 侧栏组件 → 聊天组件 → 文件浏览器。
          注意：Alpine 必须放在所有模块脚本之后，因为模块脚本需在 alpine:init 前注册 store/全局组件，

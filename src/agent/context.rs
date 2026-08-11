@@ -1,6 +1,7 @@
 use crate::agent::compressor::{CompressionInfo, ContextCompressor};
 use crate::agent::display::DisplayBuffer;
 use crate::agent::history::ConversationHistory;
+use crate::agent::summary::SummaryStore;
 use crate::llm::{LlmMessage, ToolCall};
 use crate::utils::error::AppError;
 use crate::utils::message_level::MessageLevel;
@@ -96,7 +97,7 @@ fn default_critical_threshold() -> f64 { 0.80 }
 impl Default for ContextBudgetManager {
     fn default() -> Self {
         Self {
-            max_tokens: 8192,
+            max_tokens: 262144,
             system_prompt_tokens: 0,
             memory_tokens: 0,
             tool_schema_tokens: 0,
@@ -246,6 +247,53 @@ impl ContextManager {
     #[allow(dead_code)] // reserved for future KB memory quota management
     pub fn set_memory_tokens(&mut self, tokens: usize) {
         self.budget_manager.set_memory_tokens(tokens);
+    }
+
+    /// 注入跨会话历史摘要（分层摘要 → 上下文）。
+    ///
+    /// 从 `.kb/summaries/{session_id}/` 按预算（max_tokens 减去系统提示词与
+    /// 工具 schema 固定开销后的剩余空间）加载 final → phase → round 摘要，
+    /// 以 system 角色消息注入上下文历史，实现跨会话记忆。
+    ///
+    /// 仅在历史为空（新会话）时注入；已恢复的会话（`load_state`）包含完整
+    /// 历史，跳过注入避免重复。
+    pub fn inject_historical_summaries(&mut self, kb_root: &std::path::Path) {
+        if !self.history.messages.is_empty() {
+            return;
+        }
+        let store = SummaryStore::new(&self.session_id, kb_root);
+        let budget = self
+            .max_tokens
+            .saturating_sub(crate::agent::token_counter::TokenCounter::estimate(
+                &self.history.system_prompt,
+            ));
+        let summaries = store.build_summary_messages(budget);
+        if summaries.is_empty() {
+            return;
+        }
+        let tokens: usize = summaries
+            .iter()
+            .map(|m| {
+                crate::agent::token_counter::TokenCounter::estimate(
+                    m.content.as_deref().unwrap_or(""),
+                )
+            })
+            .sum();
+        let injected_count = summaries.len();
+        // 摘要以 system 角色注入历史头部（build_messages 会前置系统提示词）
+        self.history.messages = {
+            let mut all = summaries;
+            all.append(&mut self.history.messages);
+            all
+        };
+        self.history.recount_tokens();
+        self.budget_manager.set_memory_tokens(tokens);
+        debug!(
+            session = %self.session_id,
+            summaries = injected_count,
+            tokens,
+            "已注入跨会话历史摘要"
+        );
     }
 
     /// 将当前上下文预算报告格式化为 JSON 字符串（用于工具返回）。

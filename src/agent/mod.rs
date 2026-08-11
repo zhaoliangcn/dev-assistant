@@ -49,6 +49,9 @@ pub struct SubagentConfig {
     /// 父代理的上下文预算信息（可选）。传递给子代理，让子代理感知父代理的
     /// 上下文压力，从而尽快完成并控制输出规模（结果需能容纳回父代理上下文）。
     pub parent_budget: Option<crate::agent::context::ContextBudget>,
+    /// 崩溃恢复时重建的上下文（可选）。提供时直接使用（已包含恢复通知、
+    /// 分层摘要与继续指令），跳过任务消息注入，用于检查点恢复场景。
+    pub restored_context: Option<ContextManager>,
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +102,7 @@ pub struct Agent {
 
 impl Agent {
     pub fn new(
-        context: ContextManager,
+        mut context: ContextManager,
         tools: ToolRegistry,
         async_tools: Option<AsyncToolRegistry>,
         llm: Arc<LlmClient>,
@@ -108,6 +111,12 @@ impl Agent {
         session_store: Option<SessionStore>,
     ) -> Self {
         let wd = tools.working_dir().clone();
+
+        // 跨会话记忆注入：新会话（空历史）时加载历史分层摘要。
+        // 摘要以 system 消息注入上下文头部，实现重启后仍记得上次会话的关键信息。
+        // 已恢复的会话（load_state）历史非空，注入方法内部会跳过。
+        context.inject_historical_summaries(&wd.join(".kb"));
+
         Self {
             context,
             tools,
@@ -193,6 +202,11 @@ impl Agent {
         if let Some(ref mut store) = self.session_store {
             store.record_assistant_message(content);
         }
+    }
+
+    /// 获取会话持久化存储的文件路径（用于按需从 JSONL 生成可读日志）。
+    pub fn session_store_path(&self) -> Option<&std::path::Path> {
+        self.session_store.as_ref().map(|s| s.path())
     }
 
     // ----- 活跃模型管理 -----
@@ -366,8 +380,17 @@ impl Agent {
                     let _ = self.auto_save_round_summary().await;
                 }
 
-                // 压缩上下文，防止 token 无限制增长
-                let compression_info = self.context.compress()?;
+                // 压缩上下文，防止 token 无限制增长。
+                // Warning 压力用 LLM 摘要（保留语义），Critical/Exhausted 用截断
+                // （关键信息已通过 auto_save_round_summary 落盘）。
+                let compression_info =
+                    crate::agent::compressor::ContextCompressor::compress_if_needed_async(
+                        &mut self.context.history,
+                        self.context.max_tokens,
+                        &self.llm,
+                        budget.pressure,
+                    )
+                    .await?;
 
                 // 持久化：记录压缩事件
                 if compression_info.did_compress {
@@ -492,6 +515,23 @@ impl Agent {
 
         let identity = config.agent_type.unwrap_or(AgentIdentity::General);
         let system_prompt = identity.system_prompt();
+
+        // 崩溃恢复场景：直接使用重建的上下文（已包含恢复通知、分层摘要与继续指令），
+        // 跳过任务消息注入，避免与恢复上下文中的"请从以下任务继续"指令冲突。
+        if let Some(restored) = config.restored_context {
+            let wd = config.tools.working_dir().clone();
+            return Ok(Self {
+                context: restored,
+                tools: config.tools,
+                async_tools: None,
+                llm: config.llm,
+                max_iterations: config.max_iterations,
+                depth: config.depth,
+                skills: Vec::new(),
+                session_store: None,
+                working_dir: wd,
+            });
+        }
 
         let context_manager = ContextManager::new(system_prompt, config.max_tokens);
 
@@ -698,6 +738,7 @@ impl Agent {
                 max_tokens: self.context.max_tokens,
                 agent_type: Some(stage.agent_type.clone()),
                 parent_budget: Some(self.context.get_budget_report()),
+                restored_context: None,
             }) {
                 Ok(agent) => agent,
                 Err(e) => {
@@ -987,7 +1028,7 @@ impl Agent {
         let sub_max_tokens = tool_call.function.arguments["max_tokens"]
             .as_u64()
             .map(|n| n as usize)
-            .unwrap_or(8192);
+            .unwrap_or(262144);
         let agent_type = tool_call.function.arguments["agent_type"]
             .as_str()
             .and_then(AgentIdentity::from_str);
@@ -1041,6 +1082,7 @@ impl Agent {
             max_tokens: sub_max_tokens,
             agent_type: agent_type.clone(),
             parent_budget: Some(self.context.get_budget_report()),
+            restored_context: None,
         }) {
             Ok(agent) => agent,
             Err(e) => {
@@ -1346,6 +1388,11 @@ impl Agent {
     pub fn active_model(&self) -> &str {
         self.llm.active_model()
     }
+
+    /// 获取共享的 LLM 客户端引用（供 dream 等外部模块复用）。
+    pub fn llm_client(&self) -> &Arc<LlmClient> {
+        &self.llm
+    }
 }
 
 /// 检测工作目录下被修改的文件列表（通过 git diff）。
@@ -1414,6 +1461,7 @@ mod tests {
             max_tokens: 4096,
             agent_type: None,
             parent_budget: None,
+            restored_context: None,
         }
     }
 

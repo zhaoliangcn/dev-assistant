@@ -30,7 +30,9 @@ impl ScheduledTaskExecutor {
         store: Arc<ScheduledTaskStore>,
     ) -> Self {
         Self {
-            agent_handler: Arc::new(AgentTaskHandler),
+            agent_handler: Arc::new(AgentTaskHandler {
+                working_dir: working_dir.clone(),
+            }),
             command_handler: Arc::new(CommandTaskHandler { working_dir }),
             store,
         }

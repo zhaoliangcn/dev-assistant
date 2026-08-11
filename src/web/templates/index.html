@@ -227,9 +227,11 @@
                 </template>
             </div>
             <!-- 欢迎消息 -->
-            <div class="message system" x-show="chatMessages.length === 0 && !loadingSessions">
+            <div class="message system welcome-hero" x-show="chatMessages.length === 0 && !loadingSessions">
+                <div class="welcome-logo" aria-hidden="true">🤖</div>
                 <div class="message-body">
-                    <p👋 <span x-text="$store.i18n.assistant"></span>！<span x-text="$store.i18n.chat"></span></p>
+                    <p class="welcome-title"><span x-text="$store.i18n.assistant"></span>！</p>
+                    <p class="welcome-subtitle" x-text="$store.i18n.chat"></p>
                 </div>
             </div>
 
@@ -244,7 +246,7 @@
                         <div>
                             <!-- 用户消息 -->
                             <div x-show="msg.role === 'user'" class="message user">
-                                <div class="message-avatar">👤</div>
+                                <div class="message-avatar" aria-hidden="true">👤</div>
                                 <div class="message-body">
                                     <div class="message-header">
                                         <span class="message-role">你</span>
@@ -258,7 +260,7 @@
                             <div x-show="msg.role === 'assistant'"
                                  class="message assistant"
                                  :class="{ 'streaming': msg.streaming }">
-                                <div class="message-avatar">🤖</div>
+                                <div class="message-avatar" aria-hidden="true">🤖</div>
                                 <div class="message-body">
                                     <div class="message-header">
                                         <span class="message-role">助手</span>
@@ -304,7 +306,7 @@
                     <div>
                         <!-- 用户消息 -->
                         <div x-show="msg.role === 'user'" class="message user">
-                            <div class="message-avatar">👤</div>
+                            <div class="message-avatar" aria-hidden="true">👤</div>
                             <div class="message-body">
                                 <div class="message-header">
                                     <span class="message-role">你</span>
@@ -318,7 +320,7 @@
                         <div x-show="msg.role === 'assistant'"
                              class="message assistant"
                              :class="{ 'streaming': msg.streaming }">
-                            <div class="message-avatar">🤖</div>
+                            <div class="message-avatar" aria-hidden="true">🤖</div>
                             <div class="message-body">
                                 <div class="message-header">
                                     <span class="message-role">助手</span>
@@ -361,6 +363,7 @@
                           @submit.prevent="sendMessage()">
                         <div class="grid">
                             <textarea x-model="input"
+                                      x-ref="chatInput"
                                       :placeholder="$store.i18n.chat_placeholder"
                                       rows="2"
                                       autofocus
@@ -384,6 +387,13 @@
                             </button>
                         </div>
                     </form>
+                    <div class="input-hints" aria-hidden="true">
+                        <span class="input-hint"><kbd>Enter</kbd> 发送</span>
+                        <span class="input-hint-sep">·</span>
+                        <span class="input-hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
+                        <span class="input-hint-sep">·</span>
+                        <span class="input-hint"><kbd>Ctrl</kbd>+<kbd>/</kbd> 搜索</span>
+                    </div>
                 </div>
     </div>
 </div>

@@ -68,10 +68,34 @@ pub struct SessionScan {
 const FAILURE_RETRY_THRESHOLD: usize = 3;
 
 /// 用户纠正的否定/修正关键词（小写匹配）。
+///
+/// 按语义分组，各词独立子串匹配。英文词已小写，比较时用户消息也会 to_lowercase。
 const CORRECTION_KEYWORDS: &[&str] = &[
-    "不对", "错了", "不是", "不要", "别这样", "重新", "换一种", "停下", "stop", "wrong",
-    "不要用", "不需要", "说错了",
+    // ── 中文否定 / 打断 ──
+    "不对", "不是", "不要", "不要用", "不要那样", "不要这样",
+    "不需要", "别这样", "别那样", "别这么做", "别用", "先别",
+    "别那么", "不是的", "不是这样", "这样做不对", "不对的",
+    // ── 中文错误识别 ──
+    "错了", "说错了", "弄错了", "搞错了", "错了重新",
+    // ── 中文变更方向 ──
+    "重新", "重新来", "换一种", "换个", "换种", "改回", "反悔",
+    "纠正", "取消", "撤销", "撤回", "推翻",
+    // ── 中文打断 ──
+    "停下", "停止",
+    // ── 英文通用 ──
+    "stop", "wrong", "cancel", "revert", "undo", "nevermind",
+    "scratch that", "that's wrong", "not that", "try again",
+    "hold on", "rethink", "ignore", "drop that", "forget it",
+    "that's not", "actually", "change approach", "different way",
 ];
+
+/// 判断用户消息是否包含纠正信号词。
+fn is_correction_signal(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    CORRECTION_KEYWORDS
+        .iter()
+        .any(|k| lower.contains(k))
+}
 
 /// 扫描工作目录下 `.dev-assistant-store/` 中的全部会话日志，提取经验候选。
 ///
@@ -163,11 +187,7 @@ fn extract_candidates(session_id: &str, events: &[crate::persist::SessionEvent])
                 }
             }
             UserMessage { content, timestamp, .. } => {
-                let lower = content.to_lowercase();
-                let is_correction = CORRECTION_KEYWORDS
-                    .iter()
-                    .any(|k| lower.contains(&k.to_lowercase()));
-                if is_correction && content.chars().count() <= 200 {
+                if is_correction_signal(content) && content.chars().count() <= 200 {
                     candidates.push(ExperienceCandidate {
                         kind: CandidateKind::UserCorrection,
                         session_id: session_id.to_string(),
@@ -307,6 +327,105 @@ mod tests {
             cands.iter().any(|c| c.kind == CandidateKind::UserCorrection),
             "含修正关键词的用户消息应产生纠正候选"
         );
+    }
+
+    #[test]
+    fn chinese_correction_keywords_are_detected() {
+        let chinese_signals = vec![
+            "撤销刚才的操作",
+            "取消这个请求",
+            "纠正一下，应该用另一种方式",
+            "反悔了，重新来",
+            "改回原来的方案",
+            "弄错了，不是这个",
+            "搞错了，换一个",
+            "不是这样，重新做",
+            "别那样，这样做不对",
+            "先别，停下",
+            "推翻之前的决策",
+            "撤回上一条消息",
+            "错了重新开始",
+            "不要那样做",
+            "这样做不对，换一种",
+        ];
+        for signal in chinese_signals {
+            let events = vec![crate::persist::SessionEvent::UserMessage {
+                timestamp: "2026-08-10T00:00:00Z".into(),
+                session_id: "s1".into(),
+                content: signal.to_string(),
+            }];
+            let cands = extract_candidates("s1", &events);
+            assert!(
+                cands.iter().any(|c| c.kind == CandidateKind::UserCorrection),
+                "中文纠正信号词应被识别: '{}'",
+                signal
+            );
+        }
+    }
+
+    #[test]
+    fn english_correction_keywords_are_detected() {
+        let english_signals = vec![
+            "cancel this request",
+            "revert that change",
+            "undo what you did",
+            "nevermind, let's try something else",
+            "scratch that, different approach",
+            "that's wrong, do it again",
+            "not that, use the other one",
+            "try again with a different tool",
+            "hold on, let me think",
+            "rethink the approach",
+            "ignore that, do this instead",
+            "drop that idea",
+            "forget it, start over",
+            "that's not what I meant",
+            "actually, use a different approach",
+            "change approach, this isn't working",
+            "different way please",
+        ];
+        for signal in english_signals {
+            let events = vec![crate::persist::SessionEvent::UserMessage {
+                timestamp: "2026-08-10T00:00:00Z".into(),
+                session_id: "s1".into(),
+                content: signal.to_string(),
+            }];
+            let cands = extract_candidates("s1", &events);
+            assert!(
+                cands.iter().any(|c| c.kind == CandidateKind::UserCorrection),
+                "英文纠正信号词应被识别: '{}'",
+                signal
+            );
+        }
+    }
+
+    #[test]
+    fn non_correction_message_is_not_flagged() {
+        let normal_messages = vec![
+            "你好，请帮我实现这个功能",
+            "请帮我写一段 Rust 代码",
+            "解释一下这个算法的原理",
+            "帮我分析一下这个项目的架构",
+            "请优化一下这段代码的性能",
+            "hello, please help me with this task",
+            "can you explain how this works",
+            "please implement this feature",
+            "write a function that does X",
+            "how does this algorithm work",
+        ];
+        for msg in &normal_messages {
+            let events = vec![crate::persist::SessionEvent::UserMessage {
+                timestamp: "2026-08-10T00:00:00Z".into(),
+                session_id: "s1".into(),
+                content: msg.to_string(),
+            }];
+            let cands = extract_candidates("s1", &events);
+            assert!(
+                cands.iter().all(|c| c.kind != CandidateKind::UserCorrection),
+                "正常对话不应被识别为纠正: '{}'",
+                msg
+            );
+        }
     }
 
     #[test]

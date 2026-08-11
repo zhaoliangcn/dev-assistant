@@ -400,6 +400,8 @@ mod tests {
                 author: None,
                 created: Some(updated.to_string()),
                 updated: Some(updated.to_string()),
+                query_count: 0,
+                last_query_at: None,
             },
         )
     }
@@ -577,6 +579,8 @@ mod tests {
                     author: None,
                     created: Some(updated.clone()),
                     updated: Some(updated),
+                    query_count: 0,
+                    last_query_at: None,
                 },
             );
         }

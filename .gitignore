@@ -39,3 +39,6 @@ id_dsa
 id_ecdsa
 id_ed25519
 *.local
+
+# ── ZCode 计划状态文件 ──
+.zcode/plans/

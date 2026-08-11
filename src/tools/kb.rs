@@ -94,6 +94,12 @@ pub struct KbIndexEntry {
     /// 更新时间
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated: Option<String>,
+    /// 被 kb_query 命中的次数（Dream 遗忘阶段用作健康分激励）
+    #[serde(default)]
+    pub query_count: u64,
+    /// 最近一次被 kb_query 命中的时间
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_query_at: Option<String>,
 }
 
 /// 查询结果条目（包含可选的正文内容）。
@@ -385,6 +391,24 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         include_archived,
     );
 
+    // 查询命中追踪：仅当存在关键词查询时记录（避免纯标签/类型浏览写盘）
+    if !query.is_empty() && !results.is_empty() {
+        let mut index = index; // 获取所有权以便修改
+        let now = Utc::now().to_rfc3339();
+        for result in &results {
+            if let Some(entry) = index.entries.get_mut(&result.id) {
+                entry.query_count = entry.query_count.saturating_add(1);
+                entry.last_query_at = Some(now.clone());
+            }
+        }
+        // 写回索引
+        index.updated = Utc::now().to_rfc3339();
+        let index_json = serde_json::to_string_pretty(&index).map_err(|e| {
+            AppError::Json(e)
+        })?;
+        let _ = fs::write(&index_path, &index_json);
+    }
+
     // 如果需要内容，加载每个条目的正文
     let mut results_with_content = Vec::new();
     for mut result in results {
@@ -502,7 +526,7 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
     // 解析 archived 字段（frontmatter 可写 archived: true，默认 false）
     let archived = fm.get("archived").map(|s| s.trim().eq_ignore_ascii_case("true")).unwrap_or(false);
 
-    let entry = KbIndexEntry {
+    let mut entry = KbIndexEntry {
         path: entry_path.to_string(),
         entry_type: fm.get("type").cloned().unwrap_or_else(|| "unknown".to_string()),
         title: fm.get("title").cloned().unwrap_or_else(|| id.clone()),
@@ -515,11 +539,17 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
         author: fm.get("author").cloned(),
         created: fm.get("created").cloned(),
         updated: Some(now.clone()),
+        query_count: 0,
+        last_query_at: None,
     };
 
     // 增量优化：若条目已存在且元数据完全一致（仅 updated 时间戳不同），
     // 跳过全量序列化与写盘，避免 KB 增长后每次 kb_store 都产生 O(n) IO。
     if let Some(existing) = index.entries.get(&id) {
+        // 查询统计不由 frontmatter 管理，从旧条目继承，避免每次 kb_store 覆盖为 0
+        entry.query_count = existing.query_count;
+        entry.last_query_at = existing.last_query_at.clone();
+
         let unchanged = existing.path == entry.path
             && existing.entry_type == entry.entry_type
             && existing.title == entry.title

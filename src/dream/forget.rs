@@ -135,8 +135,10 @@ pub fn run_forget(kb_root: &Path, dry_run: bool) -> Result<ForgetResult, AppErro
 
 /// 计算条目的健康分。
 ///
-/// 公式：`健康分 = 时效衰减 × 类型权重 + 状态加成`，结果夹在 `[0, 1.5]`。
+/// 公式：`健康分 = 时效衰减 × 类型权重 + 状态加成 + 查询激励`，结果夹在 `[0, 1.5]`。
 /// 时效衰减按 updated 距今天数指数衰减（半衰期 `RECENCY_HALF_LIFE_DAYS`）。
+/// 查询激励按历史命中次数对数增长 + 最近 30 天内被查询过的额外加成，
+/// 让高频被使用的条目即使久远也不易被遗忘。
 pub fn compute_health(entry: &KbIndexEntry, now: DateTime<Utc>) -> f64 {
     // 时效衰减：updated 距今天数，指数衰减
     let days = entry
@@ -150,8 +152,32 @@ pub fn compute_health(entry: &KbIndexEntry, now: DateTime<Utc>) -> f64 {
         .unwrap_or(0.0);
     let recency = 0.5f64.powf(days / RECENCY_HALF_LIFE_DAYS);
 
-    let health = recency * type_weight(&entry.entry_type) + status_bonus(&entry.status);
+    let health = recency * type_weight(&entry.entry_type)
+        + status_bonus(&entry.status)
+        + query_bonus(entry, now);
     health.clamp(0.0, 1.5)
+}
+
+/// 查询激励：按历史命中次数对数增长，最近 30 天内被查询过额外加成。
+///
+/// 效应：0 次查询 → 0；1 次 → 0.058；3 次 → 0.149；10 次 → 0.20（上限）；
+/// 最近 30 天内查询过额外 +0.08。总激励上限 0.30。
+fn query_bonus(entry: &KbIndexEntry, now: DateTime<Utc>) -> f64 {
+    let base = (1.0f64 + entry.query_count as f64).ln() * 0.05;
+    let recency = entry
+        .last_query_at
+        .as_deref()
+        .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+        .map(|dt| {
+            let days = (now - dt.with_timezone(&Utc)).num_days().max(0);
+            if days <= 30 {
+                0.08
+            } else {
+                0.0
+            }
+        })
+        .unwrap_or(0.0);
+    (base + recency).min(0.30)
 }
 
 /// 在 Markdown 的 frontmatter 中写入 `archived: true`（保留原字段）。
@@ -184,6 +210,8 @@ mod tests {
             author: None,
             created: Some(updated.clone()),
             updated: Some(updated),
+            query_count: 0,
+            last_query_at: None,
         }
     }
 
@@ -210,6 +238,104 @@ mod tests {
             "废弃条目即使类型权重高也应低分，got {}",
             health
         );
+    }
+
+    #[test]
+    fn frequently_queried_entry_has_boosted_health() {
+        // 高频查询（query_count=50）的旧条目健康分应显著高于无查询的同龄条目
+        let mut queried = entry("decision", "draft", 200);
+        queried.query_count = 50;
+        queried.last_query_at = Some(Utc::now().to_rfc3339());
+
+        let unqueried = entry("decision", "draft", 200);
+
+        let h_queried = compute_health(&queried, Utc::now());
+        let h_unqueried = compute_health(&unqueried, Utc::now());
+        assert!(
+            h_queried > h_unqueried + 0.15,
+            "高频查询条目的健康分应显著高于无查询条目：queried={}, unqueried={}",
+            h_queried,
+            h_unqueried
+        );
+    }
+
+    #[test]
+    fn recently_queried_old_entry_escapes_archive() {
+        // 很久未更新但最近被查询过的条目，健康分应高于归档阈值；
+        // 而同龄从未查询的条目应仍被归档（证明是查询激励挽救了它）。
+        let mut queried = entry("decision", "draft", 200);
+        queried.query_count = 3;
+        queried.last_query_at = Some((Utc::now() - chrono::Duration::days(1)).to_rfc3339());
+
+        let unqueried = entry("decision", "draft", 200);
+
+        let h_queried = compute_health(&queried, Utc::now());
+        let h_unqueried = compute_health(&unqueried, Utc::now());
+
+        assert!(
+            h_unqueried < ARCHIVE_THRESHOLD,
+            "同龄未查询条目应被归档：health={}",
+            h_unqueried
+        );
+        assert!(
+            h_queried >= ARCHIVE_THRESHOLD,
+            "最近被查询的旧条目健康分应高于归档阈值：health={}",
+            h_queried
+        );
+    }
+
+    #[test]
+    fn never_queried_entry_gets_no_bonus() {
+        // 从未被查询的条目，健康分等于原公式（零查询不产生额外激励）
+        let e = entry("issue", "draft", 400);
+        let health = compute_health(&e, Utc::now());
+        // 无查询激励，应仍低于归档阈值（与 old_draft_entry_has_low_health 一致）
+        assert!(
+            health < ARCHIVE_THRESHOLD,
+            "从未被查询的旧条目应低于归档阈值：health={}",
+            health
+        );
+    }
+
+    #[test]
+    fn query_bonus_scales_logarithmically() {
+        // 验证查询激励按对数增长、单调递增、不超过上限
+        let now = Utc::now();
+        let mut base = entry("decision", "accepted", 1);
+
+        let bonuses: Vec<f64> = [0u64, 1, 3, 10, 30, 100, 500]
+            .iter()
+            .map(|&q| {
+                base.query_count = q;
+                base.last_query_at = None;
+                query_bonus(&base, now)
+            })
+            .collect();
+
+        // 0 次查询 → 0
+        assert_eq!(bonuses[0], 0.0, "0 次查询的激励应为 0");
+
+        // 单调递增
+        for i in 1..bonuses.len() {
+            assert!(
+                bonuses[i] > bonuses[i - 1],
+                "查询激励应随查询次数递增：{} 次 {} ≤ {} 次 {}",
+                [0, 1, 3, 10, 30, 100, 500][i],
+                bonuses[i],
+                [0, 1, 3, 10, 30, 100, 500][i - 1],
+                bonuses[i - 1]
+            );
+        }
+
+        // 不超过上限 0.30
+        for (i, &b) in bonuses.iter().enumerate() {
+            assert!(
+                b <= 0.30 + 1e-10,
+                "查询激励不应超过 0.30：{} 次查询 → {}",
+                [0, 1, 3, 10, 30, 100, 500][i],
+                b
+            );
+        }
     }
 
     #[test]

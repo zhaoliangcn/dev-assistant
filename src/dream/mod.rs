@@ -356,6 +356,8 @@ mod tests {
             author: None,
             created: Some(updated.clone()),
             updated: Some(updated),
+            query_count: 0,
+            last_query_at: None,
         };
         let mut index = crate::tools::kb::KbIndex::default();
         index.entries.insert("OLD-001".to_string(), old);

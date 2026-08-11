@@ -1,6 +1,5 @@
 target/
 .DS_Store
-.env
 /skills/
 *.log
 
@@ -13,3 +12,30 @@ dev-assistant
 .kb/
 # ins-code AIGC 分析缓存
 .inscode/
+
+# ── 密钥 / 凭证 / 敏感配置 ──
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.cert
+*.crt
+*.cred
+*.credential
+*.token
+*.auth
+*.password
+*.secret
+*.private
+secrets/
+credentials/
+.aws/
+.gcp/
+.ssh/
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.local

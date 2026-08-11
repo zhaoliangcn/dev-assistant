@@ -34,8 +34,8 @@
 ### 安装
 
 ```bash
-git clone https://github.com/your-username/dev-assistant-rs.git
-cd dev-assistant-rs
+git clone https://github.com/zhaoliangcn/dev-assistant.git
+cd dev-assistant
 cargo build --release
 ```
 

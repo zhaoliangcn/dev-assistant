@@ -9,14 +9,33 @@
 //! 每条记录独立一行 JSON，可通过 `jq`、`grep` 或 [`SessionStore::read_events`] 查询。
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::utils::error::AppError;
+
+// ── flush 策略配置（通过环境变量可调） ──
+
+/// 批量 flush 的条数阈值，达到此数后触发一次 flush。
+fn flush_batch_size() -> u32 {
+    std::env::var("PERSIST_FLUSH_BATCH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10)
+}
+
+/// 批量 flush 的时间间隔（毫秒），超过此时间后触发一次 flush。
+fn flush_interval_ms() -> u64 {
+    std::env::var("PERSIST_FLUSH_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000)
+}
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -95,9 +114,14 @@ pub enum SessionEvent {
 /// store.record_tool_result("call_123", "read_file", true, "file content...");
 /// ```
 pub struct SessionStore {
-    file: File,
+    /// 带缓冲的写入器，减少每次事件落盘的 I/O 次数。
+    writer: BufWriter<File>,
     path: PathBuf,
     session_id: String,
+    /// 当前批次已写入但尚未 flush 的事件数。
+    pending_events: u32,
+    /// 最近一次 flush 的时间戳，用于定时 flush。
+    last_flush: Instant,
     /// 连续写入失败次数。达到阈值后升级日志级别。
     consecutive_write_failures: u32,
 }
@@ -142,9 +166,11 @@ impl SessionStore {
         })?;
 
         Ok(Self {
-            file,
+            writer: BufWriter::new(file),
             path,
             session_id: timestamp.to_string(),
+            pending_events: 0,
+            last_flush: Instant::now(),
             consecutive_write_failures: 0,
         })
     }
@@ -163,32 +189,85 @@ impl SessionStore {
 
     // ── 内部辅助 ──
 
-    /// 追加一条事件记录到文件。写入失败仅记录 warning，不向上传播。
-    fn append_event(&mut self, event: &SessionEvent) {
-        match serde_json::to_string(event) {
-            Ok(json) => {
-                let write_ok = writeln!(self.file, "{}", json).is_ok();
-                let flush_ok = self.file.flush().is_ok();
-                if write_ok && flush_ok {
-                    // 写入成功，重置连续失败计数
-                    self.consecutive_write_failures = 0;
-                    return;
-                }
-                // 写入或 flush 失败：累计连续失败次数，达到阈值后升级为 error 级别日志，
-                // 避免会话数据在磁盘满/权限变更等场景下静默丢失。
+    /// 按需 flush：当累积事件数达到阈值，或距离上次 flush 超过时间间隔时触发。
+    fn maybe_flush(&mut self) {
+        let batch_size = flush_batch_size();
+        let interval = Duration::from_millis(flush_interval_ms());
+
+        let should_flush = self.pending_events >= batch_size
+            || self.last_flush.elapsed() >= interval;
+
+        if should_flush {
+            let write_ok = self.writer.flush().is_ok();
+            if write_ok {
+                self.pending_events = 0;
+                self.last_flush = Instant::now();
+                self.consecutive_write_failures = 0;
+            } else {
                 self.consecutive_write_failures += 1;
                 if self.consecutive_write_failures >= 3 {
                     tracing::error!(
                         consecutive_failures = self.consecutive_write_failures,
                         file = %self.path.display(),
-                        "会话持久化连续写入失败（可能磁盘已满或权限变更），后续事件可能丢失"
+                        pending = self.pending_events,
+                        "会话持久化连续 flush 失败（可能磁盘已满或权限变更），后续事件可能丢失"
                     );
                 } else {
                     tracing::warn!(
-                        error = write_ok.then_some("flush").unwrap_or("write"),
                         file = %self.path.display(),
-                        "写入会话持久化事件失败"
+                        pending = self.pending_events,
+                        "会话持久化 flush 失败"
                     );
+                }
+            }
+        }
+    }
+
+    /// 将缓冲区中尚未落盘的事件立即写入文件。
+    ///
+    /// 应在会话结束、或任何跨模块读取该 JSONL 文件之前调用，
+    /// 以缩小崩溃丢失窗口并保证读后写可见性（如 Web 会话详情、
+    /// 背景 ingest 扫描等并发读者能看到完整数据）。
+    pub fn flush(&mut self) {
+        if self.pending_events == 0 {
+            return;
+        }
+        if self.writer.flush().is_ok() {
+            self.pending_events = 0;
+            self.last_flush = Instant::now();
+            self.consecutive_write_failures = 0;
+        } else {
+            self.consecutive_write_failures += 1;
+            tracing::warn!(
+                file = %self.path.display(),
+                pending = self.pending_events,
+                "会话持久化显式 flush 失败，缓冲事件可能丢失"
+            );
+        }
+    }
+
+    /// 追加一条事件记录到文件。写入失败仅记录 warning，不向上传播。
+    fn append_event(&mut self, event: &SessionEvent) {
+        match serde_json::to_string(event) {
+            Ok(json) => {
+                let write_ok = writeln!(self.writer, "{}", json).is_ok();
+                if write_ok {
+                    self.pending_events += 1;
+                    self.maybe_flush();
+                } else {
+                    self.consecutive_write_failures += 1;
+                    if self.consecutive_write_failures >= 3 {
+                        tracing::error!(
+                            consecutive_failures = self.consecutive_write_failures,
+                            file = %self.path.display(),
+                            "会话持久化连续写入失败（可能磁盘已满或权限变更），后续事件可能丢失"
+                        );
+                    } else {
+                        tracing::warn!(
+                            file = %self.path.display(),
+                            "写入会话持久化事件失败"
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -340,7 +419,7 @@ impl SessionStore {
 
 impl Drop for SessionStore {
     fn drop(&mut self) {
-        let _ = self.file.flush();
+        let _ = self.writer.flush();
     }
 }
 

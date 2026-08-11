@@ -204,6 +204,16 @@ impl Agent {
         }
     }
 
+    /// 将持久化存储缓冲区中的事件立即刷盘。
+    ///
+    /// 回合结束、会话结束或 exec 重启之前调用，保证 JSONL 文件中
+    /// 数据完整可见（并发读者包括 Web 会话详情与背景 ingest）。
+    pub fn flush_persistence(&mut self) {
+        if let Some(ref mut store) = self.session_store {
+            store.flush();
+        }
+    }
+
     /// 获取会话持久化存储的文件路径（用于按需从 JSONL 生成可读日志）。
     pub fn session_store_path(&self) -> Option<&std::path::Path> {
         self.session_store.as_ref().map(|s| s.path())

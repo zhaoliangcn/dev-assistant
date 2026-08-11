@@ -782,8 +782,13 @@ pub async fn process_user_message(
 
     // Handle restart request
     if result.restart_requested {
+        // exec 替换进程前先刷盘，避免缓冲区中的事件在 exec 时丢失
+        agent.flush_persistence();
         return handle_restart(agent, working_dir, restart_args, verbose);
     }
+
+    // 回合结束：刷盘，保证并发读者（Web 会话详情、背景 ingest）可见完整数据
+    agent.flush_persistence();
 
     Ok(ReplAction::Continue)
 }

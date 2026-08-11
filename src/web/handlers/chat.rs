@@ -165,9 +165,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                                 output.status_aborted();
                                 // 补发 done，让前端复位 busy 状态
                                 let _ = conn_manager.send_to(conn_id, ServerEvent::done(msg_id)).await;
+                                // 取消路径：把已记录的事件刷盘，保证会话详情/列表可见完整数据
+                                agent.flush_persistence();
                                 return;
                             }
                         };
+
+                        // 回合结束：立即刷盘，确保 Web 会话详情与背景 ingest 能读到完整回合
+                        agent.flush_persistence();
 
                         // 释放锁，避免在发送事件时持有
                         drop(session_guard);

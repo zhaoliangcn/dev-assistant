@@ -767,8 +767,14 @@ impl App {
 
         // 会话结束：按需从 SessionStore 的 JSONL 生成可读日志（统一持久化方案，
         // 不再由 SessionLogger 独立并行写入）。
-        if let Some(store_path) = self.agent.session_store_path() {
-            match crate::session::generate_readable_log(store_path) {
+        if let Some(store_path) = self
+            .agent
+            .session_store_path()
+            .map(|p| p.to_path_buf())
+        {
+            // 先刷盘，确保生成的可读日志包含全部事件（含最后一条助手消息）。
+            self.agent.flush_persistence();
+            match crate::session::generate_readable_log(&store_path) {
                 Ok(log) => {
                     let log_dir = working_dir.join(".dev-assistant-store").join("logs");
                     if let Err(e) = std::fs::create_dir_all(&log_dir) {

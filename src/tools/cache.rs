@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-// AtomicUsize, Ordering removed — not used after size field cleanup
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tracing::debug;
@@ -18,14 +18,14 @@ fn now_timestamp() -> Timestamp {
 /// 文件缓存条目
 #[derive(Debug, Clone)]
 struct CacheEntry {
-    content: String,
+    content: Arc<str>,
     mtime: Timestamp,
     created_at: Timestamp,
     accessed_at: Timestamp,
 }
 
 impl CacheEntry {
-    fn new(content: String, mtime: Timestamp) -> Self {
+    fn new(content: Arc<str>, mtime: Timestamp) -> Self {
         let now = now_timestamp();
         Self {
             content,
@@ -65,12 +65,23 @@ impl Default for CacheConfig {
 }
 
 /// 文件读取缓存（基于 mtime 失效）
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ReadCache {
     cache: Arc<RwLock<HashMap<PathBuf, CacheEntry>>>,
     config: CacheConfig,
-    hits: Arc<RwLock<usize>>,
-    misses: Arc<RwLock<usize>>,
+    hits: AtomicUsize,
+    misses: AtomicUsize,
+}
+
+impl Clone for ReadCache {
+    fn clone(&self) -> Self {
+        Self {
+            cache: Arc::clone(&self.cache),
+            config: self.config.clone(),
+            hits: AtomicUsize::new(self.hits.load(Ordering::Relaxed)),
+            misses: AtomicUsize::new(self.misses.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 #[allow(dead_code)] // sync methods used in tests; async methods used in production
@@ -79,8 +90,8 @@ impl ReadCache {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             config,
-            hits: Arc::new(RwLock::new(0)),
-            misses: Arc::new(RwLock::new(0)),
+            hits: AtomicUsize::new(0),
+            misses: AtomicUsize::new(0),
         }
     }
 
@@ -90,7 +101,7 @@ impl ReadCache {
     }
 
     /// 从缓存读取文件内容
-    /// 
+    ///
     /// 返回 Some(content) 表示命中缓存
     /// 返回 None 表示需要从磁盘读取
     ///
@@ -100,14 +111,10 @@ impl ReadCache {
     /// 2. 如果存在，释放读锁，再进行 IO 检查 mtime
     /// 3. 如果 IO 确认未修改，再获取写锁更新访问时间
     pub fn read(&self, path: &Path) -> Option<String> {
-        let Some((content, cached_mtime, expired)) = self.lookup(path) else {
-            *self.misses.write().unwrap() += 1;
+        let Some((content, cached_mtime)) = self.lookup(path) else {
+            self.misses.fetch_add(1, Ordering::Relaxed);
             return None;
         };
-        if expired {
-            self.evict(path, "Cache entry expired (TTL)");
-            return None;
-        }
         let current_mtime = std::fs::metadata(path)
             .ok()
             .and_then(|m| m.modified().ok())
@@ -116,20 +123,23 @@ impl ReadCache {
         self.handle_hit(path, content, cached_mtime, current_mtime)
     }
 
-    /// 查找缓存条目，返回 `(content, cached_mtime, expired)`；未命中返回 None。
+    /// 查找缓存条目，返回 (content, 缓存时的 mtime)；未命中返回 None。
     ///
-    /// 只持有读锁，不进行任何 IO。
-    fn lookup(&self, path: &Path) -> Option<(String, Timestamp, bool)> {
+    /// 只持有读锁，不进行任何 IO，且避免过早深拷贝。
+    /// content 与 mtime 在同一读锁内一次性取出，保证快照一致，
+    /// 避免与 `handle_hit` 二次加锁之间条目被替换导致 mtime 与内容不匹配。
+    fn lookup(&self, path: &Path) -> Option<(Arc<str>, Timestamp)> {
         if !self.config.enabled {
             return None;
         }
         let path_buf = path.to_path_buf();
         let cache = self.cache.read().unwrap();
-        cache.get(&path_buf).map(|entry| {
-            let now = now_timestamp();
-            let expired = (now - entry.created_at) > self.config.ttl_seconds;
-            (entry.content.clone(), entry.mtime, expired)
-        })
+        let entry = cache.get(&path_buf)?;
+        let now = now_timestamp();
+        if (now - entry.created_at) > self.config.ttl_seconds {
+            return None;
+        }
+        Some((entry.content.clone(), entry.mtime))
     }
 
     /// 缓存命中后的 mtime 校验与状态更新（同步/异步共用）。
@@ -140,7 +150,7 @@ impl ReadCache {
     fn handle_hit(
         &self,
         path: &Path,
-        content: String,
+        content: Arc<str>,
         cached_mtime: Timestamp,
         current_mtime: Option<Timestamp>,
     ) -> Option<String> {
@@ -149,7 +159,7 @@ impl ReadCache {
             Some(current) if current > cached_mtime => {
                 let mut cache = self.cache.write().unwrap();
                 cache.remove(&path_buf);
-                *self.misses.write().unwrap() += 1;
+                self.misses.fetch_add(1, Ordering::Relaxed);
                 debug!(path = ?path, "Cache entry invalidated (file modified)");
                 None
             }
@@ -160,14 +170,14 @@ impl ReadCache {
                         entry.touch();
                     }
                 }
-                *self.hits.write().unwrap() += 1;
+                self.hits.fetch_add(1, Ordering::Relaxed);
                 debug!(path = ?path, "Cache hit");
-                Some(content)
+                Some(content.as_ref().to_string())
             }
             None => {
                 let mut cache = self.cache.write().unwrap();
                 cache.remove(&path_buf);
-                *self.misses.write().unwrap() += 1;
+                self.misses.fetch_add(1, Ordering::Relaxed);
                 debug!(path = ?path, "Cache entry invalidated (file unavailable)");
                 None
             }
@@ -179,25 +189,21 @@ impl ReadCache {
         let path_buf = path.to_path_buf();
         let mut cache = self.cache.write().unwrap();
         cache.remove(&path_buf);
-        *self.misses.write().unwrap() += 1;
+        self.misses.fetch_add(1, Ordering::Relaxed);
         debug!(path = ?path, "{}", reason);
     }
 
     /// 异步从缓存读取文件内容
-    /// 
+    ///
     /// 返回 Some(content) 表示命中缓存
     /// 返回 None 表示需要从磁盘读取
     ///
     /// 与 [`Self::read`] 共用 `lookup` / `handle_hit`，仅 metadata 获取使用异步 IO。
     pub async fn read_async(&self, path: &Path) -> Option<String> {
-        let Some((content, cached_mtime, expired)) = self.lookup(path) else {
-            *self.misses.write().unwrap() += 1;
+        let Some((content, cached_mtime)) = self.lookup(path) else {
+            self.misses.fetch_add(1, Ordering::Relaxed);
             return None;
         };
-        if expired {
-            self.evict(path, "Cache entry expired (TTL)");
-            return None;
-        }
         let current_mtime = tokio::fs::metadata(path)
             .await
             .ok()
@@ -229,7 +235,10 @@ impl ReadCache {
             self.cleanup(&mut cache);
         }
 
-        cache.insert(path_buf, CacheEntry::new(content.to_string(), mtime));
+        cache.insert(
+            path_buf,
+            CacheEntry::new(Arc::from(content.to_owned().into_boxed_str()), mtime),
+        );
         debug!(path = ?path, "Cache written");
     }
 
@@ -280,11 +289,11 @@ impl ReadCache {
     pub fn stats(&self) -> CacheStats {
         CacheStats {
             entries: self.cache.read().unwrap().len(),
-            hits: *self.hits.read().unwrap(),
-            misses: *self.misses.read().unwrap(),
+            hits: self.hits.load(Ordering::Relaxed),
+            misses: self.misses.load(Ordering::Relaxed),
             hit_rate: {
-                let hits = *self.hits.read().unwrap();
-                let misses = *self.misses.read().unwrap();
+                let hits = self.hits.load(Ordering::Relaxed);
+                let misses = self.misses.load(Ordering::Relaxed);
                 let total = hits + misses;
                 if total == 0 {
                     0.0

@@ -45,7 +45,16 @@ fn run_hook_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
     };
     let name_filter = args.arguments["name"].as_str();
 
-    let hook_manager = crate::hooks::HookManager::load(&context.working_dir, true);
+    // 优先复用注入的共享 HookManager（由 App 组装，尊重 --no-hooks 与已加载配置）；
+    // 仅当上下文未注入时（如非 Agent 路径的独立调用）才回退到现场加载。
+    let owned_manager;
+    let hook_manager: &crate::hooks::HookManager = match context.hooks.as_ref() {
+        Some(m) => m,
+        None => {
+            owned_manager = crate::hooks::HookManager::load(&context.working_dir, true);
+            &owned_manager
+        }
+    };
     let output = hook_manager.execute_event(event, name_filter);
 
     if output.is_empty() {

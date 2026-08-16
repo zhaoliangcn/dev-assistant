@@ -42,6 +42,9 @@ pub struct ToolRegistry {
     pub retry_manager: retry::RetryManager,
     pub resources: Option<crate::tools::resources::SharedResources>,
     pub cache: Arc<ReadCache>,
+    /// 可选的共享 Hook 管理器，注入到 `ToolContext` 供 `run_hook` 等工具复用，
+    /// 避免 `run_hook` 自行重新加载配置或绕过 `--no-hooks`。
+    hooks: Option<Arc<crate::hooks::HookManager>>,
     schema_tokens: AtomicUsize,
 }
 
@@ -74,6 +77,8 @@ pub struct ToolContext {
     pub resources: Option<crate::tools::resources::SharedResources>,
     /// 可选的文件读取缓存，用于避免重复读取同一文件
     pub cache: Option<Arc<ReadCache>>,
+    /// 可选的共享 Hook 管理器：`run_hook` 等工具复用它，尊重 `--no-hooks` 与已加载配置。
+    pub hooks: Option<Arc<crate::hooks::HookManager>>,
 }
 
 /// 错误类别，用于区分可重试和不可重试的错误
@@ -133,12 +138,18 @@ impl ToolRegistry {
             retry_manager: retry::RetryManager::default(),
             resources: None,
             cache: Arc::new(ReadCache::default()),
+            hooks: None,
             schema_tokens: AtomicUsize::new(0),
         };
         registry.register_builtin_tools();
         registry
     }
-    
+
+    /// 注入共享 Hook 管理器，使其在工具执行上下文中可用（如 `run_hook` 工具）。
+    pub fn set_hooks(&mut self, hooks: Option<Arc<crate::hooks::HookManager>>) {
+        self.hooks = hooks;
+    }
+
     pub fn new_with_resources(
         working_dir: PathBuf, 
         security: Arc<SecurityPolicy>,
@@ -153,6 +164,7 @@ impl ToolRegistry {
             retry_manager: retry::RetryManager::default(),
             resources: Some(resources),
             cache: Arc::new(ReadCache::default()),
+            hooks: None,
             schema_tokens: AtomicUsize::new(0),
         };
         registry.register_builtin_tools();
@@ -334,6 +346,7 @@ impl ToolRegistry {
             retry_manager: self.retry_manager.clone(),
             resources: self.resources.clone(),
             cache: self.cache.clone(),
+            hooks: self.hooks.clone(),
             schema_tokens: AtomicUsize::new(0),
         };
         // 子 Agent 拥有文件工具、KB 工具、预算工具和 finish
@@ -365,6 +378,7 @@ impl ToolRegistry {
             retry_manager: self.retry_manager.clone(),
             resources: self.resources.clone(),
             cache: self.cache.clone(),
+            hooks: self.hooks.clone(),
             schema_tokens: AtomicUsize::new(0),
         };
 
@@ -413,6 +427,7 @@ impl ToolRegistry {
             working_dir: self.working_dir.clone(),
             resources: self.resources.clone(),
             cache: Some(self.cache.clone()),
+            hooks: self.hooks.clone(),
         };
 
         // 使用重试管理器执行工具，只对可重试错误进行重试

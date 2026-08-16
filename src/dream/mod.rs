@@ -45,15 +45,6 @@ impl DreamConfig {
             dry_run: false,
         }
     }
-
-    /// 带 LLM 精炼的配置（用于 `/dream` 交互命令）。
-    pub fn with_llm(working_dir: PathBuf, budget_tokens: usize) -> Self {
-        Self {
-            working_dir,
-            llm_budget_tokens: budget_tokens,
-            dry_run: false,
-        }
-    }
 }
 
 /// 单轮 Dream 的执行结果汇总。
@@ -76,11 +67,6 @@ pub struct DreamResult {
 }
 
 impl DreamResult {
-    /// 各阶段的动作总数（不含采集）。
-    pub fn total_actions(&self) -> usize {
-        self.consolidated + self.deduplicated + self.archived
-    }
-
     /// 格式化为多行摘要文本（用于 REPL 输出）。
     pub fn summarize(&self, dry_run: bool) -> String {
         let mode = if dry_run { "预演" } else { "正式" };

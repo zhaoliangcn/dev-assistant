@@ -80,15 +80,25 @@ fn normalize_title(title: &str) -> String {
 }
 
 /// 字符 n-gram（bigram）集合。
+/// 提取标题的字符 bigram 集合（**去重**）。
+///
+/// 去重是正确性的关键：若保留重复 bigram，倒排索引会把同一索引在同一桶内
+/// 压多次、生成 `(i,i)` 自配对；且 `similarity_from_sets` 的多重集计数会放大
+/// Jaccard（如 `测试测试` vs `测试A` 算成 0.67 而真实为 0.33）。
 fn char_bigrams(s: &str) -> Vec<String> {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() < 2 {
         return vec![s.to_string()];
     }
-    chars
-        .windows(2)
-        .map(|w| w.iter().collect::<String>())
-        .collect()
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for w in chars.windows(2) {
+        let bg: String = w.iter().collect();
+        if seen.insert(bg.clone()) {
+            out.push(bg);
+        }
+    }
+    out
 }
 
 /// 从预计算的归一化标题与 bigram 集合计算 n-gram Jaccard 相似度。
@@ -113,6 +123,7 @@ fn similarity_from_sets(ga: &[String], gb: &[String], na: &str, nb: &str) -> f64
 ///
 /// 对中文（无空格分词）用字符 bigram，对英文用归一化后的字符 bigram
 /// 已足够作为初筛信号；标题越短，bigram 交集越能反映重复。
+#[allow(dead_code)] // 生产路径走 similarity_from_sets；保留为公开工具 + 测试基准
 pub fn title_similarity(a: &str, b: &str) -> f64 {
     let na = normalize_title(a);
     let nb = normalize_title(b);
@@ -171,6 +182,11 @@ pub fn find_candidate_pairs(index: &KbIndex, threshold: f64) -> Vec<CandidatePai
         for (k, &i) in bucket.iter().enumerate() {
             for &j in bucket.iter().skip(k + 1) {
                 let (a, b) = if i < j { (i, j) } else { (j, i) };
+                // 兜底：跳过同一索引的自配对（去重后理论上不会出现，
+                // 但防御未来 char_bigrams 或 postings 变更引入的回归）。
+                if a == b {
+                    continue;
+                }
                 if !seen.insert((a, b)) {
                     continue;
                 }
@@ -707,5 +723,51 @@ let mut rng = rand::rng();
         let pairs = find_candidate_pairs(&index, 0.0);
         assert_eq!(pairs.len(), 1, "共享 bigram 的标题应产生候选对");
         assert_eq!(pairs[0].similarity, 0.5, "Jaccard(['ab'], ['ab','bc']) = 1/2 = 0.5");
+    }
+
+    #[test]
+    fn repeated_bigrams_dedup_no_self_pair_and_correct_jaccard() {
+        // 回归测试：char_bigrams 去重前，"测试测试"（bigram ["测试","试测","测试"]）
+        // 会在 postings 桶内把同一索引压两次，生成 (A,A) 自配对，且与 "测试A" 的
+        // 多重集 Jaccard 被放大为 2/3。去重后应为真实集合 Jaccard 1/3，且无自配对。
+        let mut index = KbIndex::default();
+        index.entries.insert("A".into(), entry("A", "测试测试", "2026-08-01T00:00:00Z").1);
+        index.entries.insert("B".into(), entry("B", "测试A", "2026-08-01T00:00:00Z").1);
+        index.entries.insert("C".into(), entry("C", "完全不同", "2026-08-01T00:00:00Z").1);
+
+        let pairs = find_candidate_pairs(&index, 0.0);
+        // 无自配对
+        for p in &pairs {
+            assert_ne!(p.id_a, p.id_b, "不应产生自配对: {:?}", p);
+        }
+        // A 与 B 的真实集合 Jaccard = |{测试}| / |{测试,试测,试A}| = 1/3
+        let ab = pairs
+            .iter()
+            .find(|p| (p.id_a == "A" && p.id_b == "B") || (p.id_a == "B" && p.id_b == "A"))
+            .expect("A/B 共享 bigram 应产生候选对");
+        assert!(
+            (ab.similarity - 1.0 / 3.0).abs() < 1e-9,
+            "Jaccard 应为 1/3≈0.333，实际 {}",
+            ab.similarity
+        );
+        // C 与 A/B 无共享 bigram，不应出现
+        assert!(
+            pairs.iter().all(|p| p.id_a != "C" && p.id_b != "C"),
+            "无共享 bigram 的 C 不应出现在候选对中: {:?}",
+            pairs
+        );
+    }
+
+    #[test]
+    fn title_similarity_known_answers() {
+        // 钉住 title_similarity 的正确集合 Jaccard 值，防止未来回归到多重集计数。
+        assert!(
+            (title_similarity("测试测试", "测试A") - 1.0 / 3.0).abs() < 1e-9,
+            "测试测试 vs 测试A 应为 1/3"
+        );
+        assert_eq!(title_similarity("ab", "abc"), 0.5);
+        assert_eq!(title_similarity("a", "bc"), 0.0);
+        // 完全相同 → 1.0
+        assert_eq!(title_similarity("缓存优化", "缓存优化"), 1.0);
     }
 }

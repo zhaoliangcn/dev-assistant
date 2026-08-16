@@ -134,8 +134,12 @@ impl Agent {
     }
 
     /// 注入 Hook 管理器（由 App 组装时调用），用于工具执行前后的 pre/post-tool hooks。
+    ///
+    /// 同时注入到 `ToolRegistry`，使 `run_hook` 等工具复用同一实例，
+    /// 而非自行重新加载配置或绕过 `--no-hooks`。
     pub fn set_hooks(&mut self, hooks: Option<Arc<crate::hooks::HookManager>>) {
-        self.hooks = hooks;
+        self.hooks = hooks.clone();
+        self.tools.set_hooks(hooks);
     }
 
     /// 获取所有工具的 schemas（同步工具 + 异步工具）

@@ -143,7 +143,6 @@ fn extract_candidates(session_id: &str, events: &[crate::persist::SessionEvent])
 
     // 统计工具失败：tool_name → 连续失败次数
     let mut fail_counts: Vec<(String, usize)> = Vec::new();
-    let mut last_failure_ts: Option<String> = None;
 
     for event in events {
         use crate::persist::SessionEvent::*;
@@ -156,7 +155,6 @@ fn extract_candidates(session_id: &str, events: &[crate::persist::SessionEvent])
                     } else {
                         fail_counts.push((name.clone(), 1));
                     }
-                    last_failure_ts = Some(timestamp.clone());
 
                     // 达到阈值 → 失败教训候选（先克隆工具名，避免 retain 借用冲突）
                     let tool_clone = name.clone();
@@ -174,7 +172,8 @@ fn extract_candidates(session_id: &str, events: &[crate::persist::SessionEvent])
                                 "工具 `{}` 在会话 `{}` 中连续失败 {} 次，可能需要检查参数或改用其他方案。",
                                 tool_clone, session_id, count
                             ),
-                            timestamp: last_failure_ts.clone().unwrap_or_default(),
+                            // 此时 timestamp 即触发阈值的最后一次失败时间
+                            timestamp: timestamp.clone(),
                             tool_name: Some(tool_clone.clone()),
                             score: 0.8,
                         });

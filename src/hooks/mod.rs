@@ -205,17 +205,19 @@ impl HookManager {
         })
     }
 
-    /// pre-tool 检查：任一 hook 成功且输出以 `DENY` 开头则拒绝执行工具。
+    /// pre-tool 检查：任一 hook 成功且输出以 `DENY`（大小写不敏感）开头则拒绝执行工具。
     ///
-    /// - `DENY` 后的文本作为拒绝原因
+    /// - `DENY` 后的文本作为拒绝原因（保留原始大小写）
     /// - hook 失败（非零退出/超时）视为放行，避免 hook 故障阻塞工具执行
     pub fn run_pre_tool(&self, tool_name: &str, tool_args: &serde_json::Value) -> PreToolVerdict {
         let outcomes = self.execute_tool_hooks(HookEvent::PreTool, tool_name, tool_args);
         for o in &outcomes {
             if o.success {
                 let trimmed = o.detail.trim();
-                if let Some(rest) = trimmed.strip_prefix("DENY") {
-                    let reason = rest.trim();
+                // 大小写不敏感匹配 "DENY" 前缀。"DENY" 为 4 个 ASCII 字节，
+                // 一旦前缀匹配，第 4 字节必为字符边界，trimmed[4..] 可安全切片。
+                if trimmed.len() >= 4 && trimmed[..4].eq_ignore_ascii_case("DENY") {
+                    let reason = trimmed[4..].trim();
                     return PreToolVerdict::Deny(if reason.is_empty() {
                         "denied by pre-tool hook".to_string()
                     } else {
@@ -227,7 +229,10 @@ impl HookManager {
         PreToolVerdict::Allow
     }
 
-    /// post-tool 通知：执行工具后运行，返回格式化输出（供日志记录，不注入上下文）。
+    /// post-tool 通知：执行工具后运行，返回格式化输出（供调用方按需记录，不注入上下文）。
+    ///
+    /// 格式化输出同时写入 `debug` 日志，避免此前"计算后即丢弃"的浪费——
+    /// post-tool hook 的 stdout 至少留有日志踪迹。
     pub fn run_post_tool(
         &self,
         tool_name: &str,
@@ -238,8 +243,15 @@ impl HookManager {
         if outcomes.is_empty() {
             return String::new();
         }
-        debug!(tool = tool_name, success, count = outcomes.len(), "Post-tool hooks executed");
-        format_hook_output(&outcomes)
+        let formatted = format_hook_output(&outcomes);
+        debug!(
+            tool = tool_name,
+            success,
+            count = outcomes.len(),
+            output = %formatted,
+            "Post-tool hooks executed"
+        );
+        formatted
     }
 
     /// 并行执行一组 hooks：每个 hook 一个 scoped 线程，join 按配置顺序收集结果。

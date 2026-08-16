@@ -366,6 +366,17 @@ impl SessionStore {
     /// 从指定路径的 JSONL 文件读取所有事件。
     ///
     /// 可用于按会话离线查询历史数据。
+    ///
+    /// # 刷盘可见性不变式
+    ///
+    /// 本函数按路径直接读取磁盘文件，**只能看到已 flush 的事件**。
+    /// `SessionStore` 使用 `BufWriter` 批量缓冲（见 `maybe_flush`），
+    /// 缓冲中的事件不会出现在文件里。若读取的是**仍活跃**的 store 路径
+    /// （同一 `SessionStore` 实例正在写入），调用方必须先
+    /// [`flush`](Self::flush)（或经 [`Agent::flush_persistence`]）再读，
+    /// 否则可能读到陈旧、不完整的数据。
+    ///
+    /// 已关闭/已 `Drop` 的 store 其 `Drop` 会自动 flush，读取其路径无需额外操作。
     #[allow(dead_code)]
     pub fn read_events(path: &Path) -> Result<Vec<SessionEvent>, AppError> {
         let file = File::open(path).map_err(AppError::Io)?;

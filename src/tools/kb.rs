@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -95,11 +95,87 @@ pub struct KbIndexEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated: Option<String>,
     /// 被 kb_query 命中的次数（Dream 遗忘阶段用作健康分激励）
+    ///
+    /// **注意**：自查询统计 sidecar 上线后，此字段的真相源已迁至
+    /// `.kb/query-stats.json`（见 [`load_query_stats`]）。index.json 中的该值
+    /// 不再被 `kb_query`/`kb_store` 维护，仅作历史字段保留；遗忘阶段会从
+    /// sidecar 注水后再用于 `compute_health`。
     #[serde(default)]
     pub query_count: u64,
     /// 最近一次被 kb_query 命中的时间
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_query_at: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// 查询统计 sidecar
+// ---------------------------------------------------------------------------
+
+/// 单个 KB 条目的查询命中统计，独立存放在 `.kb/query-stats.json`。
+///
+/// 与 index.json 分离的目的：`kb_query` 高频调用时只重写这个小文件，
+/// 而非每次都整体序列化整个 index.json（O(n)）。遗忘阶段读取本 sidecar
+/// 注水到 `KbIndexEntry` 后再计算健康分。
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+pub(crate) struct QueryStats {
+    /// 被 kb_query 命中的次数
+    #[serde(default)]
+    pub query_count: u64,
+    /// 最近一次被命中的时间
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_query_at: Option<String>,
+}
+
+/// 查询统计 sidecar 文件路径：`.kb/query-stats.json`。
+pub(crate) fn query_stats_path(kb_root: &Path) -> PathBuf {
+    kb_root.join("query-stats.json")
+}
+
+/// 加载查询统计 sidecar。
+///
+/// sidecar 不存在或损坏时，从 `baseline`（index.json 的条目）一次性迁移现有
+/// `query_count`/`last_query_at`，并尽力写回 sidecar。迁移后 sidecar 即为查询
+/// 统计的唯一真相源，index.json 中的对应字段不再被维护。
+pub(crate) fn load_query_stats(kb_root: &Path, baseline: &KbIndex) -> HashMap<String, QueryStats> {
+    let path = query_stats_path(kb_root);
+    match fs::read_to_string(&path) {
+        Ok(content) if !content.trim().is_empty() => {
+            match serde_json::from_str::<HashMap<String, QueryStats>>(&content) {
+                Ok(stats) => return stats,
+                Err(e) => debug!(path = %path.display(), error = %e, "query-stats sidecar 解析失败，从索引迁移重建"),
+            }
+        }
+        Ok(_) => debug!(path = %path.display(), "query-stats sidecar 为空，从索引迁移重建"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => debug!(path = %path.display(), error = %e, "读取 query-stats sidecar 失败，从索引迁移重建"),
+    }
+
+    // 迁移：从 baseline 拷贝非零统计（避免无意义写入空映射）
+    let mut stats: HashMap<String, QueryStats> = HashMap::new();
+    for (id, e) in &baseline.entries {
+        if e.query_count > 0 || e.last_query_at.is_some() {
+            stats.insert(id.clone(), QueryStats {
+                query_count: e.query_count,
+                last_query_at: e.last_query_at.clone(),
+            });
+        }
+    }
+    if let Err(e) = save_query_stats(kb_root, &stats) {
+        debug!(error = %e, "迁移查询统计 sidecar 写入失败，下次将再次尝试迁移");
+    }
+    stats
+}
+
+/// 写回查询统计 sidecar。
+pub(crate) fn save_query_stats(
+    kb_root: &Path,
+    stats: &HashMap<String, QueryStats>,
+) -> Result<(), AppError> {
+    let path = query_stats_path(kb_root);
+    let json = serde_json::to_string_pretty(stats).map_err(AppError::Json)?;
+    fs::write(&path, json).map_err(|e| {
+        AppError::Io(std::io::Error::other(format!("写入 query-stats sidecar 失败: {}", e)))
+    })
 }
 
 /// 查询结果条目（包含可选的正文内容）。
@@ -391,22 +467,20 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         include_archived,
     );
 
-    // 查询命中追踪：仅当存在关键词查询时记录（避免纯标签/类型浏览写盘）
+    // 查询命中追踪：仅当存在关键词查询时记录（避免纯标签/类型浏览写盘）。
+    // 统计写入独立 sidecar（query-stats.json），避免每次 kb_query 都整体
+    // 重写 index.json（KB 增长后 O(n) IO）。写入失败仅记日志，不影响查询结果。
     if !query.is_empty() && !results.is_empty() {
-        let mut index = index; // 获取所有权以便修改
+        let mut stats = load_query_stats(&kb_root, &index);
         let now = Utc::now().to_rfc3339();
         for result in &results {
-            if let Some(entry) = index.entries.get_mut(&result.id) {
-                entry.query_count = entry.query_count.saturating_add(1);
-                entry.last_query_at = Some(now.clone());
-            }
+            let s = stats.entry(result.id.clone()).or_default();
+            s.query_count = s.query_count.saturating_add(1);
+            s.last_query_at = Some(now.clone());
         }
-        // 写回索引
-        index.updated = Utc::now().to_rfc3339();
-        let index_json = serde_json::to_string_pretty(&index).map_err(|e| {
-            AppError::Json(e)
-        })?;
-        let _ = fs::write(&index_path, &index_json);
+        if let Err(e) = save_query_stats(&kb_root, &stats) {
+            debug!(error = %e, "写入查询统计 sidecar 失败，本次命中未持久化");
+        }
     }
 
     // 如果需要内容，加载每个条目的正文
@@ -526,7 +600,7 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
     // 解析 archived 字段（frontmatter 可写 archived: true，默认 false）
     let archived = fm.get("archived").map(|s| s.trim().eq_ignore_ascii_case("true")).unwrap_or(false);
 
-    let mut entry = KbIndexEntry {
+    let entry = KbIndexEntry {
         path: entry_path.to_string(),
         entry_type: fm.get("type").cloned().unwrap_or_else(|| "unknown".to_string()),
         title: fm.get("title").cloned().unwrap_or_else(|| id.clone()),
@@ -546,10 +620,8 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
     // 增量优化：若条目已存在且元数据完全一致（仅 updated 时间戳不同），
     // 跳过全量序列化与写盘，避免 KB 增长后每次 kb_store 都产生 O(n) IO。
     if let Some(existing) = index.entries.get(&id) {
-        // 查询统计不由 frontmatter 管理，从旧条目继承，避免每次 kb_store 覆盖为 0
-        entry.query_count = existing.query_count;
-        entry.last_query_at = existing.last_query_at.clone();
-
+        // 查询统计由 query-stats.json sidecar 管理，索引不再继承/维护，
+        // 否则会与 sidecar 形成双真相源。
         let unchanged = existing.path == entry.path
             && existing.entry_type == entry.entry_type
             && existing.title == entry.title
@@ -822,6 +894,7 @@ mod tests {
             working_dir: working_dir.to_path_buf(),
             resources: None,
             cache: None,
+            hooks: None,
         }
     }
 

@@ -36,6 +36,7 @@ pub struct DreamReport {
 
 impl DreamReport {
     /// 记录一条动作明细。
+    #[allow(dead_code)] // 生产路径直接 push details；保留为公开 builder + 测试用
     pub fn add_detail(&mut self, detail: impl Into<String>) {
         self.details.push(detail.into());
     }

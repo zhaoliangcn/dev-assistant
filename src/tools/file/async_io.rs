@@ -61,7 +61,7 @@ pub async fn read_file_content(path: &Path) -> Result<String, std::io::Error> {
         ));
     }
 
-    let mut file = open_file_read(path).await?;
+    let file = open_file_read(path).await?;
     let mut content = String::new();
     use tokio::io::AsyncReadExt;
     // 兜底防护：metadata 与读取之间文件可能被替换/增长，超限即报错而非截断。

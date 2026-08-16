@@ -89,11 +89,23 @@ pub fn run_forget(kb_root: &Path, dry_run: bool) -> Result<ForgetResult, AppErro
     let now = Utc::now();
     let mut actions = Vec::new();
 
+    // 查询统计从 sidecar 注水：index.json 不再维护 query_count/last_query_at，
+    // 遗忘阶段需从 query-stats.json 取回真实命中数据后再计算健康分。
+    let query_stats = crate::tools::kb::load_query_stats(kb_root, &index);
+
     for (id, entry) in index.entries.iter() {
         if entry.archived {
             continue; // 已归档的跳过
         }
-        let health = compute_health(entry, now);
+        // 注水后计算健康分（不改动写回 index.json 的 entry，避免双真相源）
+        let health = {
+            let mut e = entry.clone();
+            if let Some(s) = query_stats.get(id) {
+                e.query_count = s.query_count;
+                e.last_query_at = s.last_query_at.clone();
+            }
+            compute_health(&e, now)
+        };
         if health < ARCHIVE_THRESHOLD {
             actions.push(ArchiveAction {
                 id: id.clone(),

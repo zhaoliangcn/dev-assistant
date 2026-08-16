@@ -26,6 +26,8 @@ pub struct ToolContext {
     pub cache: Option<Arc<ReadCache>>,
     #[allow(dead_code)] // reserved for future resource injection
     pub resources: Option<crate::tools::resources::SharedResources>,
+    #[allow(dead_code)] // reserved for future hook injection (sync tools path)
+    pub hooks: Option<Arc<crate::hooks::HookManager>>,
 }
 
 /// 工具结果（重新导出）
@@ -227,6 +229,7 @@ impl AsyncToolRegistry {
             working_dir: self.working_dir.clone(),
             cache: Some(self.cache.clone()),
             resources: None,
+            hooks: None,
         };
 
         let result = (tool.handler)(args, context).await;

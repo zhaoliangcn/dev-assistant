@@ -65,23 +65,15 @@ impl Default for CacheConfig {
 }
 
 /// 文件读取缓存（基于 mtime 失效）
+///
+/// 始终以 `Arc<ReadCache>` 共享，故未实现 `Clone`——若直接克隆会产生
+/// 独立的命中/未命中计数器，与共享的缓存条目脱节，导致统计失真。
 #[derive(Debug)]
 pub struct ReadCache {
     cache: Arc<RwLock<HashMap<PathBuf, CacheEntry>>>,
     config: CacheConfig,
     hits: AtomicUsize,
     misses: AtomicUsize,
-}
-
-impl Clone for ReadCache {
-    fn clone(&self) -> Self {
-        Self {
-            cache: Arc::clone(&self.cache),
-            config: self.config.clone(),
-            hits: AtomicUsize::new(self.hits.load(Ordering::Relaxed)),
-            misses: AtomicUsize::new(self.misses.load(Ordering::Relaxed)),
-        }
-    }
 }
 
 #[allow(dead_code)] // sync methods used in tests; async methods used in production
@@ -93,11 +85,6 @@ impl ReadCache {
             hits: AtomicUsize::new(0),
             misses: AtomicUsize::new(0),
         }
-    }
-
-    /// 创建默认配置的缓存
-    pub fn default() -> Self {
-        Self::new(CacheConfig::default())
     }
 
     /// 从缓存读取文件内容
@@ -182,15 +169,6 @@ impl ReadCache {
                 None
             }
         }
-    }
-
-    /// 移除指定路径的缓存并累计一次 miss（同步/异步共用）。
-    fn evict(&self, path: &Path, reason: &str) {
-        let path_buf = path.to_path_buf();
-        let mut cache = self.cache.write().unwrap();
-        cache.remove(&path_buf);
-        self.misses.fetch_add(1, Ordering::Relaxed);
-        debug!(path = ?path, "{}", reason);
     }
 
     /// 异步从缓存读取文件内容
@@ -361,7 +339,7 @@ impl std::fmt::Display for CacheStats {
 
 impl Default for ReadCache {
     fn default() -> Self {
-        Self::default()
+        Self::new(CacheConfig::default())
     }
 }
 

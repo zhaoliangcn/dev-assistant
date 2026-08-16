@@ -276,6 +276,23 @@ impl Agent {
         if let Some(ref mut store) = self.session_store {
             store.record_user_message(&user_message);
         }
+
+        // user-input hooks：仅顶层会话触发（子代理 depth>0 跳过）。
+        // inject-only —— 输出作为该轮 System 消息注入，供模型获取每轮上下文；
+        // 不否决、不改写用户输入。每轮 top-level 用户消息触发一次（非每 LLM 迭代）。
+        if self.depth == 0 {
+            if let Some(ref hooks) = self.hooks {
+                let ui_output = hooks.execute_user_input(user_message.as_str());
+                if !ui_output.is_empty() {
+                    self.context.add_message(
+                        crate::agent::context::Role::System,
+                        ui_output,
+                        None,
+                        None,
+                    );
+                }
+            }
+        }
     }
 
     /// 执行一轮 Agent 迭代（一次 LLM 调用 + 响应处理）。

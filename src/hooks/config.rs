@@ -10,20 +10,21 @@ use super::error::HookError;
 
 /// Hook 事件类型。
 ///
-/// 当前仅 `session-start` 接入执行（见 `HookManager::execute_session_start`），
-/// 其余事件保留定义，待后续接入生命周期钩子；未知事件在 YAML 解析阶段直接报错。
+/// 五类事件均已接入执行分派（见各 `HookManager` 方法）；新增枚举变体时若暂未
+/// 接入，应在 [`HookEvent::is_dispatched`] 返回 `false`，加载器据此告警，避免静默丢失。
+/// 未知事件名在 YAML 解析阶段直接报错。
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum HookEvent {
-    /// 会话启动时执行（当前唯一接入执行的事件）。
+    /// 会话启动时执行（输出注入为 System 消息）。
     SessionStart,
-    /// 会话结束/退出前执行。
+    /// 会话结束/退出前执行（输出仅记日志）。
     SessionEnd,
-    /// 工具调用前执行。
+    /// 工具调用前执行（可 `DENY` 拦截）。
     PreTool,
-    /// 工具调用后执行。
+    /// 工具调用后执行（透传工具成败，输出仅记日志）。
     PostTool,
-    /// 用户输入前执行。
+    /// 顶层用户消息到达时执行（输出注入为该轮 System 消息，inject-only）。
     UserInput,
 }
 
@@ -50,6 +51,21 @@ impl HookEvent {
             _ => None,
         }
     }
+
+    /// 该事件是否已接入执行分派。
+    ///
+    /// 目前五类事件均已分派。新增枚举变体时若暂未接入，应在此返回 `false`，
+    /// 加载器会发出"hook 将被跳过"告警，避免静默丢失。
+    pub fn is_dispatched(&self) -> bool {
+        // 显式穷举 match：新增变体未在此处理时编译报错，强制维护分派状态。
+        match self {
+            HookEvent::SessionStart
+            | HookEvent::SessionEnd
+            | HookEvent::PreTool
+            | HookEvent::PostTool
+            | HookEvent::UserInput => true,
+        }
+    }
 }
 
 /// 单个 hook 的 YAML 定义。
@@ -64,8 +80,6 @@ pub struct HookConfig {
     pub args: Option<Vec<String>>,
     pub timeout: Option<u64>,
     pub priority: Option<i32>,
-    #[allow(dead_code)]
-    pub wrap_tag: Option<String>,
     pub max_output_bytes: Option<usize>,
 }
 
@@ -153,9 +167,10 @@ fn load_hooks_config_with_global(
     let mut result: Vec<HookConfig> = by_name.into_values().collect();
     result.sort_by_key(|h| (h.priority.unwrap_or(50), h.name.clone()));
 
-    // 未知事件在 YAML 解析阶段已报错（serde 枚举校验）；
-    // 已定义但尚未接入分派的事件（如 session-end）在此告警，避免静默丢失。
-    for h in result.iter().filter(|h| h.event != HookEvent::SessionStart) {
+    // 未知事件在 YAML 解析阶段已报错（serde 枚举校验）。
+    // 已定义但未接入分派的事件在此告警，避免静默丢失。当前五类事件均已分派，
+    // 故正常配置不会触发；保留为新增变体的防御。
+    for h in result.iter().filter(|h| !h.event.is_dispatched()) {
         warn!(
             name = %h.name,
             event = h.event.as_str(),
@@ -309,5 +324,19 @@ hooks:
         )
         .unwrap();
         assert_eq!(loaded.max_total_bytes, 1024);
+    }
+
+    #[test]
+    fn all_known_events_are_dispatched() {
+        // 当前五类事件均已接入分派；新增变体若暂未接入应返回 false 以触发告警
+        for ev in [
+            HookEvent::SessionStart,
+            HookEvent::SessionEnd,
+            HookEvent::PreTool,
+            HookEvent::PostTool,
+            HookEvent::UserInput,
+        ] {
+            assert!(ev.is_dispatched(), "{:?} should be dispatched", ev);
+        }
     }
 }

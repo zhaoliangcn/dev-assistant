@@ -1,6 +1,14 @@
 //! Hook 机制。
 //!
-//! 在会话启动时执行配置的 hook，将输出注入模型上下文。
+//! 在生命周期事件触发时执行配置的 hook，并将输出注入模型上下文。
+//!
+//! # 已接入的事件
+//!
+//! - `session-start` — 会话启动（输出注入为 System 消息）
+//! - `session-end` — 会话结束（输出仅记日志）
+//! - `pre-tool` — 工具调用前（可 `DENY` 拦截）
+//! - `post-tool` — 工具调用后（透传工具成败，输出仅记日志）
+//! - `user-input` — 顶层用户消息到达时（输出注入为该轮 System 消息，inject-only）
 //!
 //! # 模块结构
 //!
@@ -18,7 +26,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
 use crate::hooks::config::{HookConfig, HookEvent};
-use crate::hooks::shell::{execute_shell_hook, execute_tool_hook};
+use crate::hooks::shell::{execute_shell_hook, execute_shell_hook_with_input, execute_tool_hook};
 
 /// Hook 管理器：负责按配置执行 hooks 并收集输出。
 pub struct HookManager {
@@ -120,8 +128,7 @@ impl HookManager {
             return String::new();
         }
 
-        // 并行执行：每个 hook 一个 scoped 线程，join 顺序即配置顺序
-        let outcomes = self.run_parallel(hooks, |config| {
+        self.collect_and_format(hooks, |config| {
             let event = config.event;
             let workdir = self.working_dir.clone();
             match execute_shell_hook(config, &event, &workdir) {
@@ -136,7 +143,55 @@ impl HookManager {
                     detail: e.to_string(),
                 },
             }
-        });
+        })
+    }
+
+    /// 执行 user-input hooks（仅注入上下文，不否决/不改写用户输入）。
+    ///
+    /// 将用户消息原文透传给 hook stdin payload 的 `input` 字段；输出经字节预算
+    /// 裁剪后格式化，调用方将其作为该轮 System 消息注入模型上下文。与
+    /// session-start 同为 inject-only 模型，但按每条顶层用户消息触发。
+    pub fn execute_user_input(&self, user_message: &str) -> String {
+        if !self.enabled || self.hooks.is_empty() {
+            return String::new();
+        }
+
+        let hooks: Vec<&HookConfig> = self
+            .hooks
+            .iter()
+            .filter(|c| c.event == HookEvent::UserInput)
+            .collect();
+        if hooks.is_empty() {
+            return String::new();
+        }
+
+        self.collect_and_format(hooks, |config| {
+            let event = config.event;
+            let workdir = self.working_dir.clone();
+            match execute_shell_hook_with_input(config, &event, &workdir, user_message) {
+                Ok(result) => HookOutcome {
+                    name: result.name.clone(),
+                    success: true,
+                    detail: result.output,
+                },
+                Err(e) => HookOutcome {
+                    name: config.name.clone(),
+                    success: false,
+                    detail: e.to_string(),
+                },
+            }
+        })
+    }
+
+    /// 并行执行给定 hooks，按字节预算裁剪后格式化为注入内容。
+    ///
+    /// `make_outcome` 决定单个 hook 如何执行（事件级 / user-input 级），
+    /// 其捕获的引用由 `Clone` 复制进每个 scoped 线程。
+    fn collect_and_format<F>(&self, hooks: Vec<&HookConfig>, make_outcome: F) -> String
+    where
+        F: Fn(&HookConfig) -> HookOutcome + Clone + Send,
+    {
+        let outcomes = self.run_parallel(hooks, make_outcome);
 
         let failures = outcomes.iter().filter(|o| !o.success).count();
         debug!(total = outcomes.len(), failures, "Hooks executed");
@@ -166,6 +221,9 @@ impl HookManager {
 
     /// 执行工具级 hooks（pre-tool / post-tool），携带工具名与参数上下文。
     ///
+    /// `success` 仅 post-tool 有意义：透传至 hook 进程的环境变量与 stdin payload，
+    /// 使 post-tool hook 能按工具成败分支。pre-tool 传 `None`（工具尚未执行）。
+    ///
     /// 返回各 hook 的结果（按 priority 顺序）。hook 输出**不注入模型上下文**，
     /// 仅用于决策（pre-tool）或日志（post-tool）。
     fn execute_tool_hooks(
@@ -173,6 +231,7 @@ impl HookManager {
         event: HookEvent,
         tool_name: &str,
         tool_args: &serde_json::Value,
+        success: Option<bool>,
     ) -> Vec<HookOutcome> {
         if !self.enabled || self.hooks.is_empty() {
             return Vec::new();
@@ -190,7 +249,7 @@ impl HookManager {
         self.run_parallel(hooks, |config| {
             let event = config.event;
             let workdir = self.working_dir.clone();
-            match execute_tool_hook(config, &event, &workdir, tool_name, tool_args) {
+            match execute_tool_hook(config, &event, &workdir, tool_name, tool_args, success) {
                 Ok(result) => HookOutcome {
                     name: result.name.clone(),
                     success: true,
@@ -209,20 +268,27 @@ impl HookManager {
     ///
     /// - `DENY` 后的文本作为拒绝原因（保留原始大小写）
     /// - hook 失败（非零退出/超时）视为放行，避免 hook 故障阻塞工具执行
+    /// - 拒绝原因写入 tracing 日志，便于事后排查
     pub fn run_pre_tool(&self, tool_name: &str, tool_args: &serde_json::Value) -> PreToolVerdict {
-        let outcomes = self.execute_tool_hooks(HookEvent::PreTool, tool_name, tool_args);
+        let outcomes = self.execute_tool_hooks(HookEvent::PreTool, tool_name, tool_args, None);
         for o in &outcomes {
             if o.success {
                 let trimmed = o.detail.trim();
                 // 大小写不敏感匹配 "DENY" 前缀。"DENY" 为 4 个 ASCII 字节，
                 // 一旦前缀匹配，第 4 字节必为字符边界，trimmed[4..] 可安全切片。
                 if trimmed.len() >= 4 && trimmed[..4].eq_ignore_ascii_case("DENY") {
-                    let reason = trimmed[4..].trim();
-                    return PreToolVerdict::Deny(if reason.is_empty() {
+                    let reason = if trimmed[4..].trim().is_empty() {
                         "denied by pre-tool hook".to_string()
                     } else {
-                        reason.to_string()
-                    });
+                        trimmed[4..].trim().to_string()
+                    };
+                    warn!(
+                        tool = tool_name,
+                        hook = %o.name,
+                        reason = %reason,
+                        "Pre-tool hook denied tool execution"
+                    );
+                    return PreToolVerdict::Deny(reason);
                 }
             }
         }
@@ -239,7 +305,8 @@ impl HookManager {
         tool_args: &serde_json::Value,
         success: bool,
     ) -> String {
-        let outcomes = self.execute_tool_hooks(HookEvent::PostTool, tool_name, tool_args);
+        let outcomes =
+            self.execute_tool_hooks(HookEvent::PostTool, tool_name, tool_args, Some(success));
         if outcomes.is_empty() {
             return String::new();
         }
@@ -257,13 +324,18 @@ impl HookManager {
     /// 并行执行一组 hooks：每个 hook 一个 scoped 线程，join 按配置顺序收集结果。
     fn run_parallel<F>(&self, hooks: Vec<&HookConfig>, make_outcome: F) -> Vec<HookOutcome>
     where
-        F: Fn(&HookConfig) -> HookOutcome + Copy + Send,
+        F: Fn(&HookConfig) -> HookOutcome + Clone + Send,
     {
         std::thread::scope(|scope| {
             let handles: Vec<_> = hooks
                 .iter()
                 .copied()
-                .map(|config| scope.spawn(move || make_outcome(config)))
+                .map(|config| {
+                    // Clone 而非 Copy：允许闭包捕获非 Copy 值（如 owned 数据）。
+                    // 每个线程拿到自己的副本，spawn 闭包 move 该副本。
+                    let f = make_outcome.clone();
+                    scope.spawn(move || f(config))
+                })
                 .collect();
 
             handles
@@ -592,5 +664,84 @@ hooks:
         let output = mgr.run_post_tool("read_file", &serde_json::json!({"file_path": "x"}), true);
         assert!(output.contains("done-notify"));
         assert!(output.contains("<HOOK name=\"notify\""));
+    }
+
+    #[test]
+    fn post_tool_forwards_success_to_hook() {
+        // post-tool hook 通过环境变量读取工具成败状态
+        let dir = tempdir().unwrap();
+        write_hooks_yaml(
+            dir.path(),
+            r#"
+hooks:
+  - name: success-echo
+    event: post-tool
+    type: shell
+    command: sh
+    args: ["-c", "printf %s \"$DEV_ASSISTANT_TOOL_SUCCESS\""]
+"#,
+        );
+        let mgr = HookManager::load(dir.path(), true);
+        let ok_out = mgr.run_post_tool("write_file", &serde_json::json!({}), true);
+        assert!(ok_out.contains("true"), "post-tool hook should see success=true: {ok_out}");
+        let fail_out = mgr.run_post_tool("write_file", &serde_json::json!({}), false);
+        assert!(fail_out.contains("false"), "post-tool hook should see success=false: {fail_out}");
+    }
+
+    #[test]
+    fn user_input_injects_hook_output() {
+        let dir = tempdir().unwrap();
+        write_hooks_yaml(
+            dir.path(),
+            r#"
+hooks:
+  - name: ctx
+    event: user-input
+    type: shell
+    command: echo
+    args: ["per-turn-context"]
+"#,
+        );
+        let mgr = HookManager::load(dir.path(), true);
+        let out = mgr.execute_user_input("hello");
+        assert!(out.contains("<HOOK name=\"ctx\""));
+        assert!(out.contains("per-turn-context"));
+    }
+
+    #[test]
+    fn user_input_no_hooks_returns_empty() {
+        // 仅有 session-start hook，无 user-input hook → 返回空字符串
+        let dir = tempdir().unwrap();
+        write_hooks_yaml(
+            dir.path(),
+            r#"
+hooks:
+  - name: only-start
+    event: session-start
+    type: shell
+    command: echo
+    args: ["x"]
+"#,
+        );
+        let mgr = HookManager::load(dir.path(), true);
+        assert_eq!(mgr.execute_user_input("hello"), "");
+    }
+
+    #[test]
+    fn user_input_disabled_returns_empty() {
+        let dir = tempdir().unwrap();
+        write_hooks_yaml(
+            dir.path(),
+            r#"
+hooks:
+  - name: ctx
+    event: user-input
+    type: shell
+    command: echo
+    args: ["x"]
+"#,
+        );
+        let mgr = HookManager::load(dir.path(), false);
+        assert_eq!(mgr.execute_user_input("hello"), "");
     }
 }

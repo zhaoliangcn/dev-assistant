@@ -1,7 +1,7 @@
 //! Shell hook 执行器：进程 spawn、超时控制、stdout 捕获。
 
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use tracing::{debug, warn};
@@ -38,22 +38,51 @@ pub fn execute_shell_hook(
 /// 在 [`execute_shell_hook`] 基础上，额外：
 /// - 注入 `DEV_ASSISTANT_TOOL_NAME` 环境变量
 /// - stdin JSON payload 增加 `tool` 与 `arguments` 字段，hook 可按工具名/参数分支
+///
+/// `success` 仅 post-tool 有意义：`Some(true/false)` 时额外注入
+/// `DEV_ASSISTANT_TOOL_SUCCESS` 环境变量并在 payload 增加 `success` 字段，
+/// 让 post-tool hook 能按工具成败分支。pre-tool 传 `None`（工具尚未执行）。
 pub fn execute_tool_hook(
     config: &HookConfig,
     event: &HookEvent,
     workdir: &Path,
     tool_name: &str,
     tool_args: &serde_json::Value,
+    success: Option<bool>,
 ) -> Result<HookResult, HookError> {
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "event": event.as_str(),
         "cwd": workdir,
         "name": config.name,
         "tool": tool_name,
         "arguments": tool_args,
     });
-    let extra_env = [("DEV_ASSISTANT_TOOL_NAME", tool_name)];
+    let mut extra_env: Vec<(&str, &str)> = vec![("DEV_ASSISTANT_TOOL_NAME", tool_name)];
+    if let Some(ok) = success {
+        payload["success"] = serde_json::Value::Bool(ok);
+        extra_env.push(("DEV_ASSISTANT_TOOL_SUCCESS", if ok { "true" } else { "false" }));
+    }
     run_hook_process(config, event, workdir, &payload, &extra_env)
+}
+
+/// 执行一个 user-input hook：在 [`execute_shell_hook`] 基础上，
+/// 将用户消息原文写入 stdin JSON payload 的 `input` 字段，
+/// 供 hook 按用户输入分支或注入该轮上下文。
+///
+/// 完整用户消息只走 stdin（写后立即关闭），不注入环境变量，规避系统 argv 长度上限。
+pub fn execute_shell_hook_with_input(
+    config: &HookConfig,
+    event: &HookEvent,
+    workdir: &Path,
+    input: &str,
+) -> Result<HookResult, HookError> {
+    let payload = serde_json::json!({
+        "event": event.as_str(),
+        "cwd": workdir,
+        "name": config.name,
+        "input": input,
+    });
+    run_hook_process(config, event, workdir, &payload, &[])
 }
 
 /// 核心执行：spawn 进程、注入环境变量、写 stdin payload、超时等待、截断输出。
@@ -97,51 +126,24 @@ fn run_hook_process(
         drop(stdin);
     }
 
-    // 超时等待
-    let start = std::time::Instant::now();
-    let output: Output = loop {
-        if start.elapsed() >= Duration::from_secs(timeout) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(HookError::Timeout(timeout, config.name.clone()));
-        }
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                // 进程已退出，收集输出
-                let stdout = child.stdout.take()
-                    .map(|mut s| {
-                        let mut buf = Vec::new();
-                        std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                        buf
-                    })
-                    .unwrap_or_default();
-                let stderr = child.stderr.take()
-                    .map(|mut s| {
-                        let mut buf = Vec::new();
-                        std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                        buf
-                    })
-                    .unwrap_or_default();
+    // 使用线程 + 通道等待进程退出，消除 50ms 轮询忙等
+    let child_pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
 
-                let output = Output {
-                    status,
-                    stdout,
-                    stderr,
-                };
-                break output;
-            }
-            Ok(None) => {
-                // 仍在运行，短暂休眠后重试
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(HookError::Execution(format!(
-                    "Failed to wait for '{}': {}",
-                    config.command, e
-                )));
-            }
+    let output = match rx.recv_timeout(Duration::from_secs(timeout)) {
+        Ok(result) => result.map_err(|e| {
+            HookError::Execution(format!("Failed to wait for '{}': {}", config.command, e))
+        })?,
+        Err(_) => {
+            // 超时：强制 kill 进程
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(child_pid.to_string())
+                .status();
+            return Err(HookError::Timeout(timeout, config.name.clone()));
         }
     };
 
@@ -210,7 +212,19 @@ mod tests {
             args: Some(args.iter().map(|s| s.to_string()).collect()),
             timeout: Some(timeout),
             priority: None,
-            wrap_tag: None,
+            max_output_bytes: None,
+        }
+    }
+
+    fn make_config_full(name: &str, command: &str, args: Vec<&str>, timeout: u64) -> HookConfig {
+        HookConfig {
+            name: name.to_string(),
+            event: HookEvent::SessionStart,
+            type_: "shell".to_string(),
+            command: command.to_string(),
+            args: Some(args.iter().map(|s| s.to_string()).collect()),
+            timeout: Some(timeout),
+            priority: None,
             max_output_bytes: None,
         }
     }
@@ -256,7 +270,6 @@ mod tests {
             ]),
             timeout: Some(5),
             priority: None,
-            wrap_tag: None,
             max_output_bytes: None,
         };
         let workdir = std::path::Path::new("/tmp/hook-test");
@@ -275,7 +288,6 @@ mod tests {
             args: None,
             timeout: Some(5),
             priority: None,
-            wrap_tag: None,
             max_output_bytes: None,
         };
         let workdir = std::path::Path::new("/tmp/stdin-test");
@@ -296,7 +308,6 @@ mod tests {
             args: Some(vec!["hello world".to_string()]),
             timeout: Some(5),
             priority: None,
-            wrap_tag: None,
             max_output_bytes: Some(6),
         };
         let result = execute_shell_hook(&config, &HookEvent::SessionStart, std::path::Path::new(".")).unwrap();
@@ -315,7 +326,6 @@ mod tests {
             args: Some(vec!["你好世界".to_string()]),
             timeout: Some(5),
             priority: None,
-            wrap_tag: None,
             max_output_bytes: Some(7),
         };
         let result = execute_shell_hook(&config, &HookEvent::SessionStart, std::path::Path::new(".")).unwrap();
@@ -323,5 +333,37 @@ mod tests {
         // 截断后的内容必须是合法 UTF-8，且以完整字符开头
         assert!(result.output.starts_with("你"));
         assert!(result.output.is_char_boundary(3));
+    }
+
+    #[test]
+    fn tool_hook_receives_success_status() {
+        // post-tool：success 透传到 DEV_ASSISTANT_TOOL_SUCCESS 环境变量
+        let config = make_config(
+            "sh",
+            vec!["-c", "printf %s \"$DEV_ASSISTANT_TOOL_SUCCESS\""],
+            5,
+        );
+        let workdir = std::path::Path::new(".");
+        let args = serde_json::json!({});
+
+        let ok = execute_tool_hook(&config, &HookEvent::PostTool, workdir, "write_file", &args, Some(true)).unwrap();
+        assert_eq!(ok.output, "true");
+        let fail = execute_tool_hook(&config, &HookEvent::PostTool, workdir, "write_file", &args, Some(false)).unwrap();
+        assert_eq!(fail.output, "false");
+
+        // pre-tool（None）不注入该变量 → printf 输出空
+        let pre = execute_tool_hook(&config, &HookEvent::PreTool, workdir, "write_file", &args, None).unwrap();
+        assert_eq!(pre.output, "");
+    }
+
+    #[test]
+    fn user_input_hook_receives_input_payload() {
+        // cat 回显 stdin JSON，验证 input 字段携带用户消息原文（未注入环境变量，规避 arg-max）
+        let config = make_config("cat", vec![], 5);
+        let workdir = std::path::Path::new("/tmp/ui-test");
+        let result = execute_shell_hook_with_input(&config, &HookEvent::UserInput, workdir, "用户消息原文").unwrap();
+        // 原始 stdout（未经 XML 转义）：payload 含 input 字段
+        assert!(result.output.contains("\"input\":\"用户消息原文\""), "payload: {}", result.output);
+        assert!(result.output.contains("\"event\":\"user-input\""));
     }
 }

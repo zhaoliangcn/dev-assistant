@@ -43,6 +43,8 @@ minijinja = "2.0"
 tower-http = { version = "0.6", features = ["fs", "cors", "set-header"] }
 futures = "0.3"
 async-stream = "0.3"
+# E2: 生产模式将静态资源嵌入二进制，免去运行时磁盘依赖
+rust-embed = "8"
 
 [dev-dependencies]
 tempfile = "3.10"

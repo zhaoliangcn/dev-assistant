@@ -2,6 +2,8 @@
 // Dev-Assistant Web UI — 共享侧栏组件
 // ============================================================
 // 功能：会话列表 + 文件树，两个页面复用
+// 数据：会话列表统一委托 `$store.sessions`（单一数据源），
+//       本组件只持有 UI 态（Tab、高亮、重命名编辑）。
 // 通信：通过 Alpine event 向上传递选中/重命名/删除
 
 import { escapeHtml } from './utils.js';
@@ -10,10 +12,7 @@ function sidebarWidget() {
     return {
         // Tab 状态
         activeTab: 'sessions',
-        // 会话列表
-        sessions: [],
-        loadingSessions: false,
-        sessionsError: null,
+        // UI 态（不持有会话列表本体，避免与 $store.sessions 重复）
         activeSessionId: null,
         renamingId: null,
         renameTitle: '',
@@ -22,30 +21,29 @@ function sidebarWidget() {
         treeEntries: [],
         treeLoading: false,
 
+        // C6+D1：会话列表/加载态全部委托全局 store，消除两处重复实现与双重请求
+        get sessions() {
+            return this.$store.sessions.list;
+        },
+        get loadingSessions() {
+            return this.$store.sessions.loading;
+        },
+        get sessionsError() {
+            return this.$store.sessions.error;
+        },
+
         init() {
-            this.loadSessions();
+            // 仅此处触发初始加载（chatApp 不再重复调用）
+            this.$store.sessions.load();
         },
 
         // ── 会话管理 ──
 
         async loadSessions() {
-            this.loadingSessions = true;
-            this.sessionsError = null;
-            try {
-                const resp = await fetch('/api/sessions');
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                const data = await resp.json();
-                this.sessions = Array.isArray(data) ? data : [];
-            } catch (e) {
-                console.error('加载会话列表失败:', e);
-                this.sessions = [];
-                this.sessionsError = e.message || '加载失败';
-            } finally {
-                this.loadingSessions = false;
-            }
+            await this.$store.sessions.load();
         },
 
-        async selectSession(id) {
+        selectSession(id) {
             this.activeSessionId = id;
             // 向上传递选中事件
             this.$dispatch('session-selected', { id });
@@ -58,23 +56,13 @@ function sidebarWidget() {
 
         async deleteSession(id) {
             if (!confirm('确定删除该会话？')) return;
-            try {
-                const resp = await fetch('/api/sessions/' + encodeURIComponent(id), {
-                    method: 'DELETE',
-                });
-                const data = await resp.json();
-                if (data.deleted) {
-                    this.sessions = this.sessions.filter((s) => s.id !== id);
-                    if (this.activeSessionId === id) {
-                        this.activeSessionId = null;
-                        this.$dispatch('new-chat');
-                    }
-                    this.$dispatch('session-deleted', { id });
-                } else {
-                    console.error('删除失败:', data.error || '未知错误');
+            const ok = await this.$store.sessions.remove(id);
+            if (ok) {
+                if (this.activeSessionId === id) {
+                    this.activeSessionId = null;
+                    this.$dispatch('new-chat');
                 }
-            } catch (e) {
-                console.error('删除会话失败:', e);
+                this.$dispatch('session-deleted', { id });
             }
         },
 
@@ -94,34 +82,38 @@ function sidebarWidget() {
                 this.cancelRename();
                 return;
             }
-            try {
-                const resp = await fetch('/api/sessions/' + encodeURIComponent(id) + '/rename', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title: title }),
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    const s = this.sessions.find((x) => x.id === id);
-                    if (s) s.title = data.title;
-                    this.$dispatch('session-renamed', { id, title: data.title });
-                } else {
-                    console.error('重命名失败:', data.error || '未知错误');
-                }
-            } catch (e) {
-                console.error('重命名会话失败:', e);
-            } finally {
-                this.cancelRename();
+            const newTitle = await this.$store.sessions.rename(id, title);
+            if (newTitle) {
+                this.$dispatch('session-renamed', { id, title: newTitle });
             }
+            this.cancelRename();
         },
 
         formatSessionTime(iso) {
-            if (!iso) return '';
-            const d = new Date(iso);
-            if (isNaN(d.getTime())) return iso;
-            const pad = (n) => String(n).padStart(2, '0');
-            return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
-                pad(d.getHours()) + ':' + pad(d.getMinutes());
+            return this.$store.sessions.formatTime(iso);
+        },
+
+        // ── 会话导出（P5） ──
+
+        async exportSession(format) {
+            if (!this.activeSessionId) {
+                alert('请先选择一个会话');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/sessions/' + encodeURIComponent(this.activeSessionId) + '/export?format=' + format);
+                if (!resp.ok) throw new Error('导出失败');
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'session-' + this.activeSessionId + '.' + format;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                console.error('导出会话失败:', e);
+                alert('导出失败: ' + e.message);
+            }
         },
 
         // ── 文件树 ──

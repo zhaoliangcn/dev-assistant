@@ -32,12 +32,25 @@ pub struct SessionSummary {
 pub struct SessionDetail {
     pub id: String,
     pub events: Vec<serde_json::Value>,
+    /// 文件中事件总数（不受 `limit` 裁剪影响），供前端判断是否需要"加载更多"。
+    pub total: usize,
+    /// 本次实际返回的事件数（= events.len()，便于前端直接读取）。
+    pub returned: usize,
 }
 
 /// 重命名请求体
 #[derive(Deserialize)]
 pub struct RenameRequest {
     pub title: String,
+}
+
+/// 会话详情查询参数。
+///
+/// `GET /api/sessions/{id}?limit=N`：仅返回最近 N 条事件（含 `total` 字段）。
+/// `limit=0` 或缺省表示返回全部。
+#[derive(Deserialize, Default)]
+pub struct GetSessionQuery {
+    pub limit: Option<usize>,
 }
 
 /// 标题元数据文件路径。
@@ -71,18 +84,6 @@ fn session_id_from_path(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// 事件的时间戳（所有变体都带 `timestamp` 字段）。
-fn event_timestamp(event: &SessionEvent) -> &str {
-    match event {
-        SessionEvent::UserMessage { timestamp, .. }
-        | SessionEvent::AssistantMessage { timestamp, .. }
-        | SessionEvent::SystemMessage { timestamp, .. }
-        | SessionEvent::ToolCallRequest { timestamp, .. }
-        | SessionEvent::ToolResult { timestamp, .. }
-        | SessionEvent::Compression { timestamp, .. } => timestamp,
-    }
-}
-
 /// 会话文件的完整路径（带路径遍历防护）。
 fn session_path(working_dir: &Path, id: &str) -> PathBuf {
     // 只允许取文件名部分，杜绝 `../` 路径遍历
@@ -110,27 +111,11 @@ pub async fn list_sessions(
     let titles = load_titles(&state.working_dir);
     for path in paths {
         let id = session_id_from_path(&path);
-        // 读取事件以统计创建时间与消息数
-        let (created_at, message_count) = match SessionStore::read_events(&path) {
-            Ok(events) => {
-                let created = events
-                    .first()
-                    .map(event_timestamp)
-                    .unwrap_or("")
-                    .to_string();
-                let count = events
-                    .iter()
-                    .filter(|e| {
-                        matches!(
-                            e,
-                            SessionEvent::UserMessage { .. } | SessionEvent::AssistantMessage { .. }
-                        )
-                    })
-                    .count();
-                (created, count)
-            }
-            Err(_) => (String::new(), 0),
-        };
+        // 廉价扫描：仅逐行子串计数 + 首行解析 timestamp，
+        // 不再对每条事件做完整反序列化（O(会话×大小) → O(会话总字节数)）
+        let meta = SessionStore::session_meta(&path);
+        let created_at = meta.created_at;
+        let message_count = meta.message_count;
 
         let title = titles.get(&id).cloned().unwrap_or_default();
         sessions.push(SessionSummary {
@@ -148,10 +133,13 @@ pub async fn list_sessions(
 
 /// 获取单条会话详情。
 ///
-/// `GET /api/sessions/{id}`
+/// `GET /api/sessions/{id}`：返回全部事件。
+/// `GET /api/sessions/{id}?limit=N`：仅返回最近 N 条事件，但 `total` 反映文件总数，
+/// 前端可据此判断是否需要"加载更多"。`limit=0` 等同于不传（返回全部）。
 pub async fn get_session(
     State(state): State<Arc<AppState>>,
     AxumPath(id): AxumPath<String>,
+    Query(query): Query<GetSessionQuery>,
 ) -> Json<SessionDetail> {
     let path = session_path(&state.working_dir, &id);
     let events = if path.exists() {
@@ -160,12 +148,27 @@ pub async fn get_session(
         Vec::new()
     };
 
-    let events: Vec<serde_json::Value> = events
+    let total = events.len();
+    // limit=None 或 0 → 全部；否则只取最近 N 条（保留时间顺序：取尾部切片）
+    let limit = query.limit.unwrap_or(0);
+    let slice: &[SessionEvent] = if limit == 0 || limit >= total {
+        &events
+    } else {
+        &events[total - limit..]
+    };
+
+    let events: Vec<serde_json::Value> = slice
         .iter()
         .filter_map(|e| serde_json::to_value(e).ok())
         .collect();
+    let returned = events.len();
 
-    Json(SessionDetail { id, events })
+    Json(SessionDetail {
+        id,
+        events,
+        total,
+        returned,
+    })
 }
 
 /// 删除会话。

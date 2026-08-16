@@ -4,7 +4,7 @@
 // 依赖：Alpine.js 3.x, utils.js
 // 功能：目录浏览、文件打开、编辑、预览、Diff
 
-import { escapeHtmlText, inlineMdFormat, lcsDiff } from './utils.js';
+import { escapeHtmlText, renderMarkdown, lcsDiff } from './utils.js';
 
 function fileExplorer() {
     return {
@@ -208,8 +208,9 @@ function fileExplorer() {
         renderPreview() {
             const path = this.activePath || '';
             const isMarkdown = /\.(md|markdown|mdown)$/i.test(path);
+            // D3：复用 utils.renderMarkdown（含任务列表/引用/代码高亮），删除本地重复实现
             if (isMarkdown) {
-                return this.markdownToHtml(this.content);
+                return renderMarkdown(this.content);
             }
             const escaped = escapeHtmlText(this.content);
             if (typeof window.hljs !== 'undefined' && this.content.trim()) {
@@ -227,72 +228,6 @@ function fileExplorer() {
                 }
             }
             return '<pre class="preview-code"><code>' + escaped + '</code></pre>';
-        },
-
-        markdownToHtml(text) {
-            if (!text) return '<p class="file-empty">（空文件）</p>';
-            const lines = text.split('\n');
-            const out = [];
-            let i = 0;
-            while (i < lines.length) {
-                const line = lines[i];
-                const fence = line.match(/^```(\w*)/);
-                if (fence) {
-                    const lang = fence[1];
-                    const buf = [];
-                    i++;
-                    while (i < lines.length && !lines[i].startsWith('```')) {
-                        buf.push(lines[i]);
-                        i++;
-                    }
-                    i++;
-                    const code = buf.join('\n');
-                    const escaped = escapeHtmlText(code);
-                    let html = escaped;
-                    if (typeof window.hljs !== 'undefined') {
-                        try {
-                            const detected = lang && window.hljs.getLanguage(lang)
-                                ? { language: lang } : {};
-                            html = window.hljs.highlight(code, detected).value;
-                        } catch (e) { /* fallback */ }
-                    }
-                    const cls = lang ? ' class="language-' + lang + '"' : '';
-                    out.push('<pre><code' + cls + '>' + html + '</code></pre>');
-                    continue;
-                }
-                const heading = line.match(/^(#{1,6})\s+(.*)$/);
-                if (heading) {
-                    const level = Math.min(heading[1].length + 1, 6);
-                    out.push('<h' + level + '>' + inlineMdFormat(heading[2]) + '</h' + level + '>');
-                    i++;
-                    continue;
-                }
-                if (line.startsWith('>')) {
-                    out.push('<blockquote>' + inlineMdFormat(line.replace(/^>\s?/, '')) + '</blockquote>');
-                    i++;
-                    continue;
-                }
-                const ul = line.match(/^[-*+]\s+(.*)$/);
-                if (ul) {
-                    const items = [];
-                    while (i < lines.length) {
-                        const m = lines[i].match(/^[-*+]\s+(.*)$/);
-                        if (!m) break;
-                        items.push('<li>' + inlineMdFormat(m[1]) + '</li>');
-                        i++;
-                    }
-                    out.push('<ul>' + items.join('') + '</ul>');
-                    continue;
-                }
-                if (line.trim() === '') {
-                    if (out.length && !out[out.length - 1].endsWith('<br>')) out.push('<br>');
-                    i++;
-                    continue;
-                }
-                out.push('<p>' + inlineMdFormat(line) + '</p>');
-                i++;
-            }
-            return out.join('\n');
         },
 
         computeDiff() {

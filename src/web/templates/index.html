@@ -8,7 +8,6 @@
      @session-selected.window="selectSession($event.detail.id)"
      @new-chat.window="newChat()"
      @session-deleted.window="deleteSession($event.detail.id)"
-     @session-renamed.window="renameSession($event.detail.id, $event.detail.title)"
      @file-opened.window="openSideFile($event.detail.path)">
     <!-- 移动端侧栏遮罩层 -->
     <div class="sidebar-overlay"
@@ -56,7 +55,7 @@
             </div>
             <button type="button" class="session-new" @click="newChat()">＋ <span x-text="$store.i18n.new_chat"></span></button>
             <!-- 骨架屏加载状态 -->
-            <div x-show="loadingSessions && sessions.length === 0" class="skeleton-container sidebar-skeleton">
+            <div x-show="$store.sessions.loading && sessions.length === 0" class="skeleton-container sidebar-skeleton">
                 <template x-for="i in 5" :key="i">
                     <div class="skeleton-session-item">
                         <div class="skeleton-line skeleton-line-short"></div>
@@ -96,14 +95,14 @@
                         </div>
                         <div class="session-item-actions">
                             <button type="button" class="copy-btn small"
-                                    @click.stop="startRename(s)" aria-label="重命名会话">✏️</button>
+                                    @click.stop="startRename(s)" :aria-label="$store.i18n.rename">✏️</button>
                             <button type="button" class="copy-btn small session-delete"
-                                    @click.stop="deleteSession(s.id)" aria-label="删除会话">🗑</button>
+                                    @click.stop="deleteSession(s.id)" :aria-label="$store.i18n.delete_session">🗑</button>
                         </div>
                     </div>
                 </template>
-                <div class="session-empty" x-show="!loadingSessions && sessions.length === 0" x-text="$store.i18n.no_sessions"></div>
-                <div class="session-empty" x-show="loadingSessions" x-text="$store.i18n.loading"></div>
+                <div class="session-empty" x-show="!$store.sessions.loading && sessions.length === 0" x-text="$store.i18n.no_sessions"></div>
+                <div class="session-empty" x-show="$store.sessions.loading" x-text="$store.i18n.loading"></div>
             </div>
         </div>
 
@@ -194,7 +193,7 @@
                         <!-- 工具结果（折叠展示） -->
                         <div x-show="msg.role === 'tool-result'" class="tool-item tool-result">
                             <details class="collapsible" :open="msg.content.length < 200">
-                                <summary>🔧 工具结果</summary>
+                                <summary x-text="$store.i18n.tool_result_label"></summary>
                                 <div class="collapsible-content tool-content" x-text="msg.content"></div>
                             </details>
                         </div>
@@ -209,12 +208,11 @@
 
         <!-- C1: 对话区（独立容器，user / assistant / system / error） -->
         <div id="message-list" class="message-list" x-ref="list"
-             @scroll="onChatScroll($event)"
              role="log"
              aria-label="对话消息列表"
              aria-live="polite">
             <!-- 骨架屏加载状态（会话历史加载中） -->
-            <div x-show="loadingSessions && chatMessages.length === 0" class="skeleton-container">
+            <div x-show="$store.sessions.loading && chatMessages.length === 0" class="skeleton-container">
                 <template x-for="i in 4" :key="i">
                     <div class="skeleton-message" :class="i % 2 === 0 ? 'skeleton-user' : 'skeleton-assistant'">
                         <div class="skeleton-avatar"></div>
@@ -227,7 +225,7 @@
                 </template>
             </div>
             <!-- 欢迎消息 -->
-            <div class="message system welcome-hero" x-show="chatMessages.length === 0 && !loadingSessions">
+            <div class="message system welcome-hero" x-show="chatMessages.length === 0 && !$store.sessions.loading">
                 <div class="welcome-logo" aria-hidden="true">🤖</div>
                 <div class="message-body">
                     <p class="welcome-title"><span x-text="$store.i18n.assistant"></span>！</p>
@@ -235,125 +233,65 @@
                 </div>
             </div>
 
-            <!-- 消息列表（支持虚拟滚动，仅当消息数较多时启用） -->
-            <template x-if="chatTotalCount > 100">
-                <div class="virtual-scroll-container">
-                    <!-- 顶部占位（视口外的历史消息） -->
-                    <div x-show="showVirtualSpacerTop" class="virtual-spacer"
-                         :style="'height:' + virtualSpacerTopHeight + 'px'"></div>
-                    <!-- 可见消息 -->
-                    <template x-for="msg in visibleChatMessages" :key="msg._id">
-                        <div>
-                            <!-- 用户消息 -->
-                            <div x-show="msg.role === 'user'" class="message user">
-                                <div class="message-avatar" aria-hidden="true">👤</div>
-                                <div class="message-body">
-                                    <div class="message-header">
-                                        <span class="message-role">你</span>
-                                        <span class="message-time" x-text="msg.time || ''"></span>
-                                    </div>
-                                    <div class="message-content" x-text="msg.content"></div>
-                                </div>
-                            </div>
+            <!-- C4: 会话事件被 limit 裁剪时，提供"加载更多"以拉取全部历史 -->
+            <div class="load-more-banner" x-show="sessionTotal > sessionReturned && !sessionLoading">
+                <button type="button" class="load-more-btn" @click="loadFullSession()">
+                    <span x-text="$store.i18n.load_more"></span>·<span x-text="sessionTotal"></span>总/<span x-text="sessionReturned"></span>载
+                </button>
+            </div>
+            <div class="load-more-banner" x-show="sessionLoading" x-text="$store.i18n.loading"></div>
 
-                            <!-- 助手消息（流式时带 streaming 边框） -->
-                            <div x-show="msg.role === 'assistant'"
-                                 class="message assistant"
-                                 :class="{ 'streaming': msg.streaming }">
-                                <div class="message-avatar" aria-hidden="true">🤖</div>
-                                <div class="message-body">
-                                    <div class="message-header">
-                                        <span class="message-role">助手</span>
-                                        <span class="message-time" x-text="msg.time || ''"></span>
-                                        <button type="button" class="copy-btn small"
-                                                @click="copyMessage(msg.content)"
-                                                x-text="copiedMessageId ? '✅ 已复制' : '📋 复制'"></button>
-                                    </div>
-                                    <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
-                                </div>
+            <!-- C5: 消息列表（单一模板，浏览器级 content-visibility 廉价虚拟化） -->
+            <template x-for="msg in chatMessages" :key="msg._id">
+                <div>
+                    <!-- 用户消息 -->
+                    <div x-show="msg.role === 'user'" class="message user">
+                        <div class="message-avatar" aria-hidden="true">👤</div>
+                        <div class="message-body">
+                            <div class="message-header">
+                                <span class="message-role">你</span>
+                                <span class="message-time" x-text="msg.time || ''"></span>
                             </div>
-
-                            <!-- 系统/状态 -->
-                            <div x-show="msg.role === 'system'" class="message system" style="font-size:0.85em;opacity:0.7;">
-                                <div class="message-body">
-                                    <div class="message-content" x-text="msg.content"></div>
-                                </div>
-                            </div>
-
-                            <!-- 错误 -->
-                            <div x-show="msg.role === 'error'" class="message error-message" style="align-self:center;color:var(--pico-del-color);">
-                                <div class="message-body">
-                                    <div class="message-content" x-text="msg.content"></div>
-                                    <!-- P3: 错误重试按钮 -->
-                                    <button type="button" class="copy-btn small retry-btn"
-                                            @click="retryLastAction()"
-                                            x-show="canRetry">
-                                        重试
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </template>
-                    <!-- 底部占位（视口外的新消息） -->
-                    <div x-show="showVirtualSpacerBottom" class="virtual-spacer"
-                         :style="'height:' + virtualSpacerBottomHeight + 'px'"></div>
-                </div>
-            </template>
-
-            <!-- 兼容旧版：当消息数较少时使用 flat 列表 -->
-            <template x-if="chatTotalCount > 0 && chatTotalCount <= 100">
-                <template x-for="msg in chatMessages" :key="msg._id">
-                    <div>
-                        <!-- 用户消息 -->
-                        <div x-show="msg.role === 'user'" class="message user">
-                            <div class="message-avatar" aria-hidden="true">👤</div>
-                            <div class="message-body">
-                                <div class="message-header">
-                                    <span class="message-role">你</span>
-                                    <span class="message-time" x-text="msg.time || ''"></span>
-                                </div>
-                                <div class="message-content" x-text="msg.content"></div>
-                            </div>
-                        </div>
-
-                        <!-- 助手消息 -->
-                        <div x-show="msg.role === 'assistant'"
-                             class="message assistant"
-                             :class="{ 'streaming': msg.streaming }">
-                            <div class="message-avatar" aria-hidden="true">🤖</div>
-                            <div class="message-body">
-                                <div class="message-header">
-                                    <span class="message-role">助手</span>
-                                    <span class="message-time" x-text="msg.time || ''"></span>
-                                    <button type="button" class="copy-btn small"
-                                            @click="copyMessage(msg.content)"
-                                            x-text="copiedMessageId ? '✅ 已复制' : '📋 复制'"></button>
-                                </div>
-                                <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
-                            </div>
-                        </div>
-
-                        <!-- 系统/状态 -->
-                        <div x-show="msg.role === 'system'" class="message system" style="font-size:0.85em;opacity:0.7;">
-                            <div class="message-body">
-                                <div class="message-content" x-text="msg.content"></div>
-                            </div>
-                        </div>
-
-                        <!-- 错误 -->
-                        <div x-show="msg.role === 'error'" class="message error-message" style="align-self:center;color:var(--pico-del-color);">
-                            <div class="message-body">
-                                <div class="message-content" x-text="msg.content"></div>
-                                <!-- P3: 错误重试按钮 -->
-                                <button type="button" class="copy-btn small retry-btn"
-                                        @click="retryLastAction()"
-                                        x-show="canRetry">
-                                    重试
-                                </button>
-                            </div>
+                            <div class="message-content" x-text="msg.content"></div>
                         </div>
                     </div>
-                </template>
+
+                    <!-- 助手消息（流式时带 streaming 边框） -->
+                    <div x-show="msg.role === 'assistant'"
+                         class="message assistant"
+                         :class="{ 'streaming': msg.streaming }">
+                        <div class="message-avatar" aria-hidden="true">🤖</div>
+                        <div class="message-body">
+                            <div class="message-header">
+                                <span class="message-role" x-text="$store.i18n.assistant"></span>
+                                <span class="message-time" x-text="msg.time || ''"></span>
+                                <button type="button" class="copy-btn small"
+                                        @click="copyMessage(msg._id, msg.content)"
+                                        x-text="copiedMessageId === msg._id ? $store.i18n.copied : $store.i18n.copy"></button>
+                            </div>
+                            <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
+                        </div>
+                    </div>
+
+                    <!-- 系统/状态 -->
+                    <div x-show="msg.role === 'system'" class="message system" style="font-size:0.85em;opacity:0.7;">
+                        <div class="message-body">
+                            <div class="message-content" x-text="msg.content"></div>
+                        </div>
+                    </div>
+
+                    <!-- 错误 -->
+                    <div x-show="msg.role === 'error'" class="message error-message" style="align-self:center;color:var(--pico-del-color);">
+                        <div class="message-body">
+                            <div class="message-content" x-text="msg.content"></div>
+                            <!-- P3: 错误重试按钮 -->
+                            <button type="button" class="copy-btn small retry-btn"
+                                    @click="retryLastAction()"
+                                    x-show="canRetry">
+                                x-text="$store.i18n.retry">
+                        </div>
+                    </div>
+                </div>
             </template>
         </div>
 

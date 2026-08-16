@@ -10,9 +10,6 @@ function chatApp() {
     let wsInstance = null;
     let reconnectTimer = null;
     let reconnectAttempts = 0;
-    // 虚拟滚动窗口配置
-    const VIRTUAL_WINDOW = 60; // 视口内保留消息数
-    const OVERSCAN = 20; // 上下缓冲消息数
 
     return {
         connected: false,
@@ -21,16 +18,17 @@ function chatApp() {
         input: '',
         // C2: 对话区消息（user/assistant/system/error）
         chatMessages: [],
-        // 虚拟滚动：完整列表（可能很大），仅渲染视口附近
+        // C5: 完整消息列表（chatMessages 与之同源；浏览器级 content-visibility 负责廉价虚拟化）
         allChatMessages: [],
-        virtualStart: 0,
-        virtualEnd: VIRTUAL_WINDOW,
         // C2: 工具活动区消息（tool-call/tool-result）
         toolMessages: [],
         // 最近复制的消息 ID（用于"已复制"反馈，需在初始 state 声明以支持响应式）
         copiedMessageId: null,
         // 消息序号
         _msgSeq: 0,
+        // C1: 流式增量渲染节流缓冲（非响应式用途，仅内部）
+        _streamBuf: '',
+        _streamFlushTimer: null,
         // D1: 侧栏 Tab（sessions / files）
         sidebarTab: 'sessions',
         // D2: 内嵌文件树状态
@@ -39,14 +37,11 @@ function chatApp() {
         treeLoading: false,
         // W10: 是否正在生成
         busy: false,
-        // S2: 会话历史列表
-        sessions: [],
-        loadingSessions: false,
-        sessionsError: null,
         activeSessionId: null,
-        // S4: 会话重命名编辑态
-        renamingId: null,
-        renameTitle: '',
+        // C4: 当前会话的事件总数 / 本次返回数（供"加载更多"判断）
+        sessionTotal: 0,
+        sessionReturned: 0,
+        sessionLoading: false,
         // 状态条
         pendingStatus: null,
         // Token 消耗累计
@@ -64,7 +59,8 @@ function chatApp() {
 
         init() {
             this.connectWS();
-            this.loadSessions();
+            // C6: 会话列表由 sidebarWidget.init 通过 $store.sessions.load() 统一拉取，
+            // chatApp 不再重复请求（消除首页双重 /api/sessions 调用）
             // 加载模型列表和主题
             if (window.Alpine) {
                 window.Alpine.store('models').load();
@@ -117,9 +113,11 @@ function chatApp() {
         },
 
         copyLastAssistantMessage() {
-            const last = this.lastAssistantMessage();
-            if (last) {
-                this.copyMessage(last.content || '');
+            // 用 lastAssistantIndex() 取最后一条助手消息（曾误用不存在的 lastAssistantMessage()）
+            const idx = this.lastAssistantIndex();
+            if (idx >= 0) {
+                const msg = this.allChatMessages[idx];
+                this.copyMessage(msg._id, msg.content || '');
             }
         },
 
@@ -181,16 +179,11 @@ function chatApp() {
             if (this.activeSessionId) {
                 this.newChat();
             }
+            this.lastUserMessage = content;
             this.addMessage('user', content);
             this.busy = true;
             this.scrollToBottomLater();
-            if (wsInstance && wsInstance.readyState === WebSocket.OPEN) {
-                wsInstance.send(JSON.stringify({
-                    type: 'user_message',
-                    content: content,
-                    id: 'msg_' + Date.now() + '_' + (this.messageId++)
-                }));
-            }
+            this.sendMessageContent(content);
         },
 
         // ── 连接状态管理（P3） ──
@@ -234,110 +227,54 @@ function chatApp() {
             }
         },
 
-        // ── 虚拟滚动 ──
-
-        get visibleChatMessages() {
-            const start = Math.max(0, this.virtualStart);
-            const end = Math.min(this.allChatMessages.length, this.virtualEnd);
-            return this.allChatMessages.slice(start, end);
-        },
-
-        get visibleStartIndex() {
-            return Math.max(0, this.virtualStart);
-        },
-
-        get visibleEndIndex() {
-            return Math.min(this.allChatMessages.length, this.virtualEnd);
-        },
-
-        get chatTotalCount() {
-            return this.allChatMessages.length;
-        },
-
-        get showVirtualSpacerTop() {
-            return this.visibleStartIndex > 0;
-        },
-
-        get showVirtualSpacerBottom() {
-            return this.visibleEndIndex < this.allChatMessages.length;
-        },
-
-        get virtualSpacerTopHeight() {
-            // 估算：每条消息平均 80px
-            return this.visibleStartIndex * 80;
-        },
-
-        get virtualSpacerBottomHeight() {
-            return Math.max(0, (this.allChatMessages.length - this.visibleEndIndex) * 80);
-        },
-
-        updateVirtualWindow() {
-            if (this.allChatMessages.length <= VIRTUAL_WINDOW + OVERSCAN * 2) {
-                // 消息少，全量渲染
-                this.virtualStart = 0;
-                this.virtualEnd = this.allChatMessages.length;
-                return;
-            }
-            // 默认显示最后 N 条
-            const end = this.allChatMessages.length;
-            const start = Math.max(0, end - VIRTUAL_WINDOW - OVERSCAN);
-            this.virtualStart = start;
-            this.virtualEnd = end;
-        },
-
-        onChatScroll(event) {
-            // 滚动时动态调整视口（可选增强）
-            // 当前策略：默认显示最新消息，用户主动上滚时保留历史
-            const el = event.target;
-            const threshold = 200; // 距离底部 200px 内视为"查看最新"
-            const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-            if (isNearBottom && this.allChatMessages.length > VIRTUAL_WINDOW + OVERSCAN * 2) {
-                const end = this.allChatMessages.length;
-                const start = Math.max(0, end - VIRTUAL_WINDOW - OVERSCAN);
-                if (start !== this.virtualStart || end !== this.virtualEnd) {
-                    this.virtualStart = start;
-                    this.virtualEnd = end;
-                }
-            }
-        },
-
         // ── 会话历史（S2） ──
-
-        async loadSessions() {
-            this.loadingSessions = true;
-            this.sessionsError = null;
-            try {
-                const resp = await fetch('/api/sessions');
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                const data = await resp.json();
-                this.sessions = Array.isArray(data) ? data : [];
-            } catch (e) {
-                console.error('加载会话列表失败:', e);
-                this.sessions = [];
-                this.sessionsError = e.message || '加载失败';
-            } finally {
-                this.loadingSessions = false;
-            }
-        },
+        // C6+D1：列表加载/重命名/删除统一由 $store.sessions + sidebarWidget 负责，
+        // chatApp 仅保留"选中会话→加载详情"与"删除当前会话→新建"两项响应。
 
         async selectSession(id) {
+            this.sessionLoading = true;
             try {
-                const resp = await fetch('/api/sessions/' + encodeURIComponent(id));
+                // C4: 首次仅拉最近 500 条，降低大对话的初始加载/渲染成本
+                const resp = await fetch('/api/sessions/' + encodeURIComponent(id) + '?limit=500');
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 const data = await resp.json();
                 this.activeSessionId = id;
-                const all = this.eventsToMessages(data.events || []);
-                this.allChatMessages = all.filter((m) => m.role !== 'tool-call' && m.role !== 'tool-result');
-                // 与 allChatMessages 保持同一引用，避免扁平分支渲染旧会话的过期消息
-                this.chatMessages = this.allChatMessages;
-                this.toolMessages = all.filter((m) => m.role === 'tool-call' || m.role === 'tool-result');
-                this.pendingStatus = null;
-                this.updateVirtualWindow();
-                this.scrollToBottomLater();
-                this.scrollToolLater();
+                this._applySessionData(data);
             } catch (e) {
                 console.error('加载会话详情失败:', e);
+            } finally {
+                this.sessionLoading = false;
             }
+        },
+
+        // C4: 超过 limit 时，用户可点击"加载更多"拉取全部事件
+        async loadFullSession() {
+            if (!this.activeSessionId) return;
+            this.sessionLoading = true;
+            try {
+                const resp = await fetch('/api/sessions/' + encodeURIComponent(this.activeSessionId));
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                this._applySessionData(data);
+            } catch (e) {
+                console.error('加载完整会话失败:', e);
+            } finally {
+                this.sessionLoading = false;
+            }
+        },
+
+        // 把后端 SessionDetail（含 total/returned/events）映射为前端消息视图
+        _applySessionData(data) {
+            const all = this.eventsToMessages(data.events || []);
+            this.allChatMessages = all.filter((m) => m.role !== 'tool-call' && m.role !== 'tool-result');
+            // 与 allChatMessages 保持同一引用，避免扁平分支渲染旧会话的过期消息
+            this.chatMessages = this.allChatMessages;
+            this.toolMessages = all.filter((m) => m.role === 'tool-call' || m.role === 'tool-result');
+            this.sessionTotal = data.total || this.allChatMessages.length + this.toolMessages.length;
+            this.sessionReturned = data.returned || data.events.length;
+            this.pendingStatus = null;
+            this.scrollToBottomLater();
+            this.scrollToolLater();
         },
 
         newChat() {
@@ -346,58 +283,16 @@ function chatApp() {
             this.toolMessages = [];
             this.activeSessionId = null;
             this.pendingStatus = null;
-            this.virtualStart = 0;
-            this.virtualEnd = VIRTUAL_WINDOW;
+            this.sessionTotal = 0;
+            this.sessionReturned = 0;
         },
 
         deleteSession(id) {
-            // 后端删除已由侧栏组件完成，这里仅同步本地会话列表状态
-            this.sessions = this.sessions.filter((s) => s.id !== id);
+            // 列表维护已由 sidebarWidget 委托 $store.sessions.remove 完成；
+            // chatApp 只需在删除的是当前会话时回到新建态
             if (this.activeSessionId === id) {
                 this.newChat();
             }
-        },
-
-        startRename(session) {
-            this.renamingId = session.id;
-            this.renameTitle = session.title || '';
-        },
-
-        cancelRename() {
-            this.renamingId = null;
-            this.renameTitle = '';
-        },
-
-        async submitRename(id) {
-            const title = this.renameTitle.trim();
-            if (!title) {
-                this.cancelRename();
-                return;
-            }
-            try {
-                const resp = await fetch('/api/sessions/' + encodeURIComponent(id) + '/rename', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title: title }),
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    const s = this.sessions.find((x) => x.id === id);
-                    if (s) s.title = data.title;
-                } else {
-                    console.error('重命名失败:', data.error || '未知错误');
-                }
-            } catch (e) {
-                console.error('重命名会话失败:', e);
-            } finally {
-                this.cancelRename();
-            }
-        },
-
-        // 侧栏组件重命名成功后经 window 事件通知，此处同步 chatApp 自身的会话列表
-        renameSession(id, title) {
-            const s = this.sessions.find((x) => x.id === id);
-            if (s) s.title = title;
         },
 
         eventsToMessages(events) {
@@ -420,15 +315,6 @@ function chatApp() {
                     }
                 })
                 .filter((m) => m !== null);
-        },
-
-        formatSessionTime(iso) {
-            if (!iso) return '';
-            const d = new Date(iso);
-            if (isNaN(d.getTime())) return iso;
-            const pad = (n) => String(n).padStart(2, '0');
-            return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
-                pad(d.getHours()) + ':' + pad(d.getMinutes());
         },
 
         // ── 侧栏文件树（D2） ──
@@ -504,6 +390,12 @@ function chatApp() {
                 self.setConnected(true);
                 self.setConnectionStatus('connected');
                 self.reconnectCount = 0;
+                // 刷新重试时暂存的消息（retryLastAction 在建连前暂存）
+                if (self._pendingRetryMessage) {
+                    const msg = self._pendingRetryMessage;
+                    self._pendingRetryMessage = null;
+                    self.sendMessageContent(msg);
+                }
             };
 
             wsInstance.onclose = () => {
@@ -550,7 +442,6 @@ function chatApp() {
             } else {
                 this.allChatMessages = [...this.allChatMessages, item];
                 this.chatMessages = this.allChatMessages;
-                this.updateVirtualWindow();
                 this.scrollToBottomLater();
             }
         },
@@ -596,6 +487,11 @@ function chatApp() {
                     this.pendingStatus = null;
                     this.appendAssistant(msg);
                     break;
+                case 'assistant_stream_delta':
+                    // C1: 增量流式——追加到当前 streaming 助手消息，节流渲染
+                    this.pendingStatus = null;
+                    this.applyStreamDelta(msg.delta || '', msg.is_final);
+                    break;
                 case 'error':
                     this.pendingStatus = null;
                     this.busy = false;
@@ -622,15 +518,30 @@ function chatApp() {
         },
 
         finishStreaming() {
-            const idx = this.lastAssistantIndex();
-            if (idx >= 0 && this.allChatMessages[idx].streaming) {
-                this.allChatMessages[idx] = {
-                    role: 'assistant',
-                    content: this.allChatMessages[idx].content,
-                    streaming: false,
-                    time: this.allChatMessages[idx].time,
-                };
+            // C1: done 到达时冲刷残留缓冲（防止终帧 delta 丢失），并清节流定时器
+            if (this._streamFlushTimer) {
+                clearTimeout(this._streamFlushTimer);
+                this._streamFlushTimer = null;
             }
+            const idx = this.lastStreamingAssistantIndex();
+            if (idx < 0) {
+                // 没有正在 streaming 的消息：兼容旧路径（非流式最终 assistant_message）
+                const i = this.lastAssistantIndex();
+                if (i >= 0 && this.allChatMessages[i].streaming) {
+                    const cur = this.allChatMessages[i];
+                    this.allChatMessages[i] = Object.assign({}, cur, { streaming: false });
+                }
+                return;
+            }
+            // 把残余缓冲并入并关闭 streaming 标志
+            const buf = this._streamBuf || '';
+            this._streamBuf = '';
+            const cur = this.allChatMessages[idx];
+            this.allChatMessages[idx] = Object.assign({}, cur, {
+                content: (cur.content || '') + buf,
+                streaming: false,
+            });
+            this.chatMessages = this.allChatMessages;
         },
 
         appendAssistant(msg) {
@@ -645,7 +556,6 @@ function chatApp() {
                         time: existing.time,
                     };
                     this.chatMessages = this.allChatMessages;
-                    this.updateVirtualWindow();
                     this.scrollToBottomLater();
                     return;
                 }
@@ -660,34 +570,58 @@ function chatApp() {
             return -1;
         },
 
-        sendMessage() {
-            const text = this.input.trim();
-            if (!text || this.busy) return;
-
-            // 处于历史会话查看态时，发送消息自动开启新对话
-            if (this.activeSessionId) {
-                this.newChat();
+        // C1: 当前正在 streaming 的助手消息下标（无则 -1）
+        lastStreamingAssistantIndex() {
+            for (let i = this.allChatMessages.length - 1; i >= 0; i--) {
+                const m = this.allChatMessages[i];
+                if (m.role === 'assistant' && m.streaming) return i;
             }
+            return -1;
+        },
 
-            this.addMessage('user', text);
-            this.input = '';
-            this.busy = true;
-            this.scrollToBottomLater();
-
-            // 发送后保持输入框聚焦，便于连续对话
-            this.$nextTick(() => {
-                const input = this.$refs.chatInput || document.querySelector('textarea[x-model="input"]');
-                if (input) input.focus();
-            });
-
-            if (wsInstance && wsInstance.readyState === WebSocket.OPEN) {
-                wsInstance.send(JSON.stringify({
-                    type: 'user_message',
-                    content: text,
-                    id: 'msg_' + Date.now() + '_' + (this.messageId++)
-                }));
+        // C1: 应用流式增量——追加到当前 streaming 助手消息，节流渲染。
+        // 后端每 token 只下发 delta（非全量），前端缓冲后每 50ms 合并写入
+        // content 一次，避免每 token 全量重解析 Markdown（O(n²)）。
+        applyStreamDelta(delta, isFinal) {
+            let idx = this.lastStreamingAssistantIndex();
+            if (idx < 0) {
+                // 首个增量：新建一条 streaming 助手消息（空内容 + 光标由 CSS 提供）
+                this.addMessage('assistant', '', { streaming: true });
+                idx = this.allChatMessages.length - 1;
+            }
+            this._streamBuf = (this._streamBuf || '') + (delta || '');
+            if (isFinal) {
+                this._flushStreamBuffer(idx, true);
+            } else if (!this._streamFlushTimer) {
+                this._streamFlushTimer = setTimeout(() => {
+                    this._streamFlushTimer = null;
+                    this._flushStreamBuffer(idx, false);
+                }, 50);
             }
         },
+
+        // 把缓冲区写入目标消息 content；isFinal 时关闭 streaming 标志。
+        _flushStreamBuffer(idx, isFinal) {
+            this._streamFlushTimer = null;
+            const buf = this._streamBuf || '';
+            this._streamBuf = '';
+            if (idx >= this.allChatMessages.length) return;
+            const cur = this.allChatMessages[idx];
+            if (!cur) return;
+            // 整体替换对象触发 Alpine 响应式重渲（content 变更 → x-html 重解析）
+            this.allChatMessages[idx] = Object.assign({}, cur, {
+                content: (cur.content || '') + buf,
+                streaming: !isFinal,
+            });
+            this.chatMessages = this.allChatMessages;
+            if (isFinal) {
+                // 终帧：内容已齐，无需再滚动
+                return;
+            }
+            this.scrollToBottomLater();
+        },
+
+        // 注意：sendMessage 只定义一次（历史误删重复定义曾导致聚焦等逻辑丢失）。
 
         stopGeneration() {
             if (!wsInstance || wsInstance.readyState !== WebSocket.OPEN) {
@@ -719,9 +653,11 @@ function chatApp() {
 
         // ── 复制消息 ──
 
-        copyMessage(content) {
+        // 复制指定消息：传入消息 _id 与内容，copiedMessageId 存该 _id，
+        // 按钮据此判断 copiedMessageId === msg._id 显示"已复制"（修共享状态 bug）。
+        copyMessage(id, content) {
             copyTextToClipboard(content).then(() => {
-                this.copiedMessageId = Date.now();
+                this.copiedMessageId = id;
                 setTimeout(() => { this.copiedMessageId = null; }, 1500);
             });
         },
@@ -800,16 +736,7 @@ function chatApp() {
         },
 
         scrollToMessage(index) {
-            // 滚动到指定索引的消息
-            // 先切换到正常视图（如果正在虚拟滚动）
-            if (this.allChatMessages.length > 100) {
-                // 临时调整虚拟窗口以显示目标消息
-                const targetStart = Math.max(0, index - 10);
-                const targetEnd = Math.min(this.allChatMessages.length, index + 10);
-                this.virtualStart = targetStart;
-                this.virtualEnd = targetEnd;
-            }
-            // 滚动到目标消息
+            // 滚动到指定索引的消息（C5 后无虚拟窗口，DOM 始终全量存在）
             this.$nextTick(() => {
                 const messageElements = document.querySelectorAll('#message-list .message');
                 if (messageElements[index]) {
@@ -884,11 +811,10 @@ function chatApp() {
             }
             this.connectionError = null;
             this.reconnectAttempts = 0;
+            // 若有最后一条用户消息，暂存待重发——connectWS() 异步建连，
+            // 必须等 onopen 后才能发送，否则会立即判为"连接已断开"。
+            this._pendingRetryMessage = this.lastUserMessage || null;
             this.connectWS();
-            // 如果有待发送的消息，重新发送最后一条用户消息
-            if (this.lastUserMessage && !this.busy) {
-                this.sendMessageContent(this.lastUserMessage);
-            }
         },
 
         // 记录最后一条用户消息（用于重试）
@@ -909,9 +835,17 @@ function chatApp() {
             this.busy = true;
             this.scrollToBottomLater();
 
+            // 发送后保持输入框聚焦，便于连续对话
+            this.$nextTick(() => {
+                const input = this.$refs.chatInput || document.querySelector('textarea[x-model="input"]');
+                if (input) input.focus();
+            });
+
             this.sendMessageContent(text);
         },
 
+        // 低层发送：仅负责把消息写进 WebSocket，连接断开时提示错误。
+        // 由 sendMessage / 拖拽上传 / 重试复用，保证发送语义一致。
         sendMessageContent(text) {
             if (wsInstance && wsInstance.readyState === WebSocket.OPEN) {
                 wsInstance.send(JSON.stringify({

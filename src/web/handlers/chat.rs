@@ -241,6 +241,12 @@ struct WebMessageOutput {
     /// 是否已通过 `streaming_assistant` 推送过流式内容。
     /// 为 true 时，run() 返回后不再重复发送最终消息，避免前端出现两条。
     streamed: bool,
+    /// 已通过 `AssistantStreamDelta` 发送的内容字节数（基于 UTF-8 字节边界）。
+    /// agent 仍传"累积完整内容"，本实现只截取 `content[sent_len..]` 作为 delta，
+    /// 把全量重传降为增量下发，避免长回复 O(n²) 传输与渲染。
+    /// 注意：用字节而非字符计数，因 `content` 是 UTF-8，按字节切片在 char 边界对齐，
+    /// 切到半个多字节字符会 panic——见下方 `safe_slice_from` 处理。
+    sent_len: usize,
 }
 
 impl WebMessageOutput {
@@ -249,6 +255,7 @@ impl WebMessageOutput {
             conn_manager,
             conn_id,
             streamed: false,
+            sent_len: 0,
         }
     }
 
@@ -258,6 +265,23 @@ impl WebMessageOutput {
         if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event) {
             tracing::warn!("WebSocket 取消状态发送失败: {}", e);
         }
+    }
+
+    /// 从 `content` 的 `sent_len` 字节偏移处安全截取剩余部分作为 delta。
+    ///
+    /// `sent_len` 始终落在已发送 delta 的末尾（即前一次 `content.len()` 的字符边界），
+    /// 故此处切片在 UTF-8 字符边界对齐。若因异常情况未对齐，则向前回退到最近
+    /// 字符边界，保证不产生半个字符。
+    fn safe_slice_from<'a>(&self, content: &'a str) -> &'a str {
+        if self.sent_len >= content.len() {
+            return ""; // 本次内容没有新增（或更短，理论上不应发生）
+        }
+        // floor_char_boundary: 找到 <= sent_len 的最近字符边界
+        let mut idx = self.sent_len;
+        while idx > 0 && !content.is_char_boundary(idx) {
+            idx -= 1;
+        }
+        &content[idx..]
     }
 }
 
@@ -307,19 +331,34 @@ impl MessageOutput for WebMessageOutput {
         }
     }
 
-    /// W3: 将 Agent 的流式内容转发为 `assistant_message(streaming=true)` 事件。
+    /// C1: 将 Agent 的流式内容转发为 `assistant_stream_delta` 增量事件。
     ///
-    /// `content` 是**累积的完整内容**（见 trait 约定），前端定位最后一条
-    /// assistant 消息并整体替换，实现增量渲染。最终块（`is_final=true`）
-    /// 也以 streaming 事件发送，由 `streamed` 标志阻止 run() 返回后
-    /// 重复发送最终消息。
+    /// trait 仍按"累积完整内容"调用（agent/mod.rs 逐 token push_str 后传入），
+    /// 本实现只截取 `content[sent_len..]` 作为 delta 下发，把每 token 全量重传
+    /// 降为增量，避免长回复 O(n²) 的网络与渲染开销。
+    ///
+    /// 多步回合（tool loop）处理：agent 每个 step 重新累积内容，`content` 会
+    /// 比上一次短。检测到 `content.len() < sent_len` 时判定为新回合，重置
+    /// `sent_len` 从头发送，保证后续 assistant 消息不被吞掉前缀。
+    ///
+    /// `is_final=true` 时即便 delta 为空也发送（前端据此移除流式光标）。
+    /// `streamed` 标志阻止 run() 返回后重复发送最终消息。
     fn streaming_assistant(&mut self, content: &str, is_final: bool) {
         self.streamed = true;
-        let event = ServerEvent::assistant_message(content.to_string(), true);
-        if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event) {
-            tracing::warn!("WebSocket 流式事件发送失败: {}", e);
+        // 新一回合流式：content 比上次记录短 → agent 已开始新累积，从头发
+        if content.len() < self.sent_len {
+            self.sent_len = 0;
         }
-        let _ = is_final;
+        let delta = self.safe_slice_from(content).to_string();
+        // 无论发送是否成功都推进 sent_len，避免下次重发同一 delta 造成前端重复
+        self.sent_len = content.len();
+        if delta.is_empty() && !is_final {
+            return;
+        }
+        let event = ServerEvent::assistant_stream_delta(delta, is_final);
+        if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event) {
+            tracing::warn!("WebSocket 流式增量事件发送失败: {}", e);
+        }
     }
 
     /// 将 Token 用量信息转发为 `token_usage` 事件。

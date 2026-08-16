@@ -8,7 +8,7 @@ import { describe, test, expect, beforeAll } from 'bun:test';
 // utils.js 在文件末尾引用 window，测试环境需先定义
 globalThis.window = globalThis;
 
-const { escapeHtml, escapeHtmlText, inlineFormat, inlineMdFormat,
+const { escapeHtml, escapeHtmlText, inlineFormat,
         highlightCode, renderMarkdown, lcsDiff } =
     await import('../static/js/utils.js');
 
@@ -50,10 +50,6 @@ describe('inlineFormat', () => {
     test('链接 [text](url)', () => {
         expect(inlineFormat('访问[官网](https://example.com)'))
             .toContain('<a href="https://example.com" target="_blank" rel="noopener">官网</a>');
-    });
-
-    test('inlineMdFormat 是别名', () => {
-        expect(inlineMdFormat('**x**')).toBe(inlineFormat('**x**'));
     });
 });
 

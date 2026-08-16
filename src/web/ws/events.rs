@@ -63,6 +63,17 @@ pub enum ServerEvent {
         #[serde(default)]
         id: String,
     },
+    /// 助手回复的流式增量（delta）。
+    ///
+    /// 与 `AssistantMessage`（整条完整内容）不同，本事件只携带自上次以来的
+    /// 文本增量，避免长回复时每 token 重发全量内容（O(n²)）。
+    /// `is_final=true` 表示本回合流式结束。
+    AssistantStreamDelta {
+        delta: String,
+        is_final: bool,
+        #[serde(default)]
+        id: String,
+    },
     /// 错误信息
     Error {
         content: String,
@@ -99,7 +110,7 @@ impl ServerEvent {
     pub fn thinking(content: impl Into<String>) -> Self {
         Self::Thinking {
             content: content.into(),
-            id: uuid_v4(),
+            id: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -108,7 +119,7 @@ impl ServerEvent {
         Self::ToolCall {
             tool_name: tool_name.into(),
             args,
-            id: uuid_v4(),
+            id: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -118,7 +129,7 @@ impl ServerEvent {
             tool_name: tool_name.into(),
             success,
             content: content.into(),
-            id: uuid_v4(),
+            id: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -127,7 +138,16 @@ impl ServerEvent {
         Self::AssistantMessage {
             content: content.into(),
             streaming,
-            id: uuid_v4(),
+            id: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+
+    /// 创建一个助手流式增量事件（仅本次 delta，非全量内容）。
+    pub fn assistant_stream_delta(delta: impl Into<String>, is_final: bool) -> Self {
+        Self::AssistantStreamDelta {
+            delta: delta.into(),
+            is_final,
+            id: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -135,7 +155,7 @@ impl ServerEvent {
     pub fn error(content: impl Into<String>) -> Self {
         Self::Error {
             content: content.into(),
-            id: uuid_v4(),
+            id: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -150,7 +170,7 @@ impl ServerEvent {
     pub fn status(content: impl Into<String>) -> Self {
         Self::Status {
             content: content.into(),
-            id: uuid_v4(),
+            id: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -167,30 +187,9 @@ impl ServerEvent {
             prompt_tokens,
             completion_tokens,
             total_tokens,
-            id: uuid_v4(),
+            id: uuid::Uuid::new_v4().to_string(),
         }
     }
-}
-
-/// 生成一个简单的 UUID v4 格式 ID（用于事件追踪）
-fn uuid_v4() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let nanos = now.as_nanos();
-    let rand_part: u64 = {
-        // Simple pseudo-random from timestamp bits
-        (nanos as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
-    };
-    format!(
-        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
-        (nanos >> 32) as u32,
-        (nanos >> 16) as u16,
-        (rand_part >> 48) as u16 & 0x0fff,
-        (rand_part >> 32) as u16 & 0x3fff | 0x8000,
-        rand_part & 0xffff_ffff_ffff
-    )
 }
 
 #[cfg(test)]
@@ -224,5 +223,19 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"type\":\"done\""));
         assert!(json.contains("msg_001"));
+    }
+
+    #[test]
+    fn test_assistant_stream_delta_ser() {
+        let event = ServerEvent::assistant_stream_delta("你好", false);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"assistant_stream_delta\""));
+        assert!(json.contains("\"delta\":\"你好\""));
+        assert!(json.contains("\"is_final\":false"));
+        // id 应为标准 UUID v4 格式（36 字符，含 4a-8b 段的 v4/变体位）
+        let parsed = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        let id = parsed.get("id").unwrap().as_str().unwrap();
+        assert_eq!(id.len(), 36);
+        assert_eq!(id.as_bytes()[14], b'4'); // version nibble
     }
 }

@@ -18,6 +18,7 @@
 //! - `static/` — 嵌入的静态资源
 //! - `ws/` — WebSocket 事件类型和会话管理
 
+pub mod embedded;
 pub mod handlers;
 pub mod router;
 pub mod ws;
@@ -54,6 +55,8 @@ pub struct AppState {
     pub async_tools: Option<AsyncToolRegistry>,
     /// Agent 配置
     pub agent_config: AgentConfig,
+    /// 安全策略：限制文件 API 的路径在工作目录内，防止路径遍历
+    pub security: Arc<SecurityPolicy>,
     /// 工作目录
     pub working_dir: PathBuf,
     /// 系统提示词
@@ -209,6 +212,7 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
         tools,
         async_tools: Some(async_tools),
         agent_config,
+        security,
         working_dir: config.working_dir.clone(),
         system_prompt,
         max_tokens: config.max_tokens,

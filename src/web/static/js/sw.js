@@ -3,7 +3,10 @@
 // ============================================================
 // 功能：缓存静态资源，支持离线访问
 
-const CACHE_NAME = 'dev-assistant-v2';
+// E1: 缓存版本。每次静态资源发生破坏性变更（文件改名/结构变动）后，
+// 必须递增此版本以触发旧缓存清理；同时下方 message 通道允许页面在
+// 检测到新 SW 时主动激活，降低"忘记 bump 导致用户拿到旧资源"的风险。
+const CACHE_NAME = 'dev-assistant-v3';
 const STATIC_ASSETS = [
     '/',
     '/static/css/app.css',
@@ -40,6 +43,14 @@ self.addEventListener('activate', (event) => {
             })
             .then(() => self.clients.claim())
     );
+});
+
+// E1: 页面 → SW 消息通道。收到 {type:'SKIP_WAITING'} 时立即接管，
+// 配合注册端 controllerchange 监听实现"有更新即生效"。
+self.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+    }
 });
 
 // 请求拦截：缓存优先策略

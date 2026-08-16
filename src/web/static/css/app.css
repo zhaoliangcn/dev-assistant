@@ -193,6 +193,32 @@ footer {
     background: var(--pico-card-background-color);
     border: 1px solid var(--pico-muted-border-color);
     max-width: 85%;
+    /* C5: 浏览器级廉价虚拟化 —— 视口外消息跳过布局/绘制 */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 96px;
+}
+
+/* C4: 会话事件被 limit 裁剪时的"加载更多"横幅 */
+.load-more-banner {
+    align-self: center;
+    margin: 0.5rem auto;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+}
+
+.load-more-btn {
+    width: auto;
+    margin: 0;
+    padding: 0.25rem 0.75rem;
+    font-size: inherit;
+    cursor: pointer;
+}
+
+/* F3: 通用 header 内按钮（替换重复的 style="width:auto;padding:0.25rem 0.75rem;"） */
+.header-btn {
+    width: auto;
+    padding: 0.25rem 0.75rem;
 }
 
 .message.user {
@@ -871,18 +897,6 @@ footer {
 
 .skeleton-line-long {
     width: 90%;
-}
-
-/* ── 虚拟滚动 ── */
-
-.virtual-scroll-container {
-    position: relative;
-    min-height: 0;
-}
-
-.virtual-spacer {
-    width: 100%;
-    pointer-events: none;
 }
 
 /* ── 对话布局与会话侧栏（S2） ── */

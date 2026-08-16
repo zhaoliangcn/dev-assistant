@@ -48,15 +48,6 @@ export function inlineFormat(line) {
     return out;
 }
 
-/**
- * 行内 Markdown 格式（文件浏览器用，别名）。
- * @param {string} line
- * @returns {string}
- */
-export function inlineMdFormat(line) {
-    return inlineFormat(line);
-}
-
 // ── 代码高亮 ──
 
 /**
@@ -328,6 +319,9 @@ export function toggleCodeBlock(btn) {
  * @param {HTMLButtonElement} btn
  */
 export function runCode(btn) {
+    // F1: 安全确认门 —— 阻止误触执行未知代码
+    if (!confirm('确认执行这段代码？')) return;
+
     const block = btn.closest('.code-block');
     if (!block) return;
     const codeEl = block.querySelector('pre code');

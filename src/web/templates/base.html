@@ -47,8 +47,28 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/static/js/sw.js')
-                    .then((reg) => console.log('[SW] 注册成功:', reg.scope))
+                    .then((reg) => {
+                        console.log('[SW] 注册成功:', reg.scope);
+                        // E1: 检测到新 SW 进入 waiting 状态时，通知其立即接管；
+                        // 接管完成后刷新页面以加载新静态资源。
+                        reg.addEventListener('updatefound', () => {
+                            const newWorker = reg.installing;
+                            if (!newWorker) return;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                                }
+                            });
+                        });
+                    })
                     .catch((err) => console.log('[SW] 注册失败:', err));
+                // 控制器变更（新 SW 接管）后刷新一次
+                let reloading = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (reloading) return;
+                    reloading = true;
+                    window.location.reload();
+                });
             });
         }
     </script>
@@ -169,22 +189,22 @@
                                 </span>
                             </li>
                             <li>
-                                <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
+                                <button class="outline secondary header-btn"
                                         @click="$store.theme.toggle()" :title="$store.theme.modeLabel()" :aria-label="$store.i18n.theme">
                                     <span x-text="$store.theme.label()"></span>
                                 </button>
                             </li>
                             <!-- P5: 主题定制按钮 -->
                             <li>
-                                <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
+                                <button class="outline secondary header-btn"
                                         @click="$store.customization.visible = !$store.customization.visible"
-                                        title="主题定制" aria-label="主题定制">
+                                        title="$store.i18n.theme_custom" :aria-label="$store.i18n.theme_custom">
                                     🎨
                                 </button>
                             </li>
                             <!-- 性能监控按钮（P5） -->
                             <li>
-                                <button class="outline secondary" style="width:auto;padding:0.25rem 0.75rem;"
+                                <button class="outline secondary header-btn"
                                         @click="$store.performance.toggle()"
                                         :title="$store.i18n.performance + ': FPS ' + $store.performance.fps"
                                         :aria-label="$store.i18n.performance">
@@ -202,7 +222,7 @@
     <!-- 性能监控面板（P5） -->
     <div id="performance-panel" class="performance-panel" x-show="$store.performance.visible" x-cloak>
         <div class="performance-header">
-            <strong>📊 性能监控</strong>
+            <strong x-text="'📊 ' + $store.i18n.performance"></strong>
             <button type="button" class="copy-btn" @click="$store.performance.toggle()">✕</button>
         </div>
         <div class="performance-metrics">
@@ -223,7 +243,7 @@
     <!-- 主题定制面板（P5） -->
     <div id="customization-panel" class="customization-panel" x-show="$store.customization.visible" x-cloak>
         <div class="customization-header">
-            <strong>🎨 主题定制</strong>
+            <strong x-text="'🎨 ' + $store.i18n.theme_custom"></strong>
             <button type="button" class="copy-btn" @click="$store.customization.visible = false">✕</button>
         </div>
         <div class="customization-body">

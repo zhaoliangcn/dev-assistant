@@ -99,6 +99,15 @@ pub enum SessionEvent {
 // SessionStore
 // ---------------------------------------------------------------------------
 
+/// 会话摘要元数据（廉价扫描产物，详见 [`SessionStore::session_meta`]）。
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SessionMeta {
+    /// 首条事件的 `timestamp`（用作创建时间）；空表示文件为空或不可解析。
+    pub created_at: String,
+    /// `user_message` + `assistant_message` 事件计数。
+    pub message_count: usize,
+}
+
 /// 会话数据持久化存储。
 ///
 /// 使用 append-only JSONL 格式，每条记录独立一行 JSON。
@@ -363,6 +372,57 @@ impl SessionStore {
 
     // ── 查询方法 ──
 
+    /// 廉价会话摘要：仅逐行扫描，不反序列化每行。
+    ///
+    /// 返回首条事件的 `timestamp`（作为 `created_at`）与消息条数
+    ///（仅统计 `user_message` / `assistant_message` 两种类型）。
+    ///
+    /// 性能上远优于 [`read_events`](Self::read_events)：消息计数用子串判定，
+    /// 避免对每行做完整 `SessionEvent` 反序列化；`created_at` 只解析首行。
+    /// 用于会话列表 API 时整体成本从 O(会话×大小) 降到 O(会话总字节数)。
+    ///
+    /// `created_at` 为空表示文件为空或首行不可解析。
+    #[allow(dead_code)]
+    pub fn session_meta(path: &Path) -> SessionMeta {
+        let Ok(file) = File::open(path) else {
+            return SessionMeta::default();
+        };
+        let reader = BufReader::new(file);
+
+        let mut created_at = String::new();
+        let mut message_count = 0usize;
+        let mut first_seen = false;
+
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if !first_seen {
+                first_seen = true;
+                // 仅解析首行取 timestamp；解析失败则 created_at 留空
+                if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+                    if let Some(ts) = v.get("timestamp").and_then(|t| t.as_str()) {
+                        created_at = ts.to_string();
+                    }
+                }
+            }
+            // 子串判定：tag="user_message"/"assistant_message"，避免逐行反序列化
+            // `"type":"user_message"` 是 serde(tag="type", rename_all="snake_case") 实际输出
+            if trimmed.contains("\"type\":\"user_message\"")
+                || trimmed.contains("\"type\":\"assistant_message\"")
+            {
+                message_count += 1;
+            }
+        }
+
+        SessionMeta {
+            created_at,
+            message_count,
+        }
+    }
+
     /// 从指定路径的 JSONL 文件读取所有事件。
     ///
     /// 可用于按会话离线查询历史数据。
@@ -534,5 +594,40 @@ mod tests {
         // session_id 应该是非空的时间戳字符串
         assert!(!sid.is_empty());
         assert!(sid.len() >= 8); // 至少 YYYYMMDD
+    }
+
+    #[test]
+    fn test_session_meta_counts_messages_and_timestamp() {
+        let dir = tempdir().unwrap();
+        let mut store = SessionStore::create(dir.path()).unwrap();
+        // 3 条计入 message_count：2 user + 1 assistant
+        store.record_user_message("hello");
+        store.record_assistant_message("hi");
+        store.record_tool_call("c1", "read_file", serde_json::json!({"path":"x"}));
+        store.record_tool_result("c1", "read_file", true, "ok");
+        store.record_user_message("again");
+        store.record_compression(10, 5, 3, 1000, 400);
+        drop(store); // flush
+
+        let path = dir.path().join(".dev-assistant-store");
+        let jsonl = fs::read_dir(&path)
+            .unwrap()
+            .find_map(|e| e.ok())
+            .unwrap()
+            .path();
+
+        let meta = SessionStore::session_meta(&jsonl);
+        assert_eq!(meta.message_count, 3);
+        assert!(!meta.created_at.is_empty());
+    }
+
+    #[test]
+    fn test_session_meta_empty_file() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("empty.jsonl");
+        File::create(&p).unwrap();
+        let meta = SessionStore::session_meta(&p);
+        assert_eq!(meta.message_count, 0);
+        assert!(meta.created_at.is_empty());
     }
 }

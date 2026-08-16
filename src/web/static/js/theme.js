@@ -52,6 +52,85 @@ document.addEventListener('alpine:init', () => {
         },
     });
 
+    // ── 会话列表 Store（C6+D1：sidebar/chat 单一数据源，消除重复请求与双份实现） ──
+    window.Alpine.store('sessions', {
+        list: [],
+        loading: false,
+        error: null,
+        loaded: false,
+
+        // 拉取会话列表。多次并发调用会被 loading 守卫合并为一次实际请求。
+        async load() {
+            if (this.loading) return;
+            this.loading = true;
+            this.error = null;
+            try {
+                const resp = await fetch('/api/sessions');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                this.list = Array.isArray(data) ? data : [];
+                this.loaded = true;
+            } catch (e) {
+                console.error('加载会话列表失败:', e);
+                this.list = [];
+                this.error = e.message || '加载失败';
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        // 删除会话（后端删除成功后从本地列表移除）。返回是否成功。
+        async remove(id) {
+            try {
+                const resp = await fetch('/api/sessions/' + encodeURIComponent(id), {
+                    method: 'DELETE',
+                });
+                const data = await resp.json();
+                if (data.deleted) {
+                    this.list = this.list.filter((s) => s.id !== id);
+                    return true;
+                }
+                console.error('删除失败:', data.error || '未知错误');
+            } catch (e) {
+                console.error('删除会话失败:', e);
+            }
+            return false;
+        },
+
+        // 重命名会话。成功时更新本地列表对应项并返回新标题，否则返回 null。
+        async rename(id, title) {
+            const trimmed = (title || '').trim();
+            if (!trimmed) return null;
+            try {
+                const resp = await fetch('/api/sessions/' + encodeURIComponent(id) + '/rename', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: trimmed }),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    const s = this.list.find((x) => x.id === id);
+                    if (s) s.title = data.title;
+                    return data.title;
+                }
+                console.error('重命名失败:', data.error || '未知错误');
+            } catch (e) {
+                console.error('重命名会话失败:', e);
+            }
+            return null;
+        },
+
+        // ISO 时间 → "MM-DD HH:MM" 简短展示（纯函数，供侧栏复用）
+        formatTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return iso;
+            const pad = (n) => String(n).padStart(2, '0');
+            return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+                pad(d.getHours()) + ':' + pad(d.getMinutes());
+        },
+    });
+
     // ── Token 用量 Store ──
     window.Alpine.store('tokenUsage', {
         prompt: 0,

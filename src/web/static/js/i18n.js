@@ -74,6 +74,19 @@ const TRANSLATIONS = {
         performance: '性能监控',
         fps: 'FPS',
         memory: '内存',
+        // 主题定制
+        theme_custom: '主题定制',
+        // 通用按钮
+        retry: '重试',
+        copied: '✅ 已复制',
+        copy: '📋 复制',
+        confirm_delete: '确定删除该会话？',
+        delete_session: '🗑',
+        // 加载更多
+        load_more: '加载更早的对话',
+        events_total: '共 {0} 条事件，已加载 {1} 条',
+        // 工具结果折叠标题
+        tool_result_label: '🔧 工具结果',
         // 快捷键
         shortcut_focus: 'Ctrl+/ 聚焦输入',
         shortcut_new: 'Ctrl+N 新对话',
@@ -136,10 +149,19 @@ const TRANSLATIONS = {
         theme_auto: 'Theme: Auto (current {0})',
         theme_dark: 'Theme: Dark',
         theme_light: 'Theme: Light',
-        performance: 'Performance',
-        fps: 'FPS',
-        memory: 'Memory',
-        shortcut_focus: 'Ctrl+/ Focus Input',
+performance: 'Performance',
+	        fps: 'FPS',
+	        memory: 'Memory',
+	        theme_custom: 'Theme Customization',
+	        retry: 'Retry',
+	        copied: '✅ Copied',
+	        copy: '📋 Copy',
+	        confirm_delete: 'Delete this session?',
+	        delete_session: '🗑',
+	        load_more: 'Load earlier messages',
+	        events_total: '{0} total, {1} loaded',
+	        tool_result_label: '🔧 Tool Results',
+	        shortcut_focus: 'Ctrl+/ Focus Input',
         shortcut_new: 'Ctrl+N New Chat',
         shortcut_copy: 'Ctrl+Shift+C Copy Last Reply',
     }

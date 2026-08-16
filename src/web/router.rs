@@ -51,13 +51,26 @@ pub fn build_router(state: AppState) -> Router {
     // ── 静态资源 ──
     // 开发模式：从磁盘加载静态文件
     let static_dir = working_dir.join("src/web/static");
-    let static_service = if static_dir.exists() {
-        info!("使用开发模式静态文件服务: {}", static_dir.display());
-        ServeDir::new(&static_dir)
+
+    // 静态资源单独走长缓存（1 年 immutable）：带版本哈希的资源可被浏览器/Service Worker
+    // 长期复用，大幅降低重复请求。该 layer 仅作用于 /static 子路由（nest 之前施加的
+    // layer 不会向下覆盖子路由），与下方 HTML/API 的 no-cache 完全隔离。
+    let static_router = if static_dir.exists() {
+        info!("开发模式: 从磁盘加载静态文件: {}", static_dir.display());
+        Router::new()
+            .fallback_service(ServeDir::new(&static_dir))
+            .layer(SetResponseHeaderLayer::overriding(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            ))
     } else {
-        // 生产模式：使用嵌入的静态资源
-        info!("使用嵌入的静态资源");
-        ServeDir::new("")
+        info!("生产模式: 使用嵌入的静态资源");
+        Router::new()
+            .fallback(crate::web::embedded::serve_embedded)
+            .layer(SetResponseHeaderLayer::overriding(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            ))
     };
 
     // ── 主页面路由 ──
@@ -70,12 +83,13 @@ pub fn build_router(state: AppState) -> Router {
         .merge(page_routes)
         .merge(api_routes)
         .merge(ws_routes)
-        .nest_service("/static", static_service)
-        // 开发模式禁用静态资源缓存
+        // HTML 页面与 API 保持 no-cache：避免命中陈旧界面/数据。该 layer 在 nest 之前施加，
+        // 因此不会覆盖 /static 的长缓存策略。
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
         ))
+        .nest("/static", static_router)
         // 中间件
         .layer(CorsLayer::permissive())
         .with_state(state)

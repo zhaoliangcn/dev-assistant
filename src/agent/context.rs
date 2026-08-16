@@ -393,10 +393,6 @@ impl ContextManager {
         self.consecutive_no_tool_rounds = 0;
     }
 
-    pub fn get_consecutive_no_tool_rounds(&self) -> usize {
-        self.consecutive_no_tool_rounds
-    }
-
     /// 压缩上下文：委托给 [`ContextCompressor`]。
     /// 返回 [`CompressionInfo`] 描述压缩详情。
     pub fn compress(&mut self) -> Result<CompressionInfo, AppError> {

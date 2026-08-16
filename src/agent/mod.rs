@@ -468,11 +468,16 @@ impl Agent {
                     store.record_assistant_message(&assistant_content);
                 }
 
-                // 主 Agent 连续 2 轮纯文本回应即视为任务完成（交互式 REPL 场景）。
+                // 主 Agent 单轮纯文本回应即视为任务完成（交互式 REPL 场景）。
+                // 模型若仍需继续（调用工具/补充说明），会在同一响应中携带 tool_calls，
+                // 或按系统提示调用 finish 工具；仅返回文本而无任何工具调用，
+                // 即表示这是直接回答，回合应在此结束。
+                // 此前要求"连续 2 轮"纯文本，导致每条聊天消息触发两次 LLM 调用、
+                // 渲染两条内容不同的助手回复（重复回复），并白白多花一轮 token。
                 // 子 Agent（depth > 0）不受此影响：必须显式调用 `finish` 工具终止，
                 // 否则会撞上 max_iterations 上限——这是设计意图，确保子 Agent 产出
                 // 明确的阶段交付物（finish 的 summary 参数），而非中途的纯文本解释。
-                if self.depth == 0 && self.context.get_consecutive_no_tool_rounds() >= 2 {
+                if self.depth == 0 {
                     return Ok(AgentStep::Done(AgentResult {
                         success: true,
                         message: assistant_content,

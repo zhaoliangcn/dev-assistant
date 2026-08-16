@@ -75,6 +75,15 @@ impl AppError {
         }
     }
 
+    /// 连接阶段失败（DNS 解析失败、连接被拒等），由 `.send()` 抛出，无 HTTP status。
+    ///
+    /// 此类错误通常意味着目标服务未运行/不可达：重试几次可捕捉瞬时抖动或本地
+    /// 模型重启，持续失败则应快速故障转移。注意区分请求超时——超时单次已耗时
+    /// 整个 HTTP 超时窗口，重试通常无益，故不归入此类、直接故障转移。
+    pub fn is_connect_error(&self) -> bool {
+        matches!(self, AppError::Http(e) if e.is_connect())
+    }
+
     /// 判断错误是否可重试
     ///
     /// 只有瞬时错误才应该重试：
@@ -99,5 +108,55 @@ impl AppError {
             AppError::Llm(_) => true,
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn classifies_rate_limited() {
+        let e = AppError::RateLimited {
+            message: "rl".into(),
+            retry_after: Some(Duration::from_secs(5)),
+        };
+        assert!(e.is_rate_limited());
+        assert!(!e.is_server_error());
+        assert!(!e.is_connect_error());
+        assert_eq!(e.retry_after(), Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn classifies_server_error_5xx() {
+        let e = AppError::ServerError(503, "boom".into());
+        assert!(e.is_server_error());
+        assert!(!e.is_rate_limited());
+        assert!(!e.is_connect_error());
+    }
+
+    #[test]
+    fn classifies_4xx_llm_as_non_transient() {
+        // 4xx（鉴权/参数错误）不应被识别为 429/5xx，重试无益
+        let e = AppError::Llm("LLM API returned error (status 400): bad request".into());
+        assert!(!e.is_rate_limited());
+        assert!(!e.is_server_error());
+        assert!(!e.is_connect_error());
+    }
+
+    #[test]
+    fn classifies_rate_limited_via_llm_substring_fallback() {
+        // 旧 provider 残留 "status 429" 字符串的兜底识别
+        let e = AppError::Llm("... status 429 Too Many Requests ...".into());
+        assert!(e.is_rate_limited());
+    }
+
+    #[test]
+    fn config_error_is_not_transient_nor_connect() {
+        let e = AppError::Config("bad".into());
+        assert!(!e.is_rate_limited());
+        assert!(!e.is_server_error());
+        assert!(!e.is_connect_error());
     }
 }

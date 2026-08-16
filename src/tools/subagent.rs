@@ -43,7 +43,7 @@ pub fn spawn_subagent_tool() -> ToolDefinition {
                 },
                 "max_tokens": {
                     "type": "integer",
-                    "description": "Token budget for the sub-agent's context (default: 262144). Set higher for tasks requiring large context.",
+                    "description": "Token budget for the sub-agent's context window (default: 262144). This is the context budget, not the model output cap. Set higher for tasks requiring large context.",
                     "default": 262144
                 }
             },

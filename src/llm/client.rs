@@ -23,28 +23,56 @@ const BACKOFF_MULTIPLIER: f64 = 2.0;
 /// 最大延迟上限（防止无限增长）。
 const MAX_DELAY: Duration = Duration::from_secs(120);
 
-/// 统一的指数退避 + 抖动重试循环。
+/// 网络连接错误（连接被拒 / DNS 失败）的短重试上限。
 ///
-/// 对 `429`（限流）和 `5xx`（服务端错误）自动重试，最多 `MAX_RETRIES` 次。
-/// 优先使用服务端建议的 `Retry-After`，否则使用指数退避 + 随机抖动。
-///
-/// `call` 与 `call_streaming` 共享此逻辑，避免重试/退避代码重复。
-async fn retry_with_backoff<T, F, Fut>(mut f: F) -> Result<T, AppError>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<T, AppError>>,
-{
-    let mut attempt = 0u32;
-    loop {
-        match f().await {
-            Ok(v) => return Ok(v),
-            Err(ref e)
-                if (e.is_rate_limited() || e.is_server_error()) && attempt < MAX_RETRIES =>
-            {
-                attempt += 1;
+/// 远低于 429/5xx 的长重试：连接错误通常意味着目标服务未运行，重试仅为捕捉
+/// 瞬时网络抖动或本地模型重启，故次数少、退避短，避免对不可达 provider 长时间空等。
+const NETWORK_MAX_RETRIES: u32 = 2;
 
-                // 优先使用服务端建议的 Retry-After，否则用指数退避
-                let delay = match e.retry_after() {
+/// 网络错误短退避初始延迟（毫秒）。
+const NETWORK_BASE_DELAY_MS: u64 = 500;
+
+/// 网络错误短退避乘数。
+const NETWORK_BACKOFF_MULTIPLIER: f64 = 2.0;
+
+/// 网络错误单次退避上限。
+const NETWORK_MAX_DELAY: Duration = Duration::from_secs(5);
+
+/// 错误的重试类别，决定退避节奏与重试上限。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RetryClass {
+    /// `429`（限流）/ `5xx`（服务端错误）：长指数退避，最多 [`MAX_RETRIES`] 次。
+    Transient,
+    /// 连接失败（[`AppError::is_connect_error`]）：短退避快速重试，
+    /// 最多 [`NETWORK_MAX_RETRIES`] 次，捕捉瞬时网络抖动或本地模型重启。
+    Network,
+    /// 超时 / 4xx / 解析 / 配置错误：不重试，立即交由调用方故障转移。
+    Fatal,
+}
+
+impl RetryClass {
+    fn max_retries(self) -> u32 {
+        match self {
+            RetryClass::Transient => MAX_RETRIES,
+            RetryClass::Network => NETWORK_MAX_RETRIES,
+            RetryClass::Fatal => 0,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            RetryClass::Transient => "429/5xx",
+            RetryClass::Network => "network",
+            RetryClass::Fatal => "fatal",
+        }
+    }
+
+    /// 计算下一次重试前的退避延迟（`attempt` 为即将执行的尝试序号，从 1 开始）。
+    fn delay(self, e: &AppError, attempt: u32) -> Duration {
+        match self {
+            RetryClass::Transient => {
+                // 优先服务端建议的 Retry-After，否则指数退避 + 抖动
+                match e.retry_after() {
                     Some(server_delay) if server_delay <= MAX_DELAY => server_delay,
                     _ => {
                         let base = BASE_DELAY_MS as f64
@@ -57,32 +85,82 @@ where
                         };
                         Duration::from_millis(base as u64 + jitter).min(MAX_DELAY)
                     }
-                };
+                }
+            }
+            RetryClass::Network => {
+                let base = NETWORK_BASE_DELAY_MS as f64
+                    * NETWORK_BACKOFF_MULTIPLIER.powi(attempt as i32 - 1);
+                Duration::from_millis(base as u64).min(NETWORK_MAX_DELAY)
+            }
+            RetryClass::Fatal => Duration::ZERO,
+        }
+    }
+}
 
-                let error_type = if e.is_rate_limited() { "429" } else { "5xx" };
+/// 按错误类别判定重试策略。
+///
+/// 注意：超时（[`AppError::is_timeout_error`]）单次已耗时整个 HTTP 超时窗口，
+/// 重试通常会再次等待同样长时间，故归入 `Fatal` 直接故障转移；仅连接失败
+/// （服务未起）值得短重试。4xx（鉴权/参数错误）重试无益，同样直接转移。
+fn retry_class(e: &AppError) -> RetryClass {
+    if e.is_rate_limited() || e.is_server_error() {
+        RetryClass::Transient
+    } else if e.is_connect_error() {
+        RetryClass::Network
+    } else {
+        RetryClass::Fatal
+    }
+}
+
+/// 统一的退避重试循环。
+///
+/// - `429` / `5xx`：长指数退避，最多 [`MAX_RETRIES`] 次，优先服务端 `Retry-After`。
+/// - 连接失败：短退避快速重试，最多 [`NETWORK_MAX_RETRIES`] 次。
+/// - 超时 / 4xx / 解析错误：不重试，立即返回，交由调用方故障转移。
+///
+/// `call` 与 `call_streaming` 共享此逻辑，避免重试/退避代码重复。
+async fn retry_with_backoff<T, F, Fut>(mut f: F) -> Result<T, AppError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, AppError>>,
+{
+    let mut attempt = 0u32;
+    loop {
+        match f().await {
+            Ok(v) => return Ok(v),
+            // 重试臂：仅当该错误类别仍有重试预算时进入（Fatal 的 max_retries=0 ⇒ 永不进入）。
+            Err(ref e) if attempt < retry_class(e).max_retries() => {
+                let class = retry_class(e);
+                attempt += 1;
+                let delay = class.delay(e, attempt);
+                let max = class.max_retries();
+                let label = class.label();
 
                 info!(
-                    attempt = attempt,
-                    max_retries = MAX_RETRIES,
+                    attempt,
+                    max_retries = max,
                     delay_ms = delay.as_millis() as u64,
-                    error_type = error_type,
+                    error_type = label,
                     "API 请求失败（{}），等待后重试",
-                    error_type,
+                    label,
                 );
 
-                if attempt >= 3 {
+                // 仅长退避（429/5xx）在多次失败后预告故障转移；
+                // 网络短重试耗尽即转移，无需额外预告。
+                if class == RetryClass::Transient && attempt >= 3 {
                     warn!(
-                        attempt = attempt,
-                        max_retries = MAX_RETRIES,
+                        attempt,
+                        max_retries = max,
                         delay_ms = delay.as_millis() as u64,
-                        error_type = error_type,
+                        error_type = label,
                         "API 持续返回 {}，准备故障转移",
-                        error_type,
+                        label,
                     );
                 }
 
                 tokio::time::sleep(delay).await;
             }
+            // 不可重试或已达上限：返回由调用方故障转移
             Err(e) => return Err(e),
         }
     }
@@ -107,7 +185,11 @@ impl LlmClient {
         }
 
         let http_client = Client::builder()
+            // 总超时覆盖完整请求（含流式响应），保证慢服务最终不挂死。
             .timeout(Duration::from_secs(120))
+            // 连接阶段单独限速：连接被拒/DNS 失败快速判定，使短重试与故障转移
+            // 不被卡在总超时窗口里（对不可达 provider 最多 ~10s 即转移）。
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| AppError::Config(format!("Failed to create HTTP client: {}", e)))?;
 
@@ -138,7 +220,7 @@ impl LlmClient {
             api_key: Some(config.api_key.clone()),
             model: config.model.clone(),
             temperature: Some(config.temperature),
-            max_tokens: Some(config.max_tokens),
+            max_output_tokens: Some(config.max_output_tokens),
         };
         Self::from_configs(vec![provider_config])
     }
@@ -196,7 +278,12 @@ impl LlmClient {
                 warn!(
                     from_provider = %self.provider_configs[start_idx].name,
                     to_provider = %cfg.name,
-                    "429/5xx 故障转移：切换到 {}",
+                    error = %last_error
+                        .as_ref()
+                        .map(|e| e.to_string())
+                        .unwrap_or_default(),
+                    "LLM 故障转移：{} → {}（前一 provider 失败，见 error 字段）",
+                    self.provider_configs[start_idx].name,
                     cfg.name,
                 );
                 // 更新活跃索引以便后续调用使用新 provider
@@ -210,7 +297,7 @@ impl LlmClient {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
                 temperature: cfg.temperature.unwrap_or(0.2),
-                max_tokens: cfg.max_tokens.unwrap_or(262144),
+                max_output_tokens: cfg.max_output_tokens,
             };
 
             match retry_with_backoff(|| provider.chat(&self.http_client, &request)).await {
@@ -260,7 +347,12 @@ impl LlmClient {
                 warn!(
                     from_provider = %self.provider_configs[start_idx].name,
                     to_provider = %cfg.name,
-                    "429/5xx 故障转移：切换到 {}",
+                    error = %last_error
+                        .as_ref()
+                        .map(|e| e.to_string())
+                        .unwrap_or_default(),
+                    "LLM 故障转移：{} → {}（前一 provider 失败，见 error 字段）",
+                    self.provider_configs[start_idx].name,
                     cfg.name,
                 );
                 // 更新活跃索引以便后续调用使用新 provider
@@ -274,7 +366,7 @@ impl LlmClient {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
                 temperature: cfg.temperature.unwrap_or(0.2),
-                max_tokens: cfg.max_tokens.unwrap_or(262144),
+                max_output_tokens: cfg.max_output_tokens,
             };
 
             match retry_with_backoff(|| provider.chat_stream(&self.http_client, &request)).await {
@@ -312,7 +404,7 @@ impl LlmClient {
             api_key: Some(config.api_key),
             model: config.model,
             temperature: Some(config.temperature),
-            max_tokens: Some(config.max_tokens),
+            max_output_tokens: Some(config.max_output_tokens),
         }])
         .expect("Failed to create LlmClient from legacy config")
     }
@@ -331,7 +423,7 @@ mod tests {
                 api_key: Some("test-key".to_string()),
                 model: "gpt-4o".to_string(),
                 temperature: Some(0.0),
-                max_tokens: Some(100),
+                max_output_tokens: Some(100),
             },
             ProviderConfig {
                 name: "model-b".to_string(),
@@ -340,7 +432,7 @@ mod tests {
                 api_key: Some("test-key-2".to_string()),
                 model: "claude-3".to_string(),
                 temperature: Some(0.5),
-                max_tokens: Some(200),
+                max_output_tokens: Some(200),
             },
         ])
         .unwrap()
@@ -407,7 +499,7 @@ mod tests {
             api_key: Some("test-key".to_string()),
             model: "test-model".to_string(),
             temperature: Some(0.0),
-            max_tokens: Some(100),
+            max_output_tokens: Some(100),
         }])
         .unwrap();
 
@@ -426,5 +518,125 @@ mod tests {
         ));
         // 连接被拒绝，应该是某种错误
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn retry_class_classifies_constructible_errors() {
+        // 429 / 5xx → 长退避
+        let rl = AppError::RateLimited { message: "rl".into(), retry_after: None };
+        assert_eq!(retry_class(&rl), RetryClass::Transient);
+        let se = AppError::ServerError(503, "boom".into());
+        assert_eq!(retry_class(&se), RetryClass::Transient);
+
+        // 4xx / 配置错误 → 不重试（立即故障转移）
+        let llm4xx = AppError::Llm("LLM API returned error (status 401): unauthorized".into());
+        assert_eq!(retry_class(&llm4xx), RetryClass::Fatal);
+        let cfg = AppError::Config("bad".into());
+        assert_eq!(retry_class(&cfg), RetryClass::Fatal);
+    }
+
+    #[test]
+    fn retry_class_budgets_labels_and_network_delays() {
+        assert_eq!(RetryClass::Transient.max_retries(), MAX_RETRIES);
+        assert_eq!(RetryClass::Network.max_retries(), NETWORK_MAX_RETRIES);
+        assert_eq!(RetryClass::Fatal.max_retries(), 0);
+        assert_eq!(RetryClass::Transient.label(), "429/5xx");
+        assert_eq!(RetryClass::Network.label(), "network");
+        assert_eq!(RetryClass::Fatal.label(), "fatal");
+
+        let dummy = AppError::Llm("x".into());
+        // Fatal 不退避
+        assert_eq!(retry_class(&dummy).delay(&dummy, 1), std::time::Duration::ZERO);
+        // Network 无抖动：退避随 attempt 指数增长，可精确断言
+        assert_eq!(
+            RetryClass::Network.delay(&dummy, 1),
+            std::time::Duration::from_millis(NETWORK_BASE_DELAY_MS)
+        );
+        assert_eq!(
+            RetryClass::Network.delay(&dummy, 2),
+            std::time::Duration::from_millis(NETWORK_BASE_DELAY_MS * 2)
+        );
+    }
+
+    #[test]
+    fn retry_with_backoff_fatal_error_does_not_retry() {
+        // 核心回归保护：不可重试（Fatal）错误必须立即返回、不触发任何退避重试。
+        // 这正是"立即故障转移"症状的机制——修复后非 429/5xx 错误仍立即转移，
+        // 但不再被谎报为 "429/5xx"。
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let calls = Arc::new(AtomicU32::new(0));
+        let calls_inner = calls.clone();
+        let result: Result<(), AppError> = runtime.block_on(retry_with_backoff(move || {
+            let c = calls_inner.clone();
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Err(AppError::Config("not retryable".into()))
+            }
+        }));
+        assert!(result.is_err());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "Fatal error must not trigger any retry"
+        );
+    }
+
+    #[test]
+    fn retry_with_backoff_succeeds_first_try() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let calls = Arc::new(AtomicU32::new(0));
+        let calls_inner = calls.clone();
+        let result: Result<u32, AppError> = runtime.block_on(retry_with_backoff(move || {
+            let c = calls_inner.clone();
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok(42u32)
+            }
+        }));
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn connect_error_is_network_class_for_retry() {
+        // 真实连接被拒（localhost:1 无监听）：产生 AppError::Http 且 is_connect()=true。
+        // 这证明用户场景中"provider 连不上"的错误现在被识别为 Network（短重试），
+        // 而非落入 Fatal 立即转移且被谎报为 "429/5xx"。
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err: AppError = runtime.block_on(async {
+            match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .unwrap()
+                .get("http://localhost:1/v1")
+                .send()
+                .await
+            {
+                Ok(_) => panic!("expected connection refused"),
+                Err(e) => AppError::from(e),
+            }
+        });
+        assert!(
+            err.is_connect_error(),
+            "connect-refused should classify as connect error: {err}"
+        );
+        assert_eq!(
+            retry_class(&err),
+            RetryClass::Network,
+            "connect error should be Network (short retry), not Fatal"
+        );
     }
 }

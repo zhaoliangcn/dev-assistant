@@ -2,6 +2,9 @@
 # 本文件定义可用的 LLM 模型，运行时通过 /model 命令切换。
 # ${VAR} 格式的占位符会在启动时从环境变量读取。
 #
+# max_output_tokens = 单次响应输出 token 上限（发给 LLM API）；未设则由 provider 自决。
+#   旧名 max_tokens 仍作别名接受。注意：与 CLI --max-tokens（上下文窗口预算，不发 API）语义不同。
+#
 # 支持的 provider 类型：
 #   openai, openai-compatible  — OpenAI 及兼容服务（商汤、DeepSeek、Kimi、智谱等）
 #   anthropic, claude          — Anthropic Claude
@@ -14,7 +17,7 @@ api_url = "https://api.openai.com/v1"
 api_key = "${OPENAI_API_KEY}"
 model = "gpt-4o"
 temperature = 0.2
-max_tokens = 8192
+max_output_tokens = 8192
 
 [[models]]
 name = "mini"
@@ -23,7 +26,7 @@ api_url = "https://api.openai.com/v1"
 api_key = "${OPENAI_API_KEY}"
 model = "gpt-4o-mini"
 temperature = 0.0
-max_tokens = 4096
+max_output_tokens = 4096
 
 [[models]]
 name = "deepseek"
@@ -32,7 +35,7 @@ api_url = "https://api.deepseek.com/v1"
 api_key = "${DEEPSEEK_API_KEY}"
 model = "deepseek-chat"
 temperature = 0.2
-max_tokens = 8192
+max_output_tokens = 8192
 
 [[models]]
 name = "kimi"
@@ -41,7 +44,7 @@ api_url = "https://api.moonshot.cn/v1"
 api_key = "${MOONSHOT_API_KEY}"
 model = "moonshot-v1-8k"
 temperature = 0.2
-max_tokens = 8192
+max_output_tokens = 8192
 
 [[models]]
 name = "claude"
@@ -50,7 +53,7 @@ api_url = "https://api.anthropic.com"
 api_key = "${ANTHROPIC_API_KEY}"
 model = "claude-sonnet-4-20250514"
 temperature = 0.2
-max_tokens = 8192
+max_output_tokens = 8192
 
 [[models]]
 name = "local"

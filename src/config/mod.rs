@@ -63,10 +63,12 @@ pub fn load_models(explicit_path: Option<&Path>) -> Result<Vec<ProviderConfig>, 
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.2);
 
-    let max_tokens: usize = env::var("LLM_MAX_TOKENS")
+    // 输出上限：优先 LLM_MAX_OUTPUT_TOKENS，回退旧名 LLM_MAX_TOKENS；
+    // 均未设 → None（不发送该字段，由 provider 用自身默认上限）。
+    let max_output_tokens: Option<usize> = env::var("LLM_MAX_OUTPUT_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(262144);
+        .or_else(|| env::var("LLM_MAX_TOKENS").ok().and_then(|v| v.parse().ok()));
 
     Ok(vec![ProviderConfig {
         name: "default".to_string(),
@@ -75,7 +77,7 @@ pub fn load_models(explicit_path: Option<&Path>) -> Result<Vec<ProviderConfig>, 
         api_key: Some(api_key),
         model,
         temperature: Some(temperature),
-        max_tokens: Some(max_tokens),
+        max_output_tokens,
     }])
 }
 
@@ -92,10 +94,12 @@ pub fn load_llm_config() -> Result<LlmConfig, AppError> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.2);
 
-    let max_tokens: usize = env::var("LLM_MAX_TOKENS")
+    // 输出上限：优先 LLM_MAX_OUTPUT_TOKENS，回退旧名 LLM_MAX_TOKENS；均未设用安全默认 8192。
+    let max_output_tokens: usize = env::var("LLM_MAX_OUTPUT_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(262144);
+        .or_else(|| env::var("LLM_MAX_TOKENS").ok().and_then(|v| v.parse().ok()))
+        .unwrap_or(8192);
 
     Ok(LlmConfig {
         provider,
@@ -103,7 +107,7 @@ pub fn load_llm_config() -> Result<LlmConfig, AppError> {
         api_key,
         model,
         temperature,
-        max_tokens,
+        max_output_tokens,
     })
 }
 

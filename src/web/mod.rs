@@ -58,7 +58,7 @@ pub struct AppState {
     pub working_dir: PathBuf,
     /// 系统提示词
     pub system_prompt: String,
-    /// 最大 token 数
+    /// 上下文窗口 token 预算（不发给 API；输出上限见模型配置 max_output_tokens）
     pub max_tokens: usize,
     /// 是否启用详细日志
     #[allow(dead_code)]
@@ -81,7 +81,7 @@ pub struct WebConfig {
     pub verbose: bool,
     /// 最大迭代次数
     pub max_iterations: usize,
-    /// 最大 token 数
+    /// 上下文窗口 token 预算（不发给 API；输出上限见模型配置 max_output_tokens）
     pub max_tokens: usize,
     /// provider 名称
     pub provider: String,

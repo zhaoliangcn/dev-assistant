@@ -125,7 +125,8 @@ struct Cli {
     #[arg(long)]
     max_iterations: Option<usize>,
 
-    /// 上下文窗口的最大 token 数（默认 256K）
+    /// 上下文窗口的最大 token 数（默认 256K）；对话上下文预算，不发给 LLM API。
+    /// 注意：与模型配置中的 `max_output_tokens`（输出上限）语义不同，勿混用。
     #[arg(long, default_value_t = 262144)]
     max_tokens: usize,
 

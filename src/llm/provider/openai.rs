@@ -27,9 +27,12 @@ impl OpenAIProvider {
             "model": request.model,
             "messages": request.messages,
             "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
             "stream": stream,
         });
+        // 输出上限：未设置（None）则省略该字段，由 provider 用自身默认；wire key 仍为 max_tokens。
+        if let Some(n) = request.max_output_tokens {
+            body["max_tokens"] = serde_json::json!(n);
+        }
         if stream {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }

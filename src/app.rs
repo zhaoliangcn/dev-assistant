@@ -26,6 +26,7 @@ pub struct AppConfig {
     pub config: Option<PathBuf>,
     pub verbose: bool,
     pub max_iterations: usize,
+    /// 上下文窗口 token 预算（不发给 API；输出上限见模型配置 `max_output_tokens`）。
     pub max_tokens: usize,
     pub no_approval: bool,
     pub provider: String,
@@ -347,7 +348,7 @@ impl App {
                 api_key: Some("test".to_string()),
                 model: "test-model".to_string(),
                 temperature: Some(0.7),
-                max_tokens: Some(262144),
+                max_output_tokens: Some(8192),
             }
         ])?);
 

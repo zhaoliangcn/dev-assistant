@@ -725,7 +725,7 @@ mod tests {
             api_key: Some("test-key".to_string()),
             model: "test-model".to_string(),
             temperature: Some(0.0),
-            max_tokens: Some(100),
+            max_output_tokens: Some(100),
         };
         let llm = Arc::new(crate::llm::LlmClient::from_configs(vec![config]).unwrap());
         let security = Arc::new(crate::security::SecurityPolicy::new(

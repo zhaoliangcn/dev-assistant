@@ -10,6 +10,9 @@ use super::super::models::*;
 use super::LlmProvider;
 use crate::utils::error::AppError;
 
+/// Anthropic API 必填 max_tokens；配置未指定输出上限时用此安全默认。
+const ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS: usize = 4096;
+
 /// Anthropic Claude provider
 pub struct AnthropicProvider {
     config: ProviderConfig,
@@ -91,7 +94,7 @@ impl LlmProvider for AnthropicProvider {
         // 构建 Anthropic 格式的请求体
         let mut body = serde_json::json!({
             "model": request.model,
-            "max_tokens": request.max_tokens,
+            "max_tokens": request.max_output_tokens.unwrap_or(ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS),
             "messages": api_messages,
         });
 
@@ -209,7 +212,7 @@ impl LlmProvider for AnthropicProvider {
         // 构建 Anthropic 格式的请求体（启用流式）
         let mut body = serde_json::json!({
             "model": request.model,
-            "max_tokens": request.max_tokens,
+            "max_tokens": request.max_output_tokens.unwrap_or(ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS),
             "messages": api_messages,
             "stream": true,
         });

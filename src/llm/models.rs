@@ -13,8 +13,13 @@ pub struct ProviderConfig {
     pub model: String,
     #[serde(default)]
     pub temperature: Option<f32>,
-    #[serde(default)]
-    pub max_tokens: Option<usize>,
+    /// 单次响应的最大输出 token 数（作为 `max_tokens` 发给 LLM API 的输出上限）。
+    ///
+    /// 注意：这与 CLI `--max-tokens`（上下文窗口预算，不发给 API）语义不同，勿混用。
+    /// 未设置（None）时不发送该字段，由 provider 用自身默认上限。
+    /// 旧 TOML key `max_tokens` 仍作别名接受（向后兼容）。
+    #[serde(default, alias = "max_tokens")]
+    pub max_output_tokens: Option<usize>,
 }
 
 impl ProviderConfig {
@@ -86,7 +91,11 @@ pub struct LlmRequest {
     pub messages: Vec<LlmMessage>,
     pub tools: Option<Vec<ToolSchema>>,
     pub temperature: f32,
-    pub max_tokens: usize,
+    /// 单次响应的最大输出 token 数，作为 `max_tokens` 发给 LLM API。
+    ///
+    /// `None` 时由 provider 决定：OpenAI 兼容服务省略该字段，Anthropic 用安全默认（API 必填）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,7 +140,8 @@ pub struct LlmConfig {
     pub api_key: String,
     pub model: String,
     pub temperature: f32,
-    pub max_tokens: usize,
+    /// 单次响应的最大输出 token 数（发给 API 的输出上限）。
+    pub max_output_tokens: usize,
 }
 
 #[cfg(test)]
@@ -148,7 +158,7 @@ mod tests {
             api_key: Some("${TEST_API_KEY}".to_string()),
             model: "gpt-4o".to_string(),
             temperature: Some(0.0),
-            max_tokens: Some(100),
+            max_output_tokens: Some(100),
         };
         config.resolve_env_vars();
         assert_eq!(config.api_key, Some("sk-test123".to_string()));
@@ -165,7 +175,7 @@ mod tests {
             api_key: Some("real-key".to_string()),
             model: "gpt-4o".to_string(),
             temperature: Some(0.0),
-            max_tokens: Some(100),
+            max_output_tokens: Some(100),
         };
         config.resolve_env_vars();
         assert_eq!(config.api_url, "http://${UNDEFINED_VAR}:8080");
@@ -248,7 +258,7 @@ mod tests {
             }],
             tools: Some(vec![]),
             temperature: 0.5,
-            max_tokens: 100,
+            max_output_tokens: Some(100),
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"gpt-4o\""));
@@ -292,7 +302,7 @@ api_url = "https://api.openai.com/v1"
 api_key = "sk-xxx"
 model = "gpt-4-turbo"
 temperature = 0.1
-max_tokens = 4096
+max_output_tokens = 4096
 
 [[models]]
 name = "claude-3"
@@ -300,13 +310,26 @@ provider = "anthropic"
 api_url = "https://api.anthropic.com/v1"
 api_key = "sk-yyy"
 model = "claude-3-opus"
+
+[[models]]
+name = "alias-model"
+provider = "openai"
+api_url = "https://api.openai.com/v1"
+api_key = "sk-zzz"
+model = "gpt-4o"
+# 旧 key max_tokens 仍作别名接受
+max_tokens = 2048
 "#;
         let config: ModelsConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.models.len(), 2);
+        assert_eq!(config.models.len(), 3);
         assert_eq!(config.models[0].name, "gpt-4");
         assert_eq!(config.models[1].name, "claude-3");
-        // max_tokens 只对第一个模型设置了
-        assert_eq!(config.models[0].max_tokens, Some(4096));
-        assert_eq!(config.models[1].max_tokens, None);
+        assert_eq!(config.models[2].name, "alias-model");
+        // 新 key max_output_tokens
+        assert_eq!(config.models[0].max_output_tokens, Some(4096));
+        // 未设置 → None
+        assert_eq!(config.models[1].max_output_tokens, None);
+        // 旧 key max_tokens 别名仍解析为同一字段
+        assert_eq!(config.models[2].max_output_tokens, Some(2048));
     }
 }

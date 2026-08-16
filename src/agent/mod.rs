@@ -98,6 +98,8 @@ pub struct Agent {
     session_store: Option<SessionStore>,
     /// 工作目录，从 ToolRegistry 获取并存储，避免依赖 std::env::current_dir()
     working_dir: PathBuf,
+    /// 可选的 Hook 管理器：工具执行前/后触发 pre-tool / post-tool hooks。
+    hooks: Option<Arc<crate::hooks::HookManager>>,
 }
 
 impl Agent {
@@ -127,7 +129,13 @@ impl Agent {
             skills,
             session_store,
             working_dir: wd,
+            hooks: None,
         }
+    }
+
+    /// 注入 Hook 管理器（由 App 组装时调用），用于工具执行前后的 pre/post-tool hooks。
+    pub fn set_hooks(&mut self, hooks: Option<Arc<crate::hooks::HookManager>>) {
+        self.hooks = hooks;
     }
 
     /// 获取所有工具的 schemas（同步工具 + 异步工具）
@@ -540,6 +548,7 @@ impl Agent {
                 skills: Vec::new(),
                 session_store: None,
                 working_dir: wd,
+                hooks: None,
             });
         }
 
@@ -592,6 +601,7 @@ impl Agent {
             skills: Vec::new(),
             session_store: None,
             working_dir: wd,
+            hooks: None,
         })
     }
 
@@ -933,6 +943,28 @@ impl Agent {
                 continue;
             }
 
+            // ── pre-tool hooks：可在执行前拦截工具调用 ──
+            if let Some(ref hooks) = self.hooks {
+                match hooks.run_pre_tool(&tool_call.function.name, &tool_call.function.arguments) {
+                    crate::hooks::PreToolVerdict::Allow => {}
+                    crate::hooks::PreToolVerdict::Deny(reason) => {
+                        output.error(&format!(
+                            "工具 {} 被 pre-tool hook 拒绝：{}",
+                            display_name, reason
+                        ));
+                        let result = ToolResult::failure(
+                            format!(
+                                "工具 {} 被 pre-tool hook 拒绝：{}",
+                                tool_call.function.name, reason
+                            ),
+                            crate::tools::ErrorCategory::Permanent,
+                        );
+                        results.push(result);
+                        continue;
+                    }
+                }
+            }
+
             // 首先检查异步工具注册表
             let result = if let Some(ref async_tools) = self.async_tools {
                 match async_tools.execute_with_policy(
@@ -1012,6 +1044,16 @@ impl Agent {
             } else {
                 output.error(&format!("工具 {} 执行失败", tool_name));
             }
+
+            // ── post-tool hooks：执行完成后通知（输出仅记日志，不注入上下文）──
+            if let Some(ref hooks) = self.hooks {
+                hooks.run_post_tool(
+                    tool_name,
+                    &tool_call.function.arguments,
+                    result.success,
+                );
+            }
+
             results.push(result);
         }
 

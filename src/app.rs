@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::agent::{Agent, AgentConfig, ContextManager};
 use crate::config::{load_agent_config, load_models};
+use crate::hooks::config::HookEvent;
 use crate::hooks::HookManager;
 use crate::llm::LlmClient;
 use crate::orchestrator::{TaskOrchestrator, BackgroundConfig};
@@ -51,6 +52,9 @@ pub struct App {
     system_prompt: String,
     /// 定时任务调度器。
     scheduler: Arc<Scheduler>,
+    /// Hook 管理器：启动时已执行 session-start，退出时执行 session-end；
+    /// 与 Agent 共享（pre/post-tool hooks）。
+    hook_manager: Arc<HookManager>,
 }
 
 impl App {
@@ -126,7 +130,8 @@ impl App {
         let system_prompt = build_system_prompt(&discovered_skills);
 
         // 初始化 HookManager 并执行 session-start hooks
-        let hook_manager = HookManager::load(&config.working_dir, config.hooks_enabled);
+        // Arc 共享：App 与 Agent 都要用（session-end / pre/post-tool）
+        let hook_manager = Arc::new(HookManager::load(&config.working_dir, config.hooks_enabled));
         let hook_output = hook_manager.execute_session_start();
 
         // 创建或恢复 ContextManager
@@ -171,6 +176,9 @@ impl App {
         async_tools.register_tool(Arc::new(crate::tools::file::async_write::AsyncEditFileTool));
         
         let mut agent = Agent::new(context, tools, Some(async_tools), llm_client, agent_config, discovered_skills.clone(), session_store);
+
+        // 注入 HookManager，使 Agent 在工具执行前后触发 pre/post-tool hooks
+        agent.set_hooks(Some(hook_manager.clone()));
 
         // 恢复持久化的活跃模型
         let saved_model = agent.active_model_name().map(String::from);
@@ -222,6 +230,7 @@ impl App {
             skills: discovered_skills,
             system_prompt,
             scheduler,
+            hook_manager,
         })
     }
 
@@ -283,16 +292,27 @@ impl App {
     }
 
     /// 运行应用：根据配置选择交互 REPL、一次性模式或后台模式。
+    ///
+    /// 会话结束时（无论哪种模式、无论成败）执行 `session-end` hooks；
+    /// hook 输出仅记录日志，不改变返回值。
     pub async fn run(&mut self) -> Result<(), AppError> {
         // 启动定时任务调度器后台 tick 循环，确保 /schedule 和 schedule_task 工具可用
         self.scheduler.start().await;
-        if self.config.background {
+        let result = if self.config.background {
             self.run_background_mode().await
         } else if let Some(message) = self.config.message.clone() {
             self.run_once(&message).await
         } else {
             self.run_interactive().await
+        };
+
+        // 会话结束钩子：只记录，不影响退出码
+        let end_output = self.hook_manager.execute_event(HookEvent::SessionEnd, None);
+        if !end_output.is_empty() {
+            tracing::info!(output = %end_output, "Session-end hooks executed");
         }
+
+        result
     }
 
     /// 非交互模式：执行单条消息后退出。

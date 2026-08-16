@@ -113,6 +113,10 @@ struct Cli {
     #[arg(long)]
     no_hooks: bool,
 
+    /// 预览将执行的 hooks（不实际执行），打印后退出
+    #[arg(long)]
+    hooks_dry_run: bool,
+
     /// 启用详细日志输出
     #[arg(long)]
     verbose: bool,
@@ -251,6 +255,13 @@ fn main() -> Result<(), AppError> {
         background: cli.background,
         restart_args,
     };
+
+    // --hooks-dry-run：只预览将执行的 hooks，不启动会话
+    if cli.hooks_dry_run {
+        let hook_manager = crate::hooks::HookManager::load(&working_dir, !cli.no_hooks);
+        println!("{}", hook_manager.dry_run());
+        return Ok(());
+    }
 
     // App::build 是同步的，但 App::run 需要 tokio runtime。
     // 直接用 `tokio::main` 也可，但为了避免 `main` 函数签名膨胀，

@@ -1,9 +1,75 @@
 use super::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
+use crate::hooks::config::HookEvent;
 use crate::utils::error::AppError;
 
 /// The project root path, embedded at compile time.
 /// restart tool is only allowed when the working directory matches this project.
 const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
+
+pub fn run_hook_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "run_hook".to_string(),
+        description: "Execute configured hooks (from .dev-assistant/hooks.yaml) on demand and return their output. Use to re-run lifecycle scripts (git status, lint, tests, project context) at any point during the session. Optionally filter by event or hook name.".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "event": {
+                    "type": "string",
+                    "description": "Hook event to execute (default: session-start)",
+                    "enum": ["session-start", "session-end", "pre-tool", "post-tool", "user-input"]
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Only execute the hook with this name (default: all hooks for the event)"
+                }
+            }
+        }),
+        skip_security: true,
+        handler: Box::new(run_hook_handler),
+    }
+}
+
+fn run_hook_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, AppError> {
+    let event_str = args.arguments["event"].as_str().unwrap_or("session-start");
+    let event = match HookEvent::parse(event_str) {
+        Some(e) => e,
+        None => {
+            return Ok(ToolResult {
+                success: false,
+                security_evaluation: None,
+                restart_requested: false,
+                error_category: None,
+                content: format!("[run_hook] ❌ Unknown hook event: '{}'. Valid: session-start, session-end, pre-tool, post-tool, user-input", event_str),
+            });
+        }
+    };
+    let name_filter = args.arguments["name"].as_str();
+
+    let hook_manager = crate::hooks::HookManager::load(&context.working_dir, true);
+    let output = hook_manager.execute_event(event, name_filter);
+
+    if output.is_empty() {
+        Ok(ToolResult {
+            success: true,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+            content: format!(
+                "[run_hook] No hooks executed for event '{}'{}.",
+                event_str,
+                name_filter.map(|n| format!(" (name filter: '{}')", n)).unwrap_or_default()
+            ),
+        })
+    } else {
+        Ok(ToolResult {
+            success: true,
+            security_evaluation: None,
+            restart_requested: false,
+            error_category: None,
+            content: format!("[run_hook] Output of event '{}':\n{}", event_str, output),
+        })
+    }
+}
 
 pub fn finish_tool() -> ToolDefinition {
     ToolDefinition {

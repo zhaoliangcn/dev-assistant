@@ -116,18 +116,87 @@ cargo run --release -- --web --port 8080
 
 ### 内建命令
 
+#### 通用
+
 ```
-/help      — 显示帮助
-/history   — 显示对话历史
-/clear     — 清屏
-/expand    — 展开折叠的内容
-/grep      — 搜索文件内容（支持正则）
-/model     — 查看/切换 LLM 模型
-/pipeline  — 执行流水线任务
-/dream     — 手动触发记忆整理（支持 --dry-run 预演）
-/verbose   — 切换到详细模式
-/quiet     — 切换到安静模式
+/help        — 显示帮助
+/history     — 显示对话历史
+/clear       — 清屏
+/expand      — 展开上一条被折叠的内容
+/exit        — 退出程序
+/quit        — 退出程序（同 /exit）
 ```
+
+#### 搜索 / 查看
+
+```
+/grep <模式> [路径]  — 搜索文件内容（支持正则）
+/search <模式>      — 同 /grep
+/diff [路径...]     — 查看工作区改动（git diff）
+/status             — 查看当前任务状态
+```
+
+#### 模型 / 模式
+
+```
+/model [模型名] — 查看/切换 LLM 模型
+/verbose        — 切换到详细模式（显示所有消息）
+/quiet          — 切换到安静模式（仅显示关键消息）
+```
+
+#### 智能任务
+
+```
+/pipeline <任务描述>              — 执行流水线任务
+/dream [--dry-run] [--budget=N] — 手动触发记忆整理（--dry-run 预演，不消耗 LLM）
+/background                     — 后台任务管理
+```
+
+#### 定时任务
+
+```
+/schedule cron "<表达式>" agent <指令>     — 创建 cron 定时任务
+/schedule interval <秒> command <命令>     — 创建间隔定时任务
+/schedule once <秒> agent <指令>           — 创建一次性定时任务
+/unschedule <任务ID>                      — 取消定时任务
+/scheduled                                — 查看所有定时任务
+/tasks                                    — 同 /scheduled
+```
+
+#### 技能
+
+```
+/skill add <source> [--skill <名>...] [--global]  — 安装技能
+/skill list [--global]                            — 列出已安装技能
+/skill remove <名> [--global]                     — 移除技能
+/skill update [--global]                          — 更新技能（Git 来源）
+```
+
+### 常用启动参数
+
+```bash
+cargo run --release -- [选项]
+
+--web                      启动 Web UI（浏览器访问 http://127.0.0.1:8080）
+--host <地址>               Web 绑定主机（默认 127.0.0.1）
+--port <端口>               Web 绑定端口（默认 8080）
+--message "<文本>"          单次执行模式（执行后退出）
+--project <目录>            项目目录（默认当前目录）
+--config <路径>             模型配置文件（优先级最高）
+--provider <名称>           服务提供商（默认 openai）
+--model <名称>              覆盖默认模型名
+--no-approval               关闭高危操作交互式审批
+--no-hooks                  禁用 hook 机制
+--hooks-dry-run             预览将执行的 hooks（打印后退出）
+--translucent               半透明玻璃拟态界面
+--background                后台模式
+--max-iterations <N>        单次任务最大 Agent 迭代次数
+--max-tokens <N>            上下文窗口 token 预算（默认 262144）
+--verbose                   详细日志输出
+--resume                    从上次保存的状态恢复对话
+```
+
+所有选项可通过 `cargo run --release -- --help` 查看完整说明。
 
 ## 架构
 

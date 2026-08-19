@@ -1,4 +1,5 @@
 pub mod blocks;
+pub mod budget;
 pub mod input;
 pub mod markdown;
 pub mod output_impls;
@@ -7,6 +8,7 @@ pub mod style;
 pub mod theme;
 pub mod translucent;
 pub use blocks::MessageBlock;
+pub use budget::{render_budget_bar, render_budget_detail};
 pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};
 pub use realtime_output::RealtimeOutput;
@@ -33,7 +35,10 @@ static LAST_TRUNCATED_CONTENT: Mutex<Option<String>> = Mutex::new(None);
 /// 使用 `clone()` 而非 `take()`，支持多次调用 `/expand`。
 /// 新截断发生时自动覆盖旧值（见 `render_blocks_to_string`）。
 pub fn get_last_truncated_content() -> Option<String> {
-    LAST_TRUNCATED_CONTENT.lock().ok().and_then(|guard| guard.clone())
+    LAST_TRUNCATED_CONTENT
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
 }
 
 /// 将消息块渲染为字符串（纯渲染，无 IO 操作）。
@@ -88,7 +93,9 @@ pub fn render_blocks_to_string(
                 let theme = crate::ui::theme::active_theme();
                 result.push_str(&format!(
                     "\n{}... 还有 {} 行（输入 /expand 查看完整内容）{}",
-                    theme.muted_fg, remaining, crate::ui::theme::RESET
+                    theme.muted_fg,
+                    remaining,
+                    crate::ui::theme::RESET
                 ));
                 result
             } else {
@@ -115,12 +122,10 @@ pub fn render_blocks_to_string(
 /// 渲染单个消息块（追加模式，不清屏）
 ///
 /// 这是新的核心渲染 API，支持流式输出，保留终端滚动历史。
-pub fn render_block(
-    block: &MessageBlock,
-    markdown_renderer: &MarkdownRenderer,
-) -> io::Result<()> {
+pub fn render_block(block: &MessageBlock, markdown_renderer: &MarkdownRenderer) -> io::Result<()> {
     let term_width = get_terminal_width().unwrap_or(80);
-    let output = render_blocks_to_string(std::slice::from_ref(block), markdown_renderer, term_width);
+    let output =
+        render_blocks_to_string(std::slice::from_ref(block), markdown_renderer, term_width);
     let mut stdout = io::stdout();
     write!(stdout, "{}", output)?;
     stdout.flush()?;
@@ -171,16 +176,24 @@ impl From<&str> for StatusType {
             Self::ToolCall
         } else if s.contains("分析") || s.contains("检查") {
             Self::Analyzing
-        } else if s.contains("读取文件") || s.contains("读取") || s.contains("搜索")
+        } else if s.contains("读取文件")
+            || s.contains("读取")
+            || s.contains("搜索")
             || s.contains("search")
         {
             Self::Reading
-        } else if s.contains("等待 LLM") || s.contains("LLM 正在思考") || s.contains("发送请求")
-            || s.contains("LLM") || s.contains("API")
+        } else if s.contains("等待 LLM")
+            || s.contains("LLM 正在思考")
+            || s.contains("发送请求")
+            || s.contains("LLM")
+            || s.contains("API")
         {
             Self::WaitingLLM
-        } else if s.contains("完成") || s.contains("处理完成") || s.contains("done")
-            || s.contains("成功") || s.contains("success")
+        } else if s.contains("完成")
+            || s.contains("处理完成")
+            || s.contains("done")
+            || s.contains("成功")
+            || s.contains("success")
         {
             Self::Done
         } else {
@@ -210,7 +223,11 @@ pub fn render_progress_bar(
     // 进度条宽度
     let bar_width = (term_width.saturating_sub(20)).clamp(10, 60);
     let elapsed = start_time.elapsed();
-    let progress = if total > 0 { current as f64 / total as f64 } else { 0.0 };
+    let progress = if total > 0 {
+        current as f64 / total as f64
+    } else {
+        0.0
+    };
     let percent = (progress * 100.0) as usize;
     let filled = (progress * bar_width as f64) as usize;
     let empty = bar_width.saturating_sub(filled);
@@ -279,9 +296,7 @@ pub fn render_input_panel(status_line: Option<&str>) -> io::Result<()> {
 /// 使用 [`StatusType`] 枚举进行分类，优先匹配 emoji 前缀，再回退到关键词。
 fn enhance_status(status: &str) -> String {
     // 移除可能已有的 spinner 前缀
-    let clean = status
-        .trim_start_matches("⏳ ")
-        .trim_start_matches("⌛ ");
+    let clean = status.trim_start_matches("⏳ ").trim_start_matches("⌛ ");
 
     match StatusType::from(clean) {
         StatusType::ToolCall => format!("🔧 {}", clean),

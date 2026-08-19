@@ -4,10 +4,10 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use crate::agent::{Agent, AgentStep};
-use crate::ui::{self, UIMessageOutput, MarkdownRenderer};
+use crate::ui::{self, MarkdownRenderer, UIMessageOutput};
+use crate::utils::error::AppError;
 use crate::utils::message_level::MessageLevel;
 use crate::utils::message_output::MessageOutput;
-use crate::utils::error::AppError;
 
 // ── 状态指示器 ─────────────────────────────────────────────────────────
 
@@ -82,9 +82,13 @@ fn merge_consecutive_blocks(blocks: &[ui::MessageBlock]) -> Vec<ui::MessageBlock
 fn classify_info_message(msg: &str) -> ui::MessageBlock {
     // 按 emoji 前缀精确判断
     if msg.starts_with("💭") {
-        ui::MessageBlock::Thinking { content: msg.to_string() }
+        ui::MessageBlock::Thinking {
+            content: msg.to_string(),
+        }
     } else if msg.starts_with("🔧") || msg.starts_with("↻") {
-        ui::MessageBlock::System { content: msg.to_string() }
+        ui::MessageBlock::System {
+            content: msg.to_string(),
+        }
     } else if msg.starts_with("✅") {
         ui::MessageBlock::ToolResult {
             tool_name: String::new(),
@@ -92,19 +96,29 @@ fn classify_info_message(msg: &str) -> ui::MessageBlock {
             content: msg.to_string(),
         }
     } else if msg.starts_with("❌") || msg.starts_with("🔥") {
-        ui::MessageBlock::Error { content: msg.to_string() }
+        ui::MessageBlock::Error {
+            content: msg.to_string(),
+        }
     } else if msg.starts_with("⚠️") || msg.starts_with("ℹ️") || msg.starts_with("📝") {
-        ui::MessageBlock::System { content: msg.to_string() }
+        ui::MessageBlock::System {
+            content: msg.to_string(),
+        }
     } else {
         // 兜底：无 emoji 时再尝试文本匹配
         let is_thinking = msg.contains("思考") || msg.contains("thinking") || msg.contains("分析");
         let is_tool = msg.contains("工具") || msg.contains("执行");
         if is_thinking {
-            ui::MessageBlock::Thinking { content: msg.to_string() }
+            ui::MessageBlock::Thinking {
+                content: msg.to_string(),
+            }
         } else if is_tool {
-            ui::MessageBlock::System { content: msg.to_string() }
+            ui::MessageBlock::System {
+                content: msg.to_string(),
+            }
         } else {
-            ui::MessageBlock::System { content: format!("ℹ️ {}", msg) }
+            ui::MessageBlock::System {
+                content: format!("ℹ️ {}", msg),
+            }
         }
     }
 }
@@ -151,13 +165,13 @@ pub enum ReplAction {
 ///
 /// 所有命令的输出直接通过 `ui::render_block` 渲染到终端，避免存入 `DisplayBuffer`
 /// 后被 `reset_display_for_new_turn()` 清空。
-pub fn handle_slash(
-    input: &str,
-    agent: &mut Agent,
-    working_dir: &Path,
-) -> Option<SlashOutcome> {
+pub fn handle_slash(input: &str, agent: &mut Agent, working_dir: &Path) -> Option<SlashOutcome> {
     if input == "/status" {
         return Some(handle_status_command(agent));
+    }
+
+    if input == "/budget" {
+        return Some(handle_budget_command(agent));
     }
 
     if input == "/background" {
@@ -186,7 +200,7 @@ pub fn handle_slash(
 fn handle_status_command(_agent: &mut Agent) -> SlashOutcome {
     let md = MarkdownRenderer::new();
     use crate::tools::task_tools::get_global_task_manager;
-    
+
     let content = if let Some(manager) = get_global_task_manager() {
         let graph_arc = manager.graph();
         let graph = graph_arc.lock().unwrap();
@@ -218,8 +232,16 @@ fn handle_background_command(_agent: &mut Agent) -> SlashOutcome {
          - /status: 查询任务状态\n\
          - /pause: 暂停任务\n\
          - /resume: 恢复任务\n\
-         - /cancel: 取消任务".to_string();
+         - /cancel: 取消任务"
+        .to_string();
     let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
+    SlashOutcome::Continue
+}
+
+/// 处理 `/budget` 命令：显示详细上下文预算面板。
+fn handle_budget_command(agent: &mut Agent) -> SlashOutcome {
+    let budget = agent.get_budget_report();
+    let _ = ui::render_budget_detail(&budget);
     SlashOutcome::Continue
 }
 
@@ -232,15 +254,17 @@ fn handle_background_command(_agent: &mut Agent) -> SlashOutcome {
 ///   /schedule interval <秒> command <命令>
 ///   /schedule once <秒> agent <指令>
 fn handle_schedule_command(input: &str) -> SlashOutcome {
+    use crate::scheduler::task::{ScheduleType, ScheduledTask, TaskExecutionMode};
     use crate::scheduler::tools_handlers::get_global_scheduler;
-    use crate::scheduler::task::{ScheduledTask, ScheduleType, TaskExecutionMode};
 
     let md = MarkdownRenderer::new();
     let scheduler = match get_global_scheduler() {
         Some(s) => s,
         None => {
             let _ = ui::render_block(
-                &ui::MessageBlock::Error { content: "❌ 调度器未初始化".to_string() },
+                &ui::MessageBlock::Error {
+                    content: "❌ 调度器未初始化".to_string(),
+                },
                 &md,
             );
             return SlashOutcome::Continue;
@@ -270,7 +294,9 @@ fn handle_schedule_command(input: &str) -> SlashOutcome {
                 .join(" ");
             if expr.is_empty() {
                 let _ = ui::render_block(
-                    &ui::MessageBlock::Error { content: "❌ cron 表达式不能为空".to_string() },
+                    &ui::MessageBlock::Error {
+                        content: "❌ cron 表达式不能为空".to_string(),
+                    },
                     &md,
                 );
                 return SlashOutcome::Continue;
@@ -282,7 +308,9 @@ fn handle_schedule_command(input: &str) -> SlashOutcome {
                 Ok(s) => s,
                 Err(_) => {
                     let _ = ui::render_block(
-                        &ui::MessageBlock::Error { content: "❌ 间隔秒数必须为数字".to_string() },
+                        &ui::MessageBlock::Error {
+                            content: "❌ 间隔秒数必须为数字".to_string(),
+                        },
                         &md,
                     );
                     return SlashOutcome::Continue;
@@ -295,7 +323,9 @@ fn handle_schedule_command(input: &str) -> SlashOutcome {
                 Ok(s) => s,
                 Err(_) => {
                     let _ = ui::render_block(
-                        &ui::MessageBlock::Error { content: "❌ 延迟秒数必须为数字".to_string() },
+                        &ui::MessageBlock::Error {
+                            content: "❌ 延迟秒数必须为数字".to_string(),
+                        },
                         &md,
                     );
                     return SlashOutcome::Continue;
@@ -306,7 +336,10 @@ fn handle_schedule_command(input: &str) -> SlashOutcome {
         _ => {
             let _ = ui::render_block(
                 &ui::MessageBlock::Error {
-                    content: format!("❌ 未知调度类型: {}，支持: cron/interval/once", schedule_type),
+                    content: format!(
+                        "❌ 未知调度类型: {}，支持: cron/interval/once",
+                        schedule_type
+                    ),
                 },
                 &md,
             );
@@ -320,7 +353,9 @@ fn handle_schedule_command(input: &str) -> SlashOutcome {
         Some(i) => i,
         None => {
             let _ = ui::render_block(
-                &ui::MessageBlock::Error { content: "❌ 缺少执行模式 (agent/command)".to_string() },
+                &ui::MessageBlock::Error {
+                    content: "❌ 缺少执行模式 (agent/command)".to_string(),
+                },
                 &md,
             );
             return SlashOutcome::Continue;
@@ -333,7 +368,14 @@ fn handle_schedule_command(input: &str) -> SlashOutcome {
     if remaining.is_empty() {
         let _ = ui::render_block(
             &ui::MessageBlock::Error {
-                content: format!("❌ {} 指令内容不能为空", if mode_type == "agent" { "Agent" } else { "命令" }),
+                content: format!(
+                    "❌ {} 指令内容不能为空",
+                    if mode_type == "agent" {
+                        "Agent"
+                    } else {
+                        "命令"
+                    }
+                ),
             },
             &md,
         );
@@ -341,8 +383,13 @@ fn handle_schedule_command(input: &str) -> SlashOutcome {
     }
 
     let mode = match mode_type {
-        "agent" => TaskExecutionMode::Agent { instruction: remaining.clone() },
-        "command" => TaskExecutionMode::Command { command: remaining.clone(), working_dir: None },
+        "agent" => TaskExecutionMode::Agent {
+            instruction: remaining.clone(),
+        },
+        "command" => TaskExecutionMode::Command {
+            command: remaining.clone(),
+            working_dir: None,
+        },
         _ => unreachable!(),
     };
 
@@ -352,16 +399,12 @@ fn handle_schedule_command(input: &str) -> SlashOutcome {
         crate::scheduler::tools::generate_short_id(6)
     );
 
-    let task_name = format!("{}: {}", mode_type, remaining.chars().take(30).collect::<String>());
-    let task = ScheduledTask::new(
-        task_id,
-        task_name,
-        schedule,
-        mode,
-        3,
-        vec![],
-        600,
+    let task_name = format!(
+        "{}: {}",
+        mode_type,
+        remaining.chars().take(30).collect::<String>()
     );
+    let task = ScheduledTask::new(task_id, task_name, schedule, mode, 3, vec![], 600);
 
     match scheduler.schedule_task(&task) {
         Ok(()) => {
@@ -397,17 +440,25 @@ fn handle_unschedule_command(input: &str) -> SlashOutcome {
         Some(s) => s,
         None => {
             let _ = ui::render_block(
-                &ui::MessageBlock::Error { content: "❌ 调度器未初始化".to_string() },
+                &ui::MessageBlock::Error {
+                    content: "❌ 调度器未初始化".to_string(),
+                },
                 &md,
             );
             return SlashOutcome::Continue;
         }
     };
 
-    let task_id = input.strip_prefix("/unschedule ").unwrap_or("").trim().to_string();
+    let task_id = input
+        .strip_prefix("/unschedule ")
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if task_id.is_empty() {
         let _ = ui::render_block(
-            &ui::MessageBlock::Error { content: "❌ 用法: /unschedule <task-id>\n使用 /scheduled 查看任务 ID".to_string() },
+            &ui::MessageBlock::Error {
+                content: "❌ 用法: /unschedule <task-id>\n使用 /scheduled 查看任务 ID".to_string(),
+            },
             &md,
         );
         return SlashOutcome::Continue;
@@ -453,7 +504,9 @@ fn handle_list_scheduled_command() -> SlashOutcome {
         Some(s) => s,
         None => {
             let _ = ui::render_block(
-                &ui::MessageBlock::Error { content: "❌ 调度器未初始化".to_string() },
+                &ui::MessageBlock::Error {
+                    content: "❌ 调度器未初始化".to_string(),
+                },
                 &md,
             );
             return SlashOutcome::Continue;
@@ -478,7 +531,9 @@ fn handle_list_scheduled_command() -> SlashOutcome {
 
     if tasks.is_empty() {
         let _ = ui::render_block(
-            &ui::MessageBlock::System { content: "📭 暂无定时任务\n使用 /schedule 创建定时任务".to_string() },
+            &ui::MessageBlock::System {
+                content: "📭 暂无定时任务\n使用 /schedule 创建定时任务".to_string(),
+            },
             &md,
         );
         return SlashOutcome::Continue;
@@ -493,7 +548,10 @@ fn handle_list_scheduled_command() -> SlashOutcome {
         };
         let mode_desc = match &task.mode {
             crate::scheduler::task::TaskExecutionMode::Agent { instruction } => {
-                format!("Agent: {}", instruction.chars().take(40).collect::<String>())
+                format!(
+                    "Agent: {}",
+                    instruction.chars().take(40).collect::<String>()
+                )
             }
             crate::scheduler::task::TaskExecutionMode::Command { command, .. } => {
                 format!("Command: {}", command.chars().take(40).collect::<String>())
@@ -513,12 +571,10 @@ fn handle_list_scheduled_command() -> SlashOutcome {
 /// 将消息级别和内容转换为 MessageBlock（统一逻辑，避免重复）。
 fn message_to_block(level: MessageLevel, msg: String) -> ui::MessageBlock {
     match level {
-        MessageLevel::Error => {
-            ui::MessageBlock::Error { content: msg }
-        }
-        MessageLevel::Warning => {
-            ui::MessageBlock::System { content: format!("⚠️ {}", msg) }
-        }
+        MessageLevel::Error => ui::MessageBlock::Error { content: msg },
+        MessageLevel::Warning => ui::MessageBlock::System {
+            content: format!("⚠️ {}", msg),
+        },
         MessageLevel::Info => {
             let b = classify_info_message(&msg);
             if matches!(b, ui::MessageBlock::Thinking { .. }) {
@@ -528,16 +584,14 @@ fn message_to_block(level: MessageLevel, msg: String) -> ui::MessageBlock {
                 b
             }
         }
-        MessageLevel::Debug => {
-            ui::MessageBlock::System { content: format!("🐛 {}", msg) }
-        }
-        MessageLevel::Success => {
-            ui::MessageBlock::ToolResult {
-                tool_name: "操作".to_string(),
-                success: true,
-                content: msg,
-            }
-        }
+        MessageLevel::Debug => ui::MessageBlock::System {
+            content: format!("🐛 {}", msg),
+        },
+        MessageLevel::Success => ui::MessageBlock::ToolResult {
+            tool_name: "操作".to_string(),
+            success: true,
+            content: msg,
+        },
     }
 }
 
@@ -598,7 +652,11 @@ pub async fn process_user_message(
 
         // 渲染上一轮流式完成后的助手内容（避免与 drain/render_block 重复）
         if let Some(assistant_content) = output.take_pending_assistant() {
-            flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+            flush_pending_thinking(
+                &mut pending_thinking,
+                &mut thinking_count,
+                markdown_renderer,
+            )?;
             let block = ui::MessageBlock::Assistant {
                 content: assistant_content,
             };
@@ -611,22 +669,29 @@ pub async fn process_user_message(
 
             // 根据消息级别渲染不同类型的块
             let block = message_to_block(level, msg);
-            
+
             // Thinking 块需要合并处理
             if matches!(block, ui::MessageBlock::Thinking { .. }) {
                 pending_thinking = Some(block.content().to_string());
                 thinking_count += 1;
                 continue;
             }
-            
-            flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+
+            flush_pending_thinking(
+                &mut pending_thinking,
+                &mut thinking_count,
+                markdown_renderer,
+            )?;
 
             // 检查是否是连续相同类型的消息（50ms 内）
             let block_type = block.block_type();
             let now = std::time::Instant::now();
 
             match &last_block_type {
-                Some((last_type, last_time)) if *last_type == block_type && now.duration_since(*last_time).as_millis() < 50 => {
+                Some((last_type, last_time))
+                    if *last_type == block_type
+                        && now.duration_since(*last_time).as_millis() < 50 =>
+                {
                     // 相同类型，50ms 内：加入当前批次
                     current_type_blocks.push(block);
                 }
@@ -642,7 +707,11 @@ pub async fn process_user_message(
         }
 
         // 刷新本轮剩余的待处理 Thinking 块
-        flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+        flush_pending_thinking(
+            &mut pending_thinking,
+            &mut thinking_count,
+            markdown_renderer,
+        )?;
 
         // 渲染剩余批次
         render_block_batch(&current_type_blocks, markdown_renderer)?;
@@ -651,7 +720,11 @@ pub async fn process_user_message(
         // 检测上一轮操作，生成上下文状态提示
         let status = derive_thinking_status(output.last_message());
         step_round += 1;
-        let spinner = if step_round.is_multiple_of(2) { "⏳" } else { "⌛" };
+        let spinner = if step_round.is_multiple_of(2) {
+            "⏳"
+        } else {
+            "⌛"
+        };
         ui::render_input_panel(Some(&format!("{} {}", spinner, status)))?;
 
         tokio::select! {
@@ -683,22 +756,28 @@ pub async fn process_user_message(
 
         // 渲染到终端（与主循环使用相同的分类逻辑）
         let block = message_to_block(level, msg);
-        
+
         // Thinking 块需要合并处理
         if matches!(block, ui::MessageBlock::Thinking { .. }) {
             pending_thinking = Some(block.content().to_string());
             thinking_count += 1;
             continue;
         }
-        
-        flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+
+        flush_pending_thinking(
+            &mut pending_thinking,
+            &mut thinking_count,
+            markdown_renderer,
+        )?;
 
         // 检查是否是连续相同类型的消息（50ms 内）
         let block_type = block.block_type();
         let now = std::time::Instant::now();
 
         match &last_block_type {
-            Some((last_type, last_time)) if *last_type == block_type && now.duration_since(*last_time).as_millis() < 50 => {
+            Some((last_type, last_time))
+                if *last_type == block_type && now.duration_since(*last_time).as_millis() < 50 =>
+            {
                 // 相同类型，50ms 内：加入当前批次
                 current_type_blocks.push(block);
             }
@@ -713,7 +792,11 @@ pub async fn process_user_message(
         }
     }
     // 刷新本轮剩余的待处理 Thinking 块
-    flush_pending_thinking(&mut pending_thinking, &mut thinking_count, markdown_renderer)?;
+    flush_pending_thinking(
+        &mut pending_thinking,
+        &mut thinking_count,
+        markdown_renderer,
+    )?;
 
     // 渲染剩余批次
     render_block_batch(&current_type_blocks, markdown_renderer)?;
@@ -723,10 +806,7 @@ pub async fn process_user_message(
     let result = match result {
         Some(r) => r,
         None => {
-            agent.add_display_message(
-                MessageLevel::Warning,
-                "⏹ 操作已取消",
-            );
+            agent.add_display_message(MessageLevel::Warning, "⏹ 操作已取消");
             return Ok(ReplAction::Continue);
         }
     };
@@ -772,7 +852,10 @@ pub async fn process_user_message(
 
     // 渲染累计的 Token 消耗统计：独立于交互消息流，统一在末尾展示
     if let Some((prompt, completion, total)) = output.take_token_usage() {
-        let msg = format!("🔤 Token 消耗: prompt={} · completion={} · total={}", prompt, completion, total);
+        let msg = format!(
+            "🔤 Token 消耗: prompt={} · completion={} · total={}",
+            prompt, completion, total
+        );
         let block = ui::MessageBlock::System { content: msg };
         ui::render_block(&block, markdown_renderer)?;
     }
@@ -815,22 +898,15 @@ pub fn handle_restart(
         return Ok(ReplAction::Quit);
     }
 
-    agent.add_display_message(
-        MessageLevel::Info,
-        "正在运行 cargo build...",
-    );
+    agent.add_display_message(MessageLevel::Info, "正在运行 cargo build...");
     render_agent_messages(agent, verbose)?;
     std::io::stdout().flush().ok();
 
     // perform_restart 会在成功时 exec() 替换进程，永远不会返回；
     // 返回 true 表示构建失败、需要继续 REPL。
-    let should_continue = perform_restart(
-        working_dir,
-        restart_args,
-        &mut |level, msg: String| {
-            agent.add_display_message(level, &msg);
-        },
-    );
+    let should_continue = perform_restart(working_dir, restart_args, &mut |level, msg: String| {
+        agent.add_display_message(level, &msg);
+    });
 
     if should_continue {
         render_agent_messages(agent, verbose)?;
@@ -857,6 +933,11 @@ pub fn render_agent_messages(agent: &Agent, verbose: bool) -> Result<(), AppErro
     }
 
     ui::render_blocks(&blocks, &md)?;
+
+    // 每轮渲染末尾显示紧凑上下文预算条（复用已有 ContextBudget API）。
+    // 非终端输出时 render_budget_bar 内部静默跳过，不影响管道/重定向。
+    let _ = ui::render_budget_bar(&agent.get_budget_report());
+
     Ok(())
 }
 
@@ -868,7 +949,9 @@ pub fn render_agent_messages(agent: &Agent, verbose: bool) -> Result<(), AppErro
 ///   /skill remove <name> [--global]
 ///   /skill update [--global]
 fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
-    use crate::skills::installer::{install_skill, list_skills, read_skill_meta, remove_skill, InstallScope};
+    use crate::skills::installer::{
+        install_skill, list_skills, read_skill_meta, remove_skill, InstallScope,
+    };
 
     let md = MarkdownRenderer::new();
     let parts: Vec<&str> = input.split_whitespace().collect();
@@ -884,7 +967,8 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
                     source 格式：\n\
                     `owner/repo`  — Git 仓库（展开为 GitHub URL）\n\
                     `https://github.com/...`  — 完整 Git URL\n\
-                    `./local-path`  — 本地目录".to_string(),
+                    `./local-path`  — 本地目录"
+                    .to_string(),
             },
             &md,
         );
@@ -896,7 +980,9 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
             if parts.len() < 3 {
                 let _ = ui::render_block(
                     &ui::MessageBlock::Error {
-                        content: "❌ 缺少源参数。用法：/skill add <source> [--skill <name>] [--global]".to_string(),
+                        content:
+                            "❌ 缺少源参数。用法：/skill add <source> [--skill <name>] [--global]"
+                                .to_string(),
                     },
                     &md,
                 );
@@ -905,13 +991,18 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
 
             let source = parts[2];
             let is_global = parts.contains(&"--global");
-            let skill_filters: Vec<String> = parts.iter()
+            let skill_filters: Vec<String> = parts
+                .iter()
                 .skip(3)
                 .filter(|p| **p != "--global")
                 .map(|p| p.to_string())
                 .collect();
 
-            let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
+            let scope = if is_global {
+                InstallScope::Global
+            } else {
+                InstallScope::Project
+            };
 
             // skill add 命令在同步上下文中执行，但 install_skill 是 async
             // 使用 tokio Handle 直接在当前运行时执行
@@ -922,26 +1013,29 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
                 tokio::runtime::Handle::current().block_on(async {
                     install_skill(&source, scope, &working_dir, Some(&skill_filters)).await
                 })
-            }).join().unwrap();
+            })
+            .join()
+            .unwrap();
 
             match result {
                 Ok(ref skills) => {
                     let names: Vec<String> = skills.iter().map(|s| s.meta.name.clone()).collect();
-                    let mut content = format!(
-                        "✅ 已安装 {} 个技能（{} 范围）：\n",
-                        names.len(), scope
-                    );
+                    let mut content =
+                        format!("✅ 已安装 {} 个技能（{} 范围）：\n", names.len(), scope);
                     for skill in skills {
                         content.push_str(&format!(
                             "  • **{}**: {}\n",
                             skill.meta.name, skill.meta.description
                         ));
                     }
-                    let _ = ui::render_block(&ui::MessageBlock::ToolResult {
-                        tool_name: "技能".to_string(),
-                        success: true,
-                        content,
-                    }, &md);
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::ToolResult {
+                            tool_name: "技能".to_string(),
+                            success: true,
+                            content,
+                        },
+                        &md,
+                    );
                 }
                 Err(e) => {
                     let _ = ui::render_block(
@@ -956,7 +1050,11 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
 
         "list" => {
             let is_global = parts.contains(&"--global");
-            let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
+            let scope = if is_global {
+                InstallScope::Global
+            } else {
+                InstallScope::Project
+            };
 
             match list_skills(scope, working_dir) {
                 Ok(skills) => {
@@ -968,7 +1066,11 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
                             &md,
                         );
                     } else {
-                        let mut content = format!("📚 已安装技能（{} 范围，共 {} 个）：\n\n", scope, skills.len());
+                        let mut content = format!(
+                            "📚 已安装技能（{} 范围，共 {} 个）：\n\n",
+                            scope,
+                            skills.len()
+                        );
                         for skill in &skills {
                             let when = skill
                                 .meta
@@ -996,11 +1098,7 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
                                 .unwrap_or_default();
                             content.push_str(&format!(
                                 "  • **{}**: {}{}{}{}",
-                                skill.meta.name,
-                                skill.meta.description,
-                                when,
-                                version,
-                                source
+                                skill.meta.name, skill.meta.description, when, version, source
                             ));
                             content.push('\n');
                         }
@@ -1022,7 +1120,8 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
             if parts.len() < 3 {
                 let _ = ui::render_block(
                     &ui::MessageBlock::Error {
-                        content: "❌ 缺少技能名称。用法：/skill remove <name> [--global]".to_string(),
+                        content: "❌ 缺少技能名称。用法：/skill remove <name> [--global]"
+                            .to_string(),
                     },
                     &md,
                 );
@@ -1031,7 +1130,11 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
 
             let name = parts[2];
             let is_global = parts.contains(&"--global");
-            let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
+            let scope = if is_global {
+                InstallScope::Global
+            } else {
+                InstallScope::Project
+            };
 
             match remove_skill(name, scope, working_dir) {
                 Ok(()) => {
@@ -1057,7 +1160,11 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
 
         "update" => {
             let is_global = parts.contains(&"--global");
-            let scope = if is_global { InstallScope::Global } else { InstallScope::Project };
+            let scope = if is_global {
+                InstallScope::Global
+            } else {
+                InstallScope::Project
+            };
 
             match crate::skills::installer::update_skills(scope, working_dir) {
                 Ok(updated) => {
@@ -1073,7 +1180,11 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
                             &ui::MessageBlock::ToolResult {
                                 tool_name: "技能".to_string(),
                                 success: true,
-                                content: format!("✅ 已更新 {} 个技能: {}", updated.len(), updated.join(", ")),
+                                content: format!(
+                                    "✅ 已更新 {} 个技能: {}",
+                                    updated.len(),
+                                    updated.join(", ")
+                                ),
                             },
                             &md,
                         );
@@ -1102,5 +1213,3 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
 
     SlashOutcome::Continue
 }
-
-

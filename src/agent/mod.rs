@@ -23,8 +23,8 @@ use crate::llm::{LlmClient, LlmStreamEvent, ToolCall};
 use crate::persist::SessionStore;
 use crate::skills::Skill;
 use crate::tools::{async_tool::AsyncToolRegistry, ToolRegistry, ToolResult};
-use crate::utils::message_output::MessageOutput;
 use crate::utils::error::AppError;
+use crate::utils::message_output::MessageOutput;
 use tracing::{debug, info, warn};
 
 /// 最大子代理深度。超过此深度时，返回 `SubagentDepthLimit` 错误。
@@ -151,9 +151,18 @@ impl Agent {
         schemas
     }
 
+    /// 获取当前上下文预算报告，供 UI 展示上下文使用情况。
+    pub fn get_budget_report(&self) -> crate::agent::context::ContextBudget {
+        self.context.get_budget_report()
+    }
+
     // ----- UI 展示缓冲区委托 -----
 
-    pub fn add_display_message(&mut self, level: crate::utils::message_level::MessageLevel, msg: &str) {
+    pub fn add_display_message(
+        &mut self,
+        level: crate::utils::message_level::MessageLevel,
+        msg: &str,
+    ) {
         self.context.add_display_message(level, msg);
     }
 
@@ -200,7 +209,8 @@ impl Agent {
         tool_calls: Option<Vec<crate::llm::ToolCall>>,
         tool_call_id: Option<String>,
     ) {
-        self.context.add_message(role, content, tool_calls, tool_call_id);
+        self.context
+            .add_message(role, content, tool_calls, tool_call_id);
     }
 
     // ----- 状态持久化委托 -----
@@ -298,7 +308,10 @@ impl Agent {
     /// 执行一轮 Agent 迭代（一次 LLM 调用 + 响应处理）。
     /// 返回 `AgentStep::Continue` 表示需要继续下一轮，`AgentStep::Done` 表示已完成。
     pub async fn step(&mut self, output: &mut dyn MessageOutput) -> Result<AgentStep, AppError> {
-        output.info(&format!("↻ 第 {} 轮：向 LLM 发送请求...", self.context.consecutive_no_tool_rounds + 1));
+        output.info(&format!(
+            "↻ 第 {} 轮：向 LLM 发送请求...",
+            self.context.consecutive_no_tool_rounds + 1
+        ));
 
         let messages = self.context.build_messages();
         let tool_schemas = self.get_all_tool_schemas();
@@ -323,7 +336,10 @@ impl Agent {
 
         loop {
             // 使用流式响应
-            let mut stream = self.llm.call_streaming(messages.clone(), tool_schemas.clone()).await?;
+            let mut stream = self
+                .llm
+                .call_streaming(messages.clone(), tool_schemas.clone())
+                .await?;
             let mut assistant_content = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
 
@@ -341,7 +357,11 @@ impl Agent {
                         tool_calls.push(tc);
                     }
                     Ok(LlmStreamEvent::Usage(usage)) => {
-                        output.report_token_usage(usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
+                        output.report_token_usage(
+                            usage.prompt_tokens,
+                            usage.completion_tokens,
+                            usage.total_tokens,
+                        );
                     }
                     Ok(LlmStreamEvent::Done) => {
                         // 最终渲染（移除闪烁光标）
@@ -493,7 +513,9 @@ impl Agent {
                     let delay = Duration::from_secs(2u64.pow(empty_attempt));
                     output.warning(&format!(
                         "LLM 返回空响应，{}/{} 次重试，{}s 后重试...",
-                        empty_attempt, MAX_EMPTY_RETRIES, delay.as_secs()
+                        empty_attempt,
+                        MAX_EMPTY_RETRIES,
+                        delay.as_secs()
                     ));
                     tokio::time::sleep(delay).await;
                     continue;
@@ -511,7 +533,11 @@ impl Agent {
     }
 
     /// 完整运行 Agent 直到完成（非交互模式使用）。
-    pub async fn run(&mut self, user_message: String, output: &mut dyn MessageOutput) -> Result<AgentResult, AppError> {
+    pub async fn run(
+        &mut self,
+        user_message: String,
+        output: &mut dyn MessageOutput,
+    ) -> Result<AgentResult, AppError> {
         self.start_turn(user_message, output);
 
         for _ in 0..self.max_iterations {
@@ -584,7 +610,10 @@ impl Agent {
         let mut task_description = if config.context.is_empty() {
             format!("任务目标：{}", config.task)
         } else {
-            format!("任务目标：{}\n\n上下文信息：\n{}", config.task, config.context)
+            format!(
+                "任务目标：{}\n\n上下文信息：\n{}",
+                config.task, config.context
+            )
         };
 
         // 若父代理提供了上下文预算信息，附加到任务描述中，
@@ -686,17 +715,20 @@ impl Agent {
         let stages: Vec<PipelineStage> = STAGE_TEMPLATES
             .iter()
             .enumerate()
-            .map(|(i, (name, agent_type, template, output_desc, example_summary))| {
-                let task_template = template
-                    .replace("{task_ref}", task)
-                    .replace("{finish}", &Self::finish_warning(output_desc, example_summary));
-                PipelineStage {
-                    name: name.to_string(),
-                    agent_type: agent_type.clone(),
-                    task_template,
-                    max_iterations: alloc(STAGE_WEIGHTS[i]),
-                }
-            })
+            .map(
+                |(i, (name, agent_type, template, output_desc, example_summary))| {
+                    let task_template = template.replace("{task_ref}", task).replace(
+                        "{finish}",
+                        &Self::finish_warning(output_desc, example_summary),
+                    );
+                    PipelineStage {
+                        name: name.to_string(),
+                        agent_type: agent_type.clone(),
+                        task_template,
+                        max_iterations: alloc(STAGE_WEIGHTS[i]),
+                    }
+                },
+            )
             .collect();
 
         let total = stages.len();
@@ -706,9 +738,14 @@ impl Agent {
         let mut pipeline_ctx = if resume {
             match pipeline_store.load_checkpoint()? {
                 Some(ctx) => {
-                    info!("恢复 pipeline 从阶段 {} (已完成 {} 个阶段)",
+                    info!(
+                        "恢复 pipeline 从阶段 {} (已完成 {} 个阶段)",
                         ctx.current_stage,
-                        ctx.stages.iter().filter(|s| s.status == StageStatus::Completed).count());
+                        ctx.stages
+                            .iter()
+                            .filter(|s| s.status == StageStatus::Completed)
+                            .count()
+                    );
                     self.add_display_message(
                         crate::utils::message_level::MessageLevel::Info,
                         &format!("🔄 恢复 pipeline 从阶段 {} 开始...", ctx.current_stage + 1),
@@ -771,7 +808,8 @@ impl Agent {
             let context_prompt = pipeline_ctx.build_context_prompt();
             let stage_task = stage.task_template.replace("{context}", &context_prompt);
 
-            let subagent_tools = self.tools
+            let subagent_tools = self
+                .tools
                 .new_subagent_registry_with_identity(&stage.agent_type);
 
             let mut subagent = match Agent::new_subagent(SubagentConfig {
@@ -803,7 +841,8 @@ impl Agent {
             };
 
             let stage_type_name = stage.agent_type.to_str();
-            let mut sub_output = crate::ui::RealtimeOutput::new(verbose, self.depth + 1, stage_type_name);
+            let mut sub_output =
+                crate::ui::RealtimeOutput::new(verbose, self.depth + 1, stage_type_name);
             let result = Box::pin(subagent.run(stage_task, &mut sub_output)).await;
 
             // 收集子代理输出消息到主 Agent 的显示缓冲区
@@ -822,7 +861,9 @@ impl Agent {
                         stage_ctx.modified_files = files;
                     }
                     // 记录产物引用（与阶段模板中指示 LLM 保存的目录保持一致）
-                    stage_ctx.artifacts.push(format!("pipeline/stage-{}", stage_idx));
+                    stage_ctx
+                        .artifacts
+                        .push(format!("pipeline/stage-{}", stage_idx));
 
                     // 保存阶段上下文到文件
                     let _ = pipeline_store.save_stage_context(stage_ctx);
@@ -876,7 +917,13 @@ impl Agent {
         }
 
         // 完成：100% 进度
-        let _ = crate::ui::render_progress_bar(total, total, "全部完成", &pipeline_start, "🎉 流水线执行完成！");
+        let _ = crate::ui::render_progress_bar(
+            total,
+            total,
+            "全部完成",
+            &pipeline_start,
+            "🎉 流水线执行完成！",
+        );
 
         // 清理检查点（pipeline 已成功完成）
         let _ = pipeline_store.clear();
@@ -911,8 +958,12 @@ impl Agent {
             // 可重试的临时性错误
             AppError::RateLimited { .. } => crate::tools::ErrorCategory::Transient,
             AppError::Llm(_) => crate::tools::ErrorCategory::Llm,
-            AppError::Http(e) if e.is_timeout() || e.is_connect() => crate::tools::ErrorCategory::Transient,
-            AppError::Io(e) if e.kind() == std::io::ErrorKind::Interrupted => crate::tools::ErrorCategory::Transient,
+            AppError::Http(e) if e.is_timeout() || e.is_connect() => {
+                crate::tools::ErrorCategory::Transient
+            }
+            AppError::Io(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                crate::tools::ErrorCategory::Transient
+            }
             // 不可重试的永久性错误
             AppError::ToolNotFound(_) => crate::tools::ErrorCategory::Permanent,
             AppError::Security(_) => crate::tools::ErrorCategory::Permanent,
@@ -927,7 +978,11 @@ impl Agent {
         }
     }
 
-    async fn process_tool_calls(&mut self, tool_calls: &[ToolCall], output: &mut dyn MessageOutput) -> Result<Vec<ToolResult>, AppError> {
+    async fn process_tool_calls(
+        &mut self,
+        tool_calls: &[ToolCall],
+        output: &mut dyn MessageOutput,
+    ) -> Result<Vec<ToolResult>, AppError> {
         let mut results = Vec::new();
 
         for tool_call in tool_calls {
@@ -937,7 +992,10 @@ impl Agent {
             } else {
                 &tool_call.function.name
             };
-            let args_summary = crate::ui::blocks::MessageBlock::summarize_tool_args(&tool_call.function.name, &tool_call.function.arguments);
+            let args_summary = crate::ui::blocks::MessageBlock::summarize_tool_args(
+                &tool_call.function.name,
+                &tool_call.function.arguments,
+            );
             output.info(&format!("🔧 {} ({})", display_name, args_summary));
             debug!(tool = %tool_call.function.name, args = %tool_call.function.arguments, "Tool arguments");
 
@@ -993,10 +1051,13 @@ impl Agent {
 
             // 首先检查异步工具注册表
             let result = if let Some(ref async_tools) = self.async_tools {
-                match async_tools.execute_with_policy(
-                    &tool_call.function.name,
-                    tool_call.function.arguments.clone(),
-                ).await {
+                match async_tools
+                    .execute_with_policy(
+                        &tool_call.function.name,
+                        tool_call.function.arguments.clone(),
+                    )
+                    .await
+                {
                     Ok(r) => r,
                     Err(AppError::ToolNotFound(_)) => {
                         // 异步工具不存在，回退到同步工具
@@ -1008,7 +1069,10 @@ impl Agent {
                             Err(e) => {
                                 let category = Self::categorize_error(&e);
                                 ToolResult::failure(
-                                    format!("[error] Tool '{}' execution failed: {}", tool_call.function.name, e),
+                                    format!(
+                                        "[error] Tool '{}' execution failed: {}",
+                                        tool_call.function.name, e
+                                    ),
                                     category,
                                 )
                             }
@@ -1017,7 +1081,10 @@ impl Agent {
                     Err(e) => {
                         let category = Self::categorize_error(&e);
                         ToolResult::failure(
-                            format!("[error] Tool '{}' execution failed: {}", tool_call.function.name, e),
+                            format!(
+                                "[error] Tool '{}' execution failed: {}",
+                                tool_call.function.name, e
+                            ),
                             category,
                         )
                     }
@@ -1032,7 +1099,10 @@ impl Agent {
                     Err(e) => {
                         let category = Self::categorize_error(&e);
                         ToolResult::failure(
-                            format!("[error] Tool '{}' execution failed: {}", tool_call.function.name, e),
+                            format!(
+                                "[error] Tool '{}' execution failed: {}",
+                                tool_call.function.name, e
+                            ),
                             category,
                         )
                     }
@@ -1057,7 +1127,11 @@ impl Agent {
                 let preview = result.content.lines().next().unwrap_or(&result.content);
                 let preview = if preview.len() > 200 {
                     // 找到第 200 个字符边界，避免切到多字节 UTF-8 字符中间
-                    let end = preview.char_indices().nth(200).map(|(i, _)| i).unwrap_or(preview.len());
+                    let end = preview
+                        .char_indices()
+                        .nth(200)
+                        .map(|(i, _)| i)
+                        .unwrap_or(preview.len());
                     format!("{}...", &preview[..end])
                 } else {
                     preview.to_string()
@@ -1073,11 +1147,7 @@ impl Agent {
 
             // ── post-tool hooks：执行完成后通知（输出仅记日志，不注入上下文）──
             if let Some(ref hooks) = self.hooks {
-                hooks.run_post_tool(
-                    tool_name,
-                    &tool_call.function.arguments,
-                    result.success,
-                );
+                hooks.run_post_tool(tool_name, &tool_call.function.arguments, result.success);
             }
 
             results.push(result);
@@ -1087,10 +1157,12 @@ impl Agent {
     }
 
     /// 处理 `spawn_subagent` 工具调用：创建子 Agent、执行任务、返回结果。
-    async fn handle_spawn_subagent(&mut self, tool_call: &ToolCall, output: &mut dyn MessageOutput) -> Result<ToolResult, AppError> {
-        let task = tool_call.function.arguments["task"]
-            .as_str()
-            .unwrap_or("");
+    async fn handle_spawn_subagent(
+        &mut self,
+        tool_call: &ToolCall,
+        output: &mut dyn MessageOutput,
+    ) -> Result<ToolResult, AppError> {
+        let task = tool_call.function.arguments["task"].as_str().unwrap_or("");
 
         let context = tool_call.function.arguments["context"]
             .as_str()
@@ -1262,7 +1334,8 @@ impl Agent {
                 };
 
                 if info.did_compress {
-                    let strategy_name = match info.strategy.unwrap_or(CompressionStrategy::Truncate) {
+                    let strategy_name = match info.strategy.unwrap_or(CompressionStrategy::Truncate)
+                    {
                         CompressionStrategy::Summarize => "summarize",
                         CompressionStrategy::Truncate => "truncate",
                     };
@@ -1313,12 +1386,7 @@ impl Agent {
 
         // 1. 计算下一个轮次编号（已有轮次 + 1）
         let existing_rounds = store.load_rounds()?;
-        let next_round = existing_rounds
-            .iter()
-            .map(|r| r.round)
-            .max()
-            .unwrap_or(0)
-            + 1;
+        let next_round = existing_rounds.iter().map(|r| r.round).max().unwrap_or(0) + 1;
 
         // 2. 保存轮次摘要（层级 1）
         store.save_round(next_round, content)?;
@@ -1334,7 +1402,9 @@ impl Agent {
             .map(|r| r.content.clone())
             .collect();
         // 若当前轮恰好是阶段末轮，且已有足够轮次，则聚合阶段摘要
-        if next_round == phase_end && phase_rounds.len() + 1 >= crate::agent::summary::ROUNDS_PER_PHASE {
+        if next_round == phase_end
+            && phase_rounds.len() + 1 >= crate::agent::summary::ROUNDS_PER_PHASE
+        {
             let mut items = phase_rounds;
             items.push(content.to_string());
             let phase_summary = aggregate_summaries(&self.llm, "轮次", &items, 500).await?;
@@ -1392,7 +1462,9 @@ impl Agent {
         for msg in self.context.history.messages.iter().rev() {
             match msg.role.as_str() {
                 "user" => parts.push(format!("- 用户: {}", msg.content.as_deref().unwrap_or(""))),
-                "assistant" => parts.push(format!("- 助手: {}", msg.content.as_deref().unwrap_or(""))),
+                "assistant" => {
+                    parts.push(format!("- 助手: {}", msg.content.as_deref().unwrap_or("")))
+                }
                 _ => {}
             }
             if parts.len() >= 8 {
@@ -1421,7 +1493,21 @@ impl Agent {
             let start = keyword_pos.saturating_sub(20);
             let end = (keyword_pos + 20).min(msg.len());
             let context = &msg[start..end];
-            let negations = ["不", "不要", "不需要", "取消", "跳过", "忽略", "no", "don't", "not", "skip", "stop", "不需要", "不用"];
+            let negations = [
+                "不",
+                "不要",
+                "不需要",
+                "取消",
+                "跳过",
+                "忽略",
+                "no",
+                "don't",
+                "not",
+                "skip",
+                "stop",
+                "不需要",
+                "不用",
+            ];
             negations.iter().any(|n| context.contains(n))
         }
 
@@ -1435,11 +1521,21 @@ impl Agent {
                         return false; // 否定模式，不激活
                     }
                     // 对于英文关键词，检查单词边界
-                    if kw_lower.bytes().all(|b| b.is_ascii_alphabetic() || b == b' ' || b == b'-') {
+                    if kw_lower
+                        .bytes()
+                        .all(|b| b.is_ascii_alphabetic() || b == b' ' || b == b'-')
+                    {
                         // 确保关键词前后不是字母数字（单词边界）
-                        let before = pos.checked_sub(1).map(|i| msg_lower.as_bytes()[i]).unwrap_or(b' ');
-                        let after = msg_lower.as_bytes().get(pos + kw_lower.len()).copied().unwrap_or(b' ');
-                        
+                        let before = pos
+                            .checked_sub(1)
+                            .map(|i| msg_lower.as_bytes()[i])
+                            .unwrap_or(b' ');
+                        let after = msg_lower
+                            .as_bytes()
+                            .get(pos + kw_lower.len())
+                            .copied()
+                            .unwrap_or(b' ');
+
                         !before.is_ascii_alphanumeric() && !after.is_ascii_alphanumeric()
                     } else {
                         // 中文关键词直接匹配
@@ -1481,7 +1577,10 @@ fn detect_modified_files(working_dir: &std::path::Path) -> Result<Vec<String>, A
         .current_dir(working_dir)
         .output()
         .map_err(|e| {
-            AppError::Io(std::io::Error::new(e.kind(), format!("git diff 失败: {}", e)))
+            AppError::Io(std::io::Error::new(
+                e.kind(),
+                format!("git diff 失败: {}", e),
+            ))
         })?;
 
     if output.status.success() {
@@ -1562,11 +1661,7 @@ mod tests {
     #[test]
     fn new_subagent_creates_at_depth_limit() {
         // 深度等于 MAX_SUBAGENT_DEPTH 时应成功
-        let result = Agent::new_subagent(test_subagent_config(
-            MAX_SUBAGENT_DEPTH,
-            "test task",
-            "",
-        ));
+        let result = Agent::new_subagent(test_subagent_config(MAX_SUBAGENT_DEPTH, "test task", ""));
 
         assert!(result.is_ok());
         let agent = result.unwrap();
@@ -1596,19 +1691,29 @@ mod tests {
         // 验证任务描述出现在上下文中
         let messages = agent.context.build_messages();
         let user_msg = messages.iter().find(|m| m.role == "user");
-        assert!(user_msg.is_some(), "sub-agent should have a user message with task");
+        assert!(
+            user_msg.is_some(),
+            "sub-agent should have a user message with task"
+        );
         let content = user_msg.unwrap().content.as_ref().unwrap();
-        assert!(content.contains("特定任务描述"), "task description should be in user message");
+        assert!(
+            content.contains("特定任务描述"),
+            "task description should be in user message"
+        );
     }
 
     #[test]
     fn new_subagent_context_includes_context_param() {
-        let agent = Agent::new_subagent(test_subagent_config(1, "test task", "额外上下文信息")).unwrap();
+        let agent =
+            Agent::new_subagent(test_subagent_config(1, "test task", "额外上下文信息")).unwrap();
 
         let messages = agent.context.build_messages();
         let user_msg = messages.iter().find(|m| m.role == "user").unwrap();
         let content = user_msg.content.as_ref().unwrap();
-        assert!(content.contains("额外上下文信息"), "context param should be in user message");
+        assert!(
+            content.contains("额外上下文信息"),
+            "context param should be in user message"
+        );
     }
 
     #[test]
@@ -1620,12 +1725,16 @@ mod tests {
         let sub_registry = parent_registry.new_subagent_registry();
 
         // 子代理注册表不应包含 spawn_subagent
-        assert!(sub_registry.get_tool("spawn_subagent").is_none(),
-            "sub-agent registry should not contain spawn_subagent");
+        assert!(
+            sub_registry.get_tool("spawn_subagent").is_none(),
+            "sub-agent registry should not contain spawn_subagent"
+        );
 
         // 子代理注册表不应包含 restart
-        assert!(sub_registry.get_tool("restart").is_none(),
-            "sub-agent registry should not contain restart");
+        assert!(
+            sub_registry.get_tool("restart").is_none(),
+            "sub-agent registry should not contain restart"
+        );
 
         // 子代理注册表应包含基本工具
         assert!(sub_registry.get_tool("read_file").is_some());

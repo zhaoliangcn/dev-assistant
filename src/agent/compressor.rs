@@ -110,9 +110,7 @@ impl ContextCompressor {
         }
 
         match pressure {
-            crate::agent::context::ContextPressure::Warning => {
-                Self::summarize(history, llm).await
-            }
+            crate::agent::context::ContextPressure::Warning => Self::summarize(history, llm).await,
             _ => Self::truncate(history),
         }
     }
@@ -214,18 +212,20 @@ impl ContextCompressor {
         // 调用 LLM 生成摘要（不带工具，纯文本）
         let summary = match llm
             .call(
-                vec![LlmMessage {
-                    role: "system".to_string(),
-                    content: Some("你是一个高效的对话摘要助手。".to_string()),
-                    tool_calls: None,
-                    tool_call_id: None,
-                },
-                LlmMessage {
-                    role: "user".to_string(),
-                    content: Some(summarize_prompt.clone()),
-                    tool_calls: None,
-                    tool_call_id: None,
-                }],
+                vec![
+                    LlmMessage {
+                        role: "system".to_string(),
+                        content: Some("你是一个高效的对话摘要助手。".to_string()),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    },
+                    LlmMessage {
+                        role: "user".to_string(),
+                        content: Some(summarize_prompt.clone()),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    },
+                ],
                 Vec::new(),
             )
             .await
@@ -283,16 +283,21 @@ impl ContextCompressor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// 环境变量操作全局互斥锁，防止并行测试间的环境变量竞态。
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn rounds_to_keep_defaults_to_six() {
-        // 无环境变量时返回默认值 6
+        let _lock = ENV_MUTEX.lock().unwrap();
         std::env::remove_var("AGENT_ROUNDS_TO_KEEP");
         assert_eq!(rounds_to_keep(), DEFAULT_ROUNDS_TO_KEEP);
     }
 
     #[test]
     fn rounds_to_keep_reads_env_var() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         std::env::set_var("AGENT_ROUNDS_TO_KEEP", "12");
         assert_eq!(rounds_to_keep(), 12);
         std::env::remove_var("AGENT_ROUNDS_TO_KEEP");
@@ -300,27 +305,26 @@ mod tests {
 
     #[test]
     fn rounds_to_keep_clamps_invalid_values() {
-        // 0 和负数无效，回退到默认值
+        let _lock = ENV_MUTEX.lock().unwrap();
         std::env::set_var("AGENT_ROUNDS_TO_KEEP", "0");
         assert_eq!(rounds_to_keep(), DEFAULT_ROUNDS_TO_KEEP);
-
         std::env::set_var("AGENT_ROUNDS_TO_KEEP", "-1");
         assert_eq!(rounds_to_keep(), DEFAULT_ROUNDS_TO_KEEP);
-
         std::env::set_var("AGENT_ROUNDS_TO_KEEP", "abc");
         assert_eq!(rounds_to_keep(), DEFAULT_ROUNDS_TO_KEEP);
-
         std::env::remove_var("AGENT_ROUNDS_TO_KEEP");
     }
 
     #[test]
     fn summary_keep_rounds_defaults_to_three() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         std::env::remove_var("AGENT_SUMMARY_KEEP_ROUNDS");
         assert_eq!(summary_keep_rounds(), DEFAULT_SUMMARY_KEEP_ROUNDS);
     }
 
     #[test]
     fn summary_keep_rounds_reads_env_var() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         std::env::set_var("AGENT_SUMMARY_KEEP_ROUNDS", "5");
         assert_eq!(summary_keep_rounds(), 5);
         std::env::remove_var("AGENT_SUMMARY_KEEP_ROUNDS");

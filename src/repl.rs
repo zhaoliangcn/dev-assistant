@@ -170,6 +170,10 @@ pub fn handle_slash(input: &str, agent: &mut Agent, working_dir: &Path) -> Optio
         return Some(handle_status_command(agent));
     }
 
+    if input.starts_with("/theme") {
+        return Some(handle_theme_command(input));
+    }
+
     if input == "/budget" {
         return Some(handle_budget_command(agent));
     }
@@ -242,6 +246,94 @@ fn handle_background_command(_agent: &mut Agent) -> SlashOutcome {
 fn handle_budget_command(agent: &mut Agent) -> SlashOutcome {
     let budget = agent.get_budget_report();
     let _ = ui::render_budget_detail(&budget);
+    SlashOutcome::Continue
+}
+
+/// 处理 `/theme` 命令：查看/切换 UI 主题（暗/亮/自动）。
+///
+/// 用法:
+///   /theme       - 显示当前主题
+///   /theme dark  - 切换到暗色主题
+///   /theme light - 切换到亮色主题
+///   /theme auto  - 自动检测
+fn handle_theme_command(input: &str) -> SlashOutcome {
+    use crate::ui::theme;
+
+    let args: Vec<&str> = input.split_whitespace().collect();
+    let mode = args.get(1);
+
+    match mode {
+        None => {
+            // 无参数：显示当前主题
+            let current = theme::current_theme_mode();
+            let label = match current {
+                theme::ThemeMode::Dark => "暗色 (dark)",
+                theme::ThemeMode::Light => "亮色 (light)",
+            };
+            let content = format!(
+                "🎨 当前主题: {}\n\n\
+                 可用命令:\n\
+                 - /theme        显示当前主题\n\
+                 - /theme dark   切换到暗色主题\n\
+                 - /theme light  切换到亮色主题\n\
+                 - /theme auto   自动检测终端主题",
+                label,
+            );
+            let md = MarkdownRenderer::new();
+            let _ = ui::render_block(&ui::MessageBlock::System { content }, &md);
+        }
+        Some(m) => {
+            match m.to_lowercase().as_str() {
+                "dark" | "暗" | "dark-mode" => {
+                    theme::set_theme(theme::ThemeMode::Dark);
+                    let md = MarkdownRenderer::new();
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::System {
+                            content: "🌙 已切换到暗色主题".to_string(),
+                        },
+                        &md,
+                    );
+                }
+                "light" | "亮" | "light-mode" => {
+                    theme::set_theme(theme::ThemeMode::Light);
+                    let md = MarkdownRenderer::new();
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::System {
+                            content: "☀️ 已切换到亮色主题".to_string(),
+                        },
+                        &md,
+                    );
+                }
+                "auto" | "自动" => {
+                    theme::refresh_theme();
+                    let current = theme::current_theme_mode();
+                    let label = match current {
+                        theme::ThemeMode::Dark => "暗色",
+                        theme::ThemeMode::Light => "亮色",
+                    };
+                    let md = MarkdownRenderer::new();
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::System {
+                            content: format!("🔄 已自动检测为{}主题", label),
+                        },
+                        &md,
+                    );
+                }
+                _ => {
+                    let md = MarkdownRenderer::new();
+                    let _ = ui::render_block(
+                        &ui::MessageBlock::Error {
+                            content: format!(
+                                "❌ 无效主题参数: {}\n使用 /theme dark | light | auto",
+                                m
+                            ),
+                        },
+                        &md,
+                    );
+                }
+            }
+        }
+    }
     SlashOutcome::Continue
 }
 
@@ -934,11 +1026,64 @@ pub fn render_agent_messages(agent: &Agent, verbose: bool) -> Result<(), AppErro
 
     ui::render_blocks(&blocks, &md)?;
 
-    // 每轮渲染末尾显示紧凑上下文预算条（复用已有 ContextBudget API）。
+    // Phase B: 每轮渲染末尾显示紧凑上下文预算条（复用已有 ContextBudget API）。
     // 非终端输出时 render_budget_bar 内部静默跳过，不影响管道/重定向。
     let _ = ui::render_budget_bar(&agent.get_budget_report());
 
+    // Phase G: 流水线阶段可视化（如果 Agent 正在运行流水线任务）
+    let _ = render_pipeline_progress_from_agent(agent);
+
+    // Phase I: 子代理树可视化（有运行中的子代理时显示）
+    let _ = render_subagent_tree_from_agent(agent);
+
     Ok(())
+}
+
+/// Phase G: 从 Agent 加载流水线上下文并渲染阶段可视化。
+fn render_pipeline_progress_from_agent(agent: &Agent) -> std::io::Result<()> {
+    use crate::agent::pipeline_context::PipelineContextStore;
+
+    let store = match PipelineContextStore::new(&agent.working_dir()) {
+        Ok(s) => s,
+        Err(_) => return Ok(()),
+    };
+    let ctx = match store.load_pipeline_context() {
+        Ok(Some(c)) => c,
+        Ok(None) => return Ok(()),
+        Err(_) => return Ok(()),
+    };
+
+    let width = crate::ui::get_terminal_width().unwrap_or(80);
+    ui::render_pipeline_progress(&ctx, width)
+}
+
+/// Phase I: 从 Agent 获取子代理状态并渲染树。
+fn render_subagent_tree_from_agent(agent: &Agent) -> std::io::Result<()> {
+    let statuses = agent.get_subagent_statuses();
+    if statuses.is_empty() {
+        return Ok(());
+    }
+
+    // 筛选出正在运行的子代理
+    let running: Vec<&(usize, String, String, bool)> =
+        statuses.iter().filter(|(_, _, _, r)| *r).collect();
+
+    if running.is_empty() {
+        return Ok(());
+    }
+
+    let parent_name = agent.active_model();
+    let subagents: Vec<ui::SubagentInfo> = running
+        .iter()
+        .map(|(depth, name, agent_type, _running)| ui::SubagentInfo {
+            name: name.clone(),
+            depth: *depth,
+            agent_type: agent_type.clone(),
+            status: ui::SubagentStatus::Running,
+        })
+        .collect();
+
+    ui::render_subagent_tree(&subagents, &parent_name)
 }
 
 /// 处理 `/skill` slash 命令：安装/列表/移除技能。

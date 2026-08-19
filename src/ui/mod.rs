@@ -3,15 +3,21 @@ pub mod budget;
 pub mod input;
 pub mod markdown;
 pub mod output_impls;
+pub mod pipeline_view;
 pub mod realtime_output;
+pub mod status_bar;
 pub mod style;
+pub mod subagent_tree;
 pub mod theme;
 pub mod translucent;
 pub use blocks::MessageBlock;
 pub use budget::{render_budget_bar, render_budget_detail};
 pub use markdown::MarkdownRenderer;
 pub use output_impls::{CliMessageOutput, UIMessageOutput};
+pub use pipeline_view::render_pipeline_progress;
 pub use realtime_output::RealtimeOutput;
+pub use status_bar::StatusBar;
+pub use subagent_tree::{render_subagent_tree, SubagentInfo, SubagentStatus};
 
 use std::io::{self, IsTerminal, Write};
 use unicode_width::UnicodeWidthStr;
@@ -339,7 +345,7 @@ pub fn init_ui() -> io::Result<()> {
 /// Get terminal width, returns None if unavailable.
 ///
 /// 跨平台统一获取：Unix 使用 ioctl，其他平台回退到 COLUMNS 环境变量。
-fn get_terminal_width() -> Option<usize> {
+pub fn get_terminal_width() -> Option<usize> {
     #[cfg(unix)]
     {
         use libc::ioctl;

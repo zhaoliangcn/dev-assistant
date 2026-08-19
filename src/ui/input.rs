@@ -11,16 +11,31 @@ use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::history::{DefaultHistory, History};
 use rustyline::validate::Validator;
-use rustyline::{Editor, Helper, Context};
+use rustyline::{Context, Editor, Helper};
 
 // ── Slash 命令补全 ────────────────────────────────────────────────────
 
 /// 可补全的 Slash 命令列表（含 SlashCommand 枚举 + REPL 扩展命令）。
 const SLASH_COMMANDS: &[&str] = &[
-    "/help", "/history", "/clear", "/expand", "/grep", "/search", "/diff",
-    "/exit", "/quit", "/verbose", "/quiet",
-    "/model", "/status", "/pipeline", "/background",
-    "/schedule", "/unschedule", "/scheduled", "/tasks",
+    "/help",
+    "/history",
+    "/clear",
+    "/expand",
+    "/grep",
+    "/search",
+    "/diff",
+    "/exit",
+    "/quit",
+    "/verbose",
+    "/quiet",
+    "/model",
+    "/status",
+    "/pipeline",
+    "/background",
+    "/schedule",
+    "/unschedule",
+    "/scheduled",
+    "/tasks",
 ];
 
 /// rustyline Helper：为 Slash 命令提供 Tab 补全。
@@ -36,7 +51,9 @@ pub struct SlashHelper {
 
 impl Default for SlashHelper {
     fn default() -> Self {
-        Self { candidates: std::cell::RefCell::new(Vec::new()) }
+        Self {
+            candidates: std::cell::RefCell::new(Vec::new()),
+        }
     }
 }
 
@@ -98,8 +115,8 @@ pub struct InputSystem {
 impl InputSystem {
     /// 创建新的输入系统，自动加载历史记录。
     pub fn new() -> Self {
-        let mut rl = Editor::<SlashHelper, DefaultHistory>::new()
-            .expect("Failed to create input editor");
+        let mut rl =
+            Editor::<SlashHelper, DefaultHistory>::new().expect("Failed to create input editor");
 
         // 启用 Slash 命令 Tab 补全
         rl.set_helper(Some(SlashHelper::new()));
@@ -185,6 +202,8 @@ pub enum SlashCommand {
     Diff,
     /// /model — 查看/切换 LLM 模型
     Model,
+    /// /theme — 查看/切换 UI 主题（暗/亮）
+    Theme,
 }
 
 impl SlashCommand {
@@ -201,6 +220,7 @@ impl SlashCommand {
             "grep" | "search" => Some(Self::Grep),
             "diff" => Some(Self::Diff),
             "model" => Some(Self::Model),
+            "theme" => Some(Self::Theme),
             _ => None,
         }
     }
@@ -268,6 +288,10 @@ impl SlashCommand {
             SlashCommand::Model => {
                 // /model 由调用方在 REPL 循环中处理（需要访问 LLM 客户端）
                 println!("📦 /model 命令正在切换模型...");
+                SlashAction::Continue
+            }
+            SlashCommand::Theme => {
+                println!("🎨 /theme 命令正在切换主题...");
                 SlashAction::Continue
             }
         }

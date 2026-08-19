@@ -181,7 +181,7 @@ impl Theme {
 
     /// 亮色主题 — 面向浅色终端的高对比配色。
     #[must_use]
-#[allow(dead_code)]
+    #[allow(dead_code)]
     pub const fn light() -> Self {
         Self {
             mode: ThemeMode::Light,
@@ -204,7 +204,7 @@ impl Theme {
 
     /// 按模式取对应预设。
     #[must_use]
-#[allow(dead_code)]
+    #[allow(dead_code)]
     pub const fn for_mode(mode: ThemeMode) -> Self {
         match mode {
             ThemeMode::Dark => Self::dark(),
@@ -247,7 +247,11 @@ pub fn from_colorfgbg(value: &str) -> Option<ThemeMode> {
         .split(';')
         .rev()
         .find_map(|part| part.parse::<u16>().ok())?;
-    Some(if bg >= 8 { ThemeMode::Light } else { ThemeMode::Dark })
+    Some(if bg >= 8 {
+        ThemeMode::Light
+    } else {
+        ThemeMode::Dark
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -312,9 +316,23 @@ pub fn refresh_theme() {
     *ACTIVE_THEME.lock().unwrap_or_else(|e| e.into_inner()) = Theme::for_mode(detect_mode());
 }
 
+/// 手动设置主题模式（暗/亮），覆盖自动检测。
+///
+/// 使用方式：`set_theme(ThemeMode::Light)` 切换为亮色主题，后续所有渲染使用亮色配色。
+#[allow(dead_code)]
+pub fn set_theme(mode: ThemeMode) {
+    *ACTIVE_THEME.lock().unwrap_or_else(|e| e.into_inner()) = Theme::for_mode(mode);
+}
+
+/// 获取当前主题模式（用于 `/theme` 命令显示）。
+#[allow(dead_code)]
+pub fn current_theme_mode() -> ThemeMode {
+    active_theme().mode
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Theme, ThemeMode, active_theme, detect_mode, from_colorfgbg, refresh_theme};
+    use super::{active_theme, detect_mode, from_colorfgbg, refresh_theme, Theme, ThemeMode};
 
     #[test]
     fn from_colorfgbg_parses_background() {

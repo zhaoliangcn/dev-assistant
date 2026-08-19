@@ -100,6 +100,9 @@ pub struct Agent {
     working_dir: PathBuf,
     /// 可选的 Hook 管理器：工具执行前/后触发 pre-tool / post-tool hooks。
     hooks: Option<Arc<crate::hooks::HookManager>>,
+    /// 子代理运行状态（用于 UI 树形可视化）。
+    #[allow(dead_code)]
+    subagent_statuses: Vec<(usize, String, String, bool)>,
 }
 
 impl Agent {
@@ -130,6 +133,7 @@ impl Agent {
             session_store,
             working_dir: wd,
             hooks: None,
+            subagent_statuses: Vec::new(),
         }
     }
 
@@ -140,6 +144,24 @@ impl Agent {
     pub fn set_hooks(&mut self, hooks: Option<Arc<crate::hooks::HookManager>>) {
         self.hooks = hooks.clone();
         self.tools.set_hooks(hooks);
+    }
+
+    /// 记录子代理运行状态，用于 UI 树形可视化。
+    ///
+    /// 参数：`depth` 子代理深度, `name` 任务名, `agent_type` 代理类型, `running` 是否仍在运行。
+    #[allow(dead_code)]
+    pub fn register_subagent(&mut self, depth: usize, name: &str, agent_type: &str, running: bool) {
+        self.subagent_statuses.push((depth, name.to_string(), agent_type.to_string(), running));
+    }
+
+    /// 获取当前子代理状态列表，供 UI 渲染子代理树使用。
+    pub fn get_subagent_statuses(&self) -> &[(usize, String, String, bool)] {
+        &self.subagent_statuses
+    }
+
+    /// 获取正在运行的子代理数量。
+    pub fn running_subagents(&self) -> usize {
+        self.subagent_statuses.iter().filter(|(_, _, _, running)| *running).count()
     }
 
     /// 获取所有工具的 schemas（同步工具 + 异步工具）
@@ -601,6 +623,7 @@ impl Agent {
                 session_store: None,
                 working_dir: wd,
                 hooks: None,
+                subagent_statuses: Vec::new(),
             });
         }
 
@@ -657,6 +680,7 @@ impl Agent {
             session_store: None,
             working_dir: wd,
             hooks: None,
+            subagent_statuses: Vec::new(),
         })
     }
 
@@ -938,7 +962,7 @@ impl Agent {
 
     /// 获取工作目录的引用。
     /// 直接从 Agent 存储的字段中返回，避免依赖 `std::env::current_dir()`。
-    fn working_dir(&self) -> std::path::PathBuf {
+    pub fn working_dir(&self) -> std::path::PathBuf {
         self.working_dir.clone()
     }
 

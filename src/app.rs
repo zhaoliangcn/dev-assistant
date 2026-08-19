@@ -386,6 +386,19 @@ impl App {
         println!("Project: {}", self.config.working_dir.display());
         println!("Type '/exit' or '/quit' to quit.\n");
 
+        // Phase A: 初始化状态栏（渲染在终端顶部）
+        let width = ui::get_terminal_width().unwrap_or(80);
+        let mut status_bar = ui::StatusBar::new();
+        status_bar.model = self.agent.active_model().to_string();
+        status_bar.total_tokens = 0;
+        status_bar.max_tokens = self.config.max_tokens;
+        status_bar.no_approval = self.config.no_approval;
+        status_bar.subagents_running = 0;
+        status_bar.working_dir = self.config.working_dir.to_string_lossy().to_string();
+        status_bar.render(width)?;
+        // ANSI: 光标下移 1 行（为后续消息腾出空间）
+        println!("\x1b[1B");
+
         let mut round_num: usize = 0;
 
         loop {
@@ -415,6 +428,38 @@ impl App {
                     )));
                 }
             };
+
+            // ── Phase H: 键盘快捷键 ──
+            // Ctrl+L: 清屏（保留历史在滚动缓冲区）
+            if input == "\x0c" {
+                use std::io::Write;
+                let mut stdout = std::io::stdout();
+                let _ = write!(stdout, "\x1b[2J\x1b[H");
+                // 重新渲染状态栏
+                let _ = status_bar.render(width);
+                let _ = write!(stdout, "\n");
+                let _ = stdout.flush();
+                continue;
+            }
+
+            // Ctrl+T: 切换暗/亮主题
+            if input == "\x14" {
+                let current = crate::ui::theme::current_theme_mode();
+                let new_mode = match current {
+                    crate::ui::theme::ThemeMode::Dark => crate::ui::theme::ThemeMode::Light,
+                    crate::ui::theme::ThemeMode::Light => crate::ui::theme::ThemeMode::Dark,
+                };
+                crate::ui::theme::set_theme(new_mode);
+                let label = match new_mode {
+                    crate::ui::theme::ThemeMode::Dark => "暗色",
+                    crate::ui::theme::ThemeMode::Light => "亮色",
+                };
+                self.agent.add_display_message(
+                    crate::utils::message_level::MessageLevel::Info,
+                    &format!("🎨 已切换到{}主题", label),
+                );
+                continue;
+            }
 
             // ── Slash 命令分发 ──
             if input.starts_with('/') {
@@ -760,6 +805,21 @@ impl App {
                 &markdown_renderer,
             )
             .await?;
+
+            // Phase A: 更新状态栏（光标上移到状态栏行重写，再下移回来）
+            {
+                status_bar.model = self.agent.active_model().to_string();
+                let budget = self.agent.get_budget_report();
+                status_bar.total_tokens = budget.total_tokens;
+                status_bar.max_tokens = budget.max_tokens;
+                status_bar.subagents_running = self.agent.running_subagents();
+                use std::io::Write;
+                let mut stdout = std::io::stdout();
+                let _ = write!(stdout, "\x1b[1A\x1b7");
+                status_bar.render(width).ok();
+                let _ = write!(stdout, "\x1b8\x1b[1B");
+                let _ = stdout.flush();
+            }
 
             // 处理 restart 请求
             if matches!(action, ReplAction::Continue) {

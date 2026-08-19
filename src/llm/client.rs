@@ -14,6 +14,14 @@ use crate::utils::error::AppError;
 /// 最大重试次数（连续 429 的自动重试上限）。
 const MAX_RETRIES: u32 = 5;
 
+/// 将 temperature 舍入到小数点后 2 位。
+///
+/// 部分 API（如 glm）要求 temperature 最多 2 位小数，
+/// 而 `f32` 在 JSON 序列化时可能产生如 `0.123000004` 的长小数。
+fn round_temperature(temp: f32) -> f32 {
+    (temp * 100.0).round() / 100.0
+}
+
 /// 退避初始延迟（毫秒）。
 const BASE_DELAY_MS: u64 = 2000;
 
@@ -296,7 +304,7 @@ impl LlmClient {
                 model: cfg.model.clone(),
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
-                temperature: cfg.temperature.unwrap_or(0.2),
+                temperature: round_temperature(cfg.temperature.unwrap_or(0.2)),
                 max_output_tokens: cfg.max_output_tokens,
             };
 
@@ -365,7 +373,7 @@ impl LlmClient {
                 model: cfg.model.clone(),
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
-                temperature: cfg.temperature.unwrap_or(0.2),
+                temperature: round_temperature(cfg.temperature.unwrap_or(0.2)),
                 max_output_tokens: cfg.max_output_tokens,
             };
 
@@ -518,6 +526,16 @@ mod tests {
         ));
         // 连接被拒绝，应该是某种错误
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn round_temperature_truncates_long_decimals() {
+        // f32 0.123 在 JSON 序列化时可能产生 0.123000004，需舍入到 2 位小数
+        assert_eq!(round_temperature(0.123), 0.12);
+        assert_eq!(round_temperature(0.127), 0.13);
+        assert_eq!(round_temperature(0.2), 0.2);
+        assert_eq!(round_temperature(0.0), 0.0);
+        assert_eq!(round_temperature(0.07), 0.07);
     }
 
     #[test]

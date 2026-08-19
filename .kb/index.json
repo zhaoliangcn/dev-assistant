@@ -1,33 +1,1228 @@
 {
   "version": 1,
-  "updated": "2026-08-10T11:53:17.240042+00:00",
+  "updated": "2026-08-19T14:20:11.905106+00:00",
   "entries": {
-    "memory-optimization": {
-      "path": "summaries/memory-system-optimization.md",
+    "dream-20260810-120211-122": {
+      "path": "experiences/dream-20260810-120211-122.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-122",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.319389+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-317": {
+      "path": "experiences/dream-20260810-120211-317.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-317",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.713637+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-86": {
+      "path": "experiences/dream-20260810-120211-86.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-86",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.688930+00:00",
+      "query_count": 0
+    },
+    "finish-decision-tree-optimization": {
+      "path": "summaries/finish-decision-tree-optimization.md",
       "type": "summary",
-      "title": "记忆系统深度优化分析",
+      "title": "finish-decision-tree-optimization",
       "tags": [
-        "memory",
-        "optimization",
+        "prompt",
+        "finish",
+        "decision-tree",
+        "optimization"
+      ],
+      "status": "completed",
+      "archived": false,
+      "updated": "2026-08-08T10:39:39.192014+00:00",
+      "query_count": 0
+    },
+    "architecture-analysis": {
+      "path": "summaries/architecture-analysis.md",
+      "type": "summary",
+      "title": "项目代码架构分析报告",
+      "tags": [
+        "architecture",
         "analysis",
         "dev-assistant-rs"
       ],
       "status": "completed",
       "archived": false,
-      "updated": "2026-08-10T03:30:52.537417+00:00"
+      "updated": "2026-07-26T08:28:00.143228+00:00",
+      "query_count": 0
     },
-    "ADR-001-scheduled-task-architecture": {
-      "path": "decisions/ADR-001-scheduled-task-architecture.md",
-      "type": "decision",
-      "title": "ADR-001-scheduled-task-architecture",
-      "tags": [
-        "scheduled-task",
-        "architecture",
-        "design"
-      ],
-      "status": "accepted",
+    "dream-20260810-120211-249": {
+      "path": "experiences/dream-20260810-120211-249.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-249",
+      "tags": [],
+      "status": "draft",
       "archived": false,
-      "updated": "2026-07-30T02:09:34.554211+00:00"
+      "updated": "2026-08-19T14:20:10.323590+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-171": {
+      "path": "experiences/dream-20260810-120211-171.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-171",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.570757+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-22": {
+      "path": "experiences/dream-20260810-120211-22.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-22",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.272993+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-243": {
+      "path": "experiences/dream-20260810-120211-243.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-243",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.923915+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-61": {
+      "path": "experiences/dream-20260810-120211-61.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-61",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.609234+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-215": {
+      "path": "experiences/dream-20260810-120211-215.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-215",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.921181+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-325": {
+      "path": "experiences/dream-20260810-120211-325.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-325",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.446991+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-314": {
+      "path": "experiences/dream-20260810-120211-314.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-314",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.868507+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-373": {
+      "path": "experiences/dream-20260810-120211-373.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-373",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.593547+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-72": {
+      "path": "experiences/dream-20260810-120211-72.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-72",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.977187+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-335": {
+      "path": "experiences/dream-20260810-120211-335.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-335",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.488532+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-44": {
+      "path": "experiences/dream-20260810-120211-44.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-44",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.452088+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-163": {
+      "path": "experiences/dream-20260810-120211-163.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-163",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.073693+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-308": {
+      "path": "experiences/dream-20260810-120211-308.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-308",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.029439+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-128": {
+      "path": "experiences/dream-20260810-120211-128.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-128",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.526106+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-30": {
+      "path": "experiences/dream-20260810-120211-30.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-30",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.616853+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-172": {
+      "path": "experiences/dream-20260810-120211-172.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-172",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.594722+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-237": {
+      "path": "experiences/dream-20260810-120211-237.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-237",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.532028+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-151": {
+      "path": "experiences/dream-20260810-120211-151.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-151",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.595925+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-332": {
+      "path": "experiences/dream-20260810-120211-332.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-332",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.667709+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-152": {
+      "path": "experiences/dream-20260810-120211-152.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-152",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.648107+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-1": {
+      "path": "experiences/dream-20260810-120211-1.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-1",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.337487+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-199": {
+      "path": "experiences/dream-20260810-120211-199.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-199",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.242164+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-354": {
+      "path": "experiences/dream-20260810-120211-354.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-354",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.785117+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-266": {
+      "path": "experiences/dream-20260810-120211-266.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-266",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.536979+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-223": {
+      "path": "experiences/dream-20260810-120211-223.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-223",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.664606+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-39": {
+      "path": "experiences/dream-20260810-120211-39.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-39",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.556893+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-290": {
+      "path": "experiences/dream-20260810-120211-290.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-290",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.695450+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-190": {
+      "path": "experiences/dream-20260810-120211-190.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-190",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.092065+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-194": {
+      "path": "experiences/dream-20260810-120211-194.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-194",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.904507+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-242": {
+      "path": "experiences/dream-20260810-120211-242.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-242",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.581085+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-234": {
+      "path": "experiences/dream-20260810-120211-234.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-234",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.455632+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-120": {
+      "path": "experiences/dream-20260810-120211-120.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-120",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.568206+00:00",
+      "query_count": 0
+    },
+    "optimization-plan": {
+      "path": "analysis/optimization-plan.md",
+      "type": "analysis",
+      "title": "任务失败优化方案",
+      "tags": [
+        "optimization",
+        "failure-patterns",
+        "improvement-plan",
+        "edit-file",
+        "compressor",
+        "error-handling"
+      ],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-04T14:05:27.531291+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-103": {
+      "path": "experiences/dream-20260810-120211-103.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-103",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.627631+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-49": {
+      "path": "experiences/dream-20260810-120211-49.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-49",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.702104+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-300": {
+      "path": "experiences/dream-20260810-120211-300.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-300",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.274858+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-360": {
+      "path": "experiences/dream-20260810-120211-360.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-360",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.859543+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-275": {
+      "path": "experiences/dream-20260810-120211-275.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-275",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.497208+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-221": {
+      "path": "experiences/dream-20260810-120211-221.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-221",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.027857+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-271": {
+      "path": "experiences/dream-20260810-120211-271.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-271",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.849057+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-206": {
+      "path": "experiences/dream-20260810-120211-206.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-206",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.710100+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-362": {
+      "path": "experiences/dream-20260810-120211-362.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-362",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.773686+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-157": {
+      "path": "experiences/dream-20260810-120211-157.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-157",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.137216+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-184": {
+      "path": "experiences/dream-20260810-120211-184.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-184",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.912662+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-197": {
+      "path": "experiences/dream-20260810-120211-197.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-197",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.705668+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-353": {
+      "path": "experiences/dream-20260810-120211-353.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-353",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.578828+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-370": {
+      "path": "experiences/dream-20260810-120211-370.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-370",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.669208+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-232": {
+      "path": "experiences/dream-20260810-120211-232.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-232",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.681213+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-302": {
+      "path": "experiences/dream-20260810-120211-302.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-302",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.583583+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-166": {
+      "path": "experiences/dream-20260810-120211-166.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-166",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.695839+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-37": {
+      "path": "experiences/dream-20260810-120211-37.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-37",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.115242+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-62": {
+      "path": "experiences/dream-20260810-120211-62.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-62",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.993216+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-261": {
+      "path": "experiences/dream-20260810-120211-261.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-261",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.678791+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-154": {
+      "path": "experiences/dream-20260810-120211-154.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-154",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.850830+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-43": {
+      "path": "experiences/dream-20260810-120211-43.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-43",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.154484+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-340": {
+      "path": "experiences/dream-20260810-120211-340.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-340",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.357953+00:00",
+      "query_count": 0
+    },
+    "task-failure-patterns": {
+      "path": "analysis/task-failure-patterns.md",
+      "type": "analysis",
+      "title": "任务失败模式分析",
+      "tags": [
+        "failure-patterns",
+        "error-analysis",
+        "llm-errors",
+        "tool-errors"
+      ],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-04T14:03:01.020089+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-136": {
+      "path": "experiences/dream-20260810-120211-136.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-136",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.859498+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-343": {
+      "path": "experiences/dream-20260810-120211-343.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-343",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.518424+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-6": {
+      "path": "experiences/dream-20260810-120211-6.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-6",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.397318+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-205": {
+      "path": "experiences/dream-20260810-120211-205.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-205",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.895486+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-16": {
+      "path": "experiences/dream-20260810-120211-16.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-16",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.230234+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-263": {
+      "path": "experiences/dream-20260810-120211-263.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-263",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.674264+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-285": {
+      "path": "experiences/dream-20260810-120211-285.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-285",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.550234+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-358": {
+      "path": "experiences/dream-20260810-120211-358.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-358",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.316868+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-19": {
+      "path": "experiences/dream-20260810-120211-19.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-19",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.620610+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-41": {
+      "path": "experiences/dream-20260810-120211-41.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-41",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.712932+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-178": {
+      "path": "experiences/dream-20260810-120211-178.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-178",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.624699+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-336": {
+      "path": "experiences/dream-20260810-120211-336.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-336",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.554814+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-116": {
+      "path": "experiences/dream-20260810-120211-116.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-116",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.238810+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-315": {
+      "path": "experiences/dream-20260810-120211-315.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-315",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.712689+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-258": {
+      "path": "experiences/dream-20260810-120211-258.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-258",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.947246+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-156": {
+      "path": "experiences/dream-20260810-120211-156.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-156",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.405612+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-162": {
+      "path": "experiences/dream-20260810-120211-162.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-162",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.348110+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-310": {
+      "path": "experiences/dream-20260810-120211-310.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-310",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.110287+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-200": {
+      "path": "experiences/dream-20260810-120211-200.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-200",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.367299+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-8": {
+      "path": "experiences/dream-20260810-120211-8.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-8",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.328798+00:00",
+      "query_count": 0
+    },
+    "agent-performance-optimization": {
+      "path": "analysis/agent-performance-optimization.md",
+      "type": "analysis",
+      "title": "agent-performance-optimization",
+      "tags": [
+        "agent",
+        "performance",
+        "optimization",
+        "analysis"
+      ],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-08T13:28:39.573870+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-143": {
+      "path": "experiences/dream-20260810-120211-143.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-143",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.037109+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-145": {
+      "path": "experiences/dream-20260810-120211-145.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-145",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.548033+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-170": {
+      "path": "experiences/dream-20260810-120211-170.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-170",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.904666+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-267": {
+      "path": "experiences/dream-20260810-120211-267.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-267",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.827187+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-292": {
+      "path": "experiences/dream-20260810-120211-292.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-292",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.638174+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-276": {
+      "path": "experiences/dream-20260810-120211-276.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-276",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.559017+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-351": {
+      "path": "experiences/dream-20260810-120211-351.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-351",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.299837+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-51": {
+      "path": "experiences/dream-20260810-120211-51.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-51",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.729349+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-29": {
+      "path": "experiences/dream-20260810-120211-29.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-29",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.534277+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-303": {
+      "path": "experiences/dream-20260810-120211-303.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-303",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.928847+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-129": {
+      "path": "experiences/dream-20260810-120211-129.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-129",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.634068+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-27": {
+      "path": "experiences/dream-20260810-120211-27.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-27",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.045641+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-28": {
+      "path": "experiences/dream-20260810-120211-28.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-28",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.832261+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-66": {
+      "path": "experiences/dream-20260810-120211-66.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-66",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.100009+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-175": {
+      "path": "experiences/dream-20260810-120211-175.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-175",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.628812+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-73": {
+      "path": "experiences/dream-20260810-120211-73.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-73",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.266895+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-21": {
+      "path": "experiences/dream-20260810-120211-21.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-21",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.479215+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-105": {
+      "path": "experiences/dream-20260810-120211-105.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-105",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.846330+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-201": {
+      "path": "experiences/dream-20260810-120211-201.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-201",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.101014+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-133": {
+      "path": "experiences/dream-20260810-120211-133.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-133",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.338907+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-94": {
+      "path": "experiences/dream-20260810-120211-94.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-94",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.211975+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-160": {
+      "path": "experiences/dream-20260810-120211-160.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-160",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.810181+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-204": {
+      "path": "experiences/dream-20260810-120211-204.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-204",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.754977+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-98": {
+      "path": "experiences/dream-20260810-120211-98.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-98",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.536475+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-307": {
+      "path": "experiences/dream-20260810-120211-307.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-307",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.741990+00:00",
+      "query_count": 0
+    },
+    "ADR-005-sync-tool-cache": {
+      "path": "decisions/ADR-005-sync-tool-cache.md",
+      "type": "decision",
+      "title": "同步工具添加缓存支持",
+      "tags": [
+        "cache",
+        "performance",
+        "tools",
+        "sync-tools"
+      ],
+      "status": "proposed",
+      "archived": false,
+      "created": "2026-08-04",
+      "updated": "2026-08-04T15:01:15.428248+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-81": {
+      "path": "experiences/dream-20260810-120211-81.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-81",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.972394+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-193": {
+      "path": "experiences/dream-20260810-120211-193.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-193",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.806357+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-235": {
+      "path": "experiences/dream-20260810-120211-235.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-235",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.182017+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-291": {
+      "path": "experiences/dream-20260810-120211-291.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-291",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.598807+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-297": {
+      "path": "experiences/dream-20260810-120211-297.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-297",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.155014+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-321": {
+      "path": "experiences/dream-20260810-120211-321.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-321",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.687403+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-274": {
+      "path": "experiences/dream-20260810-120211-274.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-274",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.218951+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-299": {
+      "path": "experiences/dream-20260810-120211-299.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-299",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.363587+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-97": {
+      "path": "experiences/dream-20260810-120211-97.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-97",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.417388+00:00",
+      "query_count": 0
     },
     "review-report": {
       "path": ".kb/pipeline/review-report.md",
@@ -41,48 +1236,238 @@
       ],
       "status": "completed",
       "archived": false,
-      "updated": "2026-08-03T12:58:41.461566+00:00"
+      "updated": "2026-08-03T12:58:41.461566+00:00",
+      "query_count": 0
     },
-    "ADR-scheduler-architecture": {
-      "path": "decisions/ADR-scheduler-architecture.md",
-      "type": "decision",
-      "title": "定时任务模块架构设计",
-      "tags": [
-        "scheduler",
-        "architecture",
-        "design"
-      ],
+    "dream-20260810-120211-293": {
+      "path": "experiences/dream-20260810-120211-293.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-293",
+      "tags": [],
       "status": "draft",
       "archived": false,
-      "updated": "2026-07-30T02:56:03.537432+00:00"
+      "updated": "2026-08-19T14:20:10.788686+00:00",
+      "query_count": 0
     },
-    "critical-issues": {
-      "path": "review/critical-issues.md",
-      "type": "issue",
-      "title": "critical-issues",
-      "tags": [
-        "security",
-        "approval",
-        "race-condition",
-        "deadlock"
-      ],
+    "dream-20260810-120211-216": {
+      "path": "experiences/dream-20260810-120211-216.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-216",
+      "tags": [],
       "status": "draft",
       "archived": false,
-      "updated": "2026-07-29T01:31:08.745691+00:00"
+      "updated": "2026-08-19T14:20:09.749874+00:00",
+      "query_count": 0
     },
-    "refactor-retry-backoff": {
-      "path": "summary/refactor-retry-backoff.md",
-      "type": "summary",
-      "title": "refactor-retry-backoff",
-      "tags": [
-        "refactor",
-        "retry",
-        "backoff",
-        "llm-client"
-      ],
+    "dream-20260810-120211-313": {
+      "path": "experiences/dream-20260810-120211-313.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-313",
+      "tags": [],
       "status": "draft",
       "archived": false,
-      "updated": "2026-08-08T14:27:32.952646+00:00"
+      "updated": "2026-08-19T14:20:09.790519+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-158": {
+      "path": "experiences/dream-20260810-120211-158.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-158",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.696708+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-318": {
+      "path": "experiences/dream-20260810-120211-318.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-318",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.937793+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-374": {
+      "path": "experiences/dream-20260810-120211-374.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-374",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.463844+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-257": {
+      "path": "experiences/dream-20260810-120211-257.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-257",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.720799+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-58": {
+      "path": "experiences/dream-20260810-120211-58.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-58",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.645574+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-231": {
+      "path": "experiences/dream-20260810-120211-231.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-231",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.816712+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-339": {
+      "path": "experiences/dream-20260810-120211-339.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-339",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.194516+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-180": {
+      "path": "experiences/dream-20260810-120211-180.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-180",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.290546+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-130": {
+      "path": "experiences/dream-20260810-120211-130.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-130",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.527690+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-112": {
+      "path": "experiences/dream-20260810-120211-112.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-112",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.045904+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-372": {
+      "path": "experiences/dream-20260810-120211-372.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-372",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.684498+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-125": {
+      "path": "experiences/dream-20260810-120211-125.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-125",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.734777+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-42": {
+      "path": "experiences/dream-20260810-120211-42.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-42",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.067028+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-236": {
+      "path": "experiences/dream-20260810-120211-236.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-236",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.818576+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-228": {
+      "path": "experiences/dream-20260810-120211-228.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-228",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.188819+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-289": {
+      "path": "experiences/dream-20260810-120211-289.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-289",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.424579+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-95": {
+      "path": "experiences/dream-20260810-120211-95.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-95",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.119986+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-76": {
+      "path": "experiences/dream-20260810-120211-76.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-76",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.061761+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-91": {
+      "path": "experiences/dream-20260810-120211-91.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-91",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.998730+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-121": {
+      "path": "experiences/dream-20260810-120211-121.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-121",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.900418+00:00",
+      "query_count": 0
     },
     "ADR-003-scheduled-task-implementation": {
       "path": "decisions/ADR-003-scheduled-task-implementation.md",
@@ -98,7 +1483,886 @@
       "archived": false,
       "author": "architect",
       "created": "2026-07-26",
-      "updated": "2026-07-30T02:20:36.051024+00:00"
+      "updated": "2026-07-30T02:20:36.051024+00:00",
+      "query_count": 0
+    },
+    "ADR-001-scheduled-task-architecture": {
+      "path": "decisions/ADR-001-scheduled-task-architecture.md",
+      "type": "decision",
+      "title": "ADR-001-scheduled-task-architecture",
+      "tags": [
+        "scheduled-task",
+        "architecture",
+        "design"
+      ],
+      "status": "accepted",
+      "archived": false,
+      "updated": "2026-07-30T02:09:34.554211+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-55": {
+      "path": "experiences/dream-20260810-120211-55.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-55",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.649453+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-32": {
+      "path": "experiences/dream-20260810-120211-32.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-32",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.279085+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-137": {
+      "path": "experiences/dream-20260810-120211-137.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-137",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.704171+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-25": {
+      "path": "experiences/dream-20260810-120211-25.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-25",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.350024+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-229": {
+      "path": "experiences/dream-20260810-120211-229.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-229",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.094591+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-159": {
+      "path": "experiences/dream-20260810-120211-159.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-159",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.370518+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-13": {
+      "path": "experiences/dream-20260810-120211-13.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-13",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.072609+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-350": {
+      "path": "experiences/dream-20260810-120211-350.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-350",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.584634+00:00",
+      "query_count": 0
+    },
+    "refactor-retry-backoff": {
+      "path": "summary/refactor-retry-backoff.md",
+      "type": "summary",
+      "title": "refactor-retry-backoff",
+      "tags": [
+        "refactor",
+        "retry",
+        "backoff",
+        "llm-client"
+      ],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-08T14:27:32.952646+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-371": {
+      "path": "experiences/dream-20260810-120211-371.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-371",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.825645+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-9": {
+      "path": "experiences/dream-20260810-120211-9.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-9",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.617041+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-357": {
+      "path": "experiences/dream-20260810-120211-357.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-357",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.649061+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-110": {
+      "path": "experiences/dream-20260810-120211-110.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-110",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.652071+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-139": {
+      "path": "experiences/dream-20260810-120211-139.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-139",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.563658+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-134": {
+      "path": "experiences/dream-20260810-120211-134.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-134",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.623315+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-348": {
+      "path": "experiences/dream-20260810-120211-348.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-348",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.236341+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-161": {
+      "path": "experiences/dream-20260810-120211-161.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-161",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.525384+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-217": {
+      "path": "experiences/dream-20260810-120211-217.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-217",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.642326+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-173": {
+      "path": "experiences/dream-20260810-120211-173.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-173",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.308918+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-2": {
+      "path": "experiences/dream-20260810-120211-2.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-2",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.533443+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-345": {
+      "path": "experiences/dream-20260810-120211-345.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-345",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.887135+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-168": {
+      "path": "experiences/dream-20260810-120211-168.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-168",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.571069+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-323": {
+      "path": "experiences/dream-20260810-120211-323.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-323",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.677654+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-288": {
+      "path": "experiences/dream-20260810-120211-288.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-288",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.763129+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-264": {
+      "path": "experiences/dream-20260810-120211-264.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-264",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.164029+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-214": {
+      "path": "experiences/dream-20260810-120211-214.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-214",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.765621+00:00",
+      "query_count": 0
+    },
+    "ADR-scheduler-architecture": {
+      "path": "decisions/ADR-scheduler-architecture.md",
+      "type": "decision",
+      "title": "定时任务模块架构设计",
+      "tags": [
+        "scheduler",
+        "architecture",
+        "design"
+      ],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-07-30T02:56:03.537432+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-148": {
+      "path": "experiences/dream-20260810-120211-148.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-148",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.746574+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-294": {
+      "path": "experiences/dream-20260810-120211-294.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-294",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.842175+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-71": {
+      "path": "experiences/dream-20260810-120211-71.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-71",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.586788+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-218": {
+      "path": "experiences/dream-20260810-120211-218.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-218",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.297795+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-319": {
+      "path": "experiences/dream-20260810-120211-319.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-319",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.217845+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-260": {
+      "path": "experiences/dream-20260810-120211-260.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-260",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.834051+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-54": {
+      "path": "experiences/dream-20260810-120211-54.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-54",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.541126+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-337": {
+      "path": "experiences/dream-20260810-120211-337.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-337",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.870461+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-269": {
+      "path": "experiences/dream-20260810-120211-269.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-269",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.134109+00:00",
+      "query_count": 0
+    },
+    "sync-tools-cache-analysis": {
+      "path": "reports/sync-tools-cache-analysis.md",
+      "type": "report",
+      "title": "sync-tools-cache-analysis",
+      "tags": [
+        "cache",
+        "sync-tools",
+        "code-review",
+        "performance"
+      ],
+      "status": "completed",
+      "archived": false,
+      "updated": "2026-08-04T14:58:22.807423+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-4": {
+      "path": "experiences/dream-20260810-120211-4.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-4",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.083393+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-12": {
+      "path": "experiences/dream-20260810-120211-12.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-12",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.160133+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-366": {
+      "path": "experiences/dream-20260810-120211-366.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-366",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.885588+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-338": {
+      "path": "experiences/dream-20260810-120211-338.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-338",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.105127+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-78": {
+      "path": "experiences/dream-20260810-120211-78.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-78",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.529861+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-220": {
+      "path": "experiences/dream-20260810-120211-220.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-220",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.870740+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-256": {
+      "path": "experiences/dream-20260810-120211-256.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-256",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.617595+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-7": {
+      "path": "experiences/dream-20260810-120211-7.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-7",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.721241+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-101": {
+      "path": "experiences/dream-20260810-120211-101.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-101",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.691563+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-34": {
+      "path": "experiences/dream-20260810-120211-34.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-34",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.771079+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-244": {
+      "path": "experiences/dream-20260810-120211-244.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-244",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.939738+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-248": {
+      "path": "experiences/dream-20260810-120211-248.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-248",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.024332+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-52": {
+      "path": "experiences/dream-20260810-120211-52.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-52",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.077908+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-104": {
+      "path": "experiences/dream-20260810-120211-104.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-104",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.541351+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-211": {
+      "path": "experiences/dream-20260810-120211-211.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-211",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.282674+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-268": {
+      "path": "experiences/dream-20260810-120211-268.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-268",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.040365+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-188": {
+      "path": "experiences/dream-20260810-120211-188.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-188",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.008998+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-295": {
+      "path": "experiences/dream-20260810-120211-295.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-295",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.543636+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-219": {
+      "path": "experiences/dream-20260810-120211-219.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-219",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.013736+00:00",
+      "query_count": 0
+    },
+    "critical-issues": {
+      "path": "review/critical-issues.md",
+      "type": "issue",
+      "title": "critical-issues",
+      "tags": [
+        "security",
+        "approval",
+        "race-condition",
+        "deadlock"
+      ],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-07-29T01:31:08.745691+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-153": {
+      "path": "experiences/dream-20260810-120211-153.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-153",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.805358+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-89": {
+      "path": "experiences/dream-20260810-120211-89.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-89",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.128372+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-198": {
+      "path": "experiences/dream-20260810-120211-198.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-198",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.967616+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-359": {
+      "path": "experiences/dream-20260810-120211-359.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-359",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.019085+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-356": {
+      "path": "experiences/dream-20260810-120211-356.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-356",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.757970+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-187": {
+      "path": "experiences/dream-20260810-120211-187.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-187",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.753821+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-35": {
+      "path": "experiences/dream-20260810-120211-35.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-35",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.438522+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-96": {
+      "path": "experiences/dream-20260810-120211-96.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-96",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.737935+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-132": {
+      "path": "experiences/dream-20260810-120211-132.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-132",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.063827+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-208": {
+      "path": "experiences/dream-20260810-120211-208.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-208",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.248195+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-192": {
+      "path": "experiences/dream-20260810-120211-192.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-192",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.520913+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-40": {
+      "path": "experiences/dream-20260810-120211-40.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-40",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.390570+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-296": {
+      "path": "experiences/dream-20260810-120211-296.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-296",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.422168+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-80": {
+      "path": "experiences/dream-20260810-120211-80.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-80",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.260465+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-312": {
+      "path": "experiences/dream-20260810-120211-312.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-312",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.514049+00:00",
+      "query_count": 0
+    },
+    "memory-optimization": {
+      "path": "summaries/memory-system-optimization.md",
+      "type": "summary",
+      "title": "记忆系统深度优化分析",
+      "tags": [
+        "memory",
+        "optimization",
+        "analysis",
+        "dev-assistant-rs"
+      ],
+      "status": "completed",
+      "archived": false,
+      "updated": "2026-08-10T03:30:52.537417+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-56": {
+      "path": "experiences/dream-20260810-120211-56.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-56",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.004099+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-227": {
+      "path": "experiences/dream-20260810-120211-227.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-227",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.565900+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-107": {
+      "path": "experiences/dream-20260810-120211-107.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-107",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.430608+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-185": {
+      "path": "experiences/dream-20260810-120211-185.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-185",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.775946+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-33": {
+      "path": "experiences/dream-20260810-120211-33.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-33",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.987868+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-165": {
+      "path": "experiences/dream-20260810-120211-165.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-165",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.626120+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-273": {
+      "path": "experiences/dream-20260810-120211-273.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-273",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.786521+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-282": {
+      "path": "experiences/dream-20260810-120211-282.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-282",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.893828+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-149": {
+      "path": "experiences/dream-20260810-120211-149.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-149",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.411111+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-179": {
+      "path": "experiences/dream-20260810-120211-179.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-179",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.518775+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-326": {
+      "path": "experiences/dream-20260810-120211-326.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-326",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.539330+00:00",
+      "query_count": 0
     },
     "test-optimization-skills-mod": {
       "path": "reports/test-optimization-skills-mod.md",
@@ -107,21 +2371,1037 @@
       "tags": [],
       "status": "draft",
       "archived": false,
-      "updated": "2026-08-08T10:31:12.343803+00:00"
+      "updated": "2026-08-08T10:31:12.343803+00:00",
+      "query_count": 0
     },
-    "cleanup-p1-issues": {
-      "path": "decisions/cleanup-p1-issues.md",
-      "type": "summary",
-      "title": "cleanup-p1-issues",
+    "dream-20260810-120211-270": {
+      "path": "experiences/dream-20260810-120211-270.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-270",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.008972+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-342": {
+      "path": "experiences/dream-20260810-120211-342.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-342",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.798647+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-109": {
+      "path": "experiences/dream-20260810-120211-109.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-109",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.681077+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-203": {
+      "path": "experiences/dream-20260810-120211-203.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-203",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.522719+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-26": {
+      "path": "experiences/dream-20260810-120211-26.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-26",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.129235+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-155": {
+      "path": "experiences/dream-20260810-120211-155.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-155",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.545794+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-252": {
+      "path": "experiences/dream-20260810-120211-252.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-252",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.516026+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-365": {
+      "path": "experiences/dream-20260810-120211-365.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-365",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.191613+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-31": {
+      "path": "experiences/dream-20260810-120211-31.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-31",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.511573+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-306": {
+      "path": "experiences/dream-20260810-120211-306.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-306",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.637108+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-247": {
+      "path": "experiences/dream-20260810-120211-247.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-247",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.738289+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-90": {
+      "path": "experiences/dream-20260810-120211-90.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-90",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.291642+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-233": {
+      "path": "experiences/dream-20260810-120211-233.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-233",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.591159+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-355": {
+      "path": "experiences/dream-20260810-120211-355.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-355",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.930404+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-123": {
+      "path": "experiences/dream-20260810-120211-123.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-123",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.606817+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-135": {
+      "path": "experiences/dream-20260810-120211-135.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-135",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.724513+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-174": {
+      "path": "experiences/dream-20260810-120211-174.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-174",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.731054+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-344": {
+      "path": "experiences/dream-20260810-120211-344.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-344",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.734047+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-241": {
+      "path": "experiences/dream-20260810-120211-241.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-241",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.546023+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-65": {
+      "path": "experiences/dream-20260810-120211-65.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-65",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.779985+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-5": {
+      "path": "experiences/dream-20260810-120211-5.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-5",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.171670+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-283": {
+      "path": "experiences/dream-20260810-120211-283.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-283",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.054978+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-67": {
+      "path": "experiences/dream-20260810-120211-67.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-67",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.183020+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-124": {
+      "path": "experiences/dream-20260810-120211-124.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-124",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.631514+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-328": {
+      "path": "experiences/dream-20260810-120211-328.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-328",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.050946+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-60": {
+      "path": "experiences/dream-20260810-120211-60.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-60",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.504401+00:00",
+      "query_count": 0
+    },
+    "scheduler-improvement-plan": {
+      "path": "decisions/scheduler-improvement-plan.md",
+      "type": "decision",
+      "title": "定时任务模块改进计划",
       "tags": [
-        "refactor",
-        "dead-code",
-        "dependencies",
-        "P1"
+        "scheduler",
+        "improvement",
+        "architecture"
       ],
       "status": "draft",
       "archived": false,
-      "updated": "2026-08-06T07:38:57.645377+00:00"
+      "created": "2026-08-01",
+      "updated": "2026-08-01T01:15:21.367039+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-38": {
+      "path": "experiences/dream-20260810-120211-38.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-38",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.880368+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-182": {
+      "path": "experiences/dream-20260810-120211-182.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-182",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.576583+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-84": {
+      "path": "experiences/dream-20260810-120211-84.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-84",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.124657+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-189": {
+      "path": "experiences/dream-20260810-120211-189.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-189",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.304020+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-131": {
+      "path": "experiences/dream-20260810-120211-131.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-131",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.814379+00:00",
+      "query_count": 0
+    },
+    "dream-llm-20260819-142009": {
+      "path": "experiences/dream-llm-20260819-142009.md",
+      "type": "experience",
+      "title": "核心经验（380 条候选聚合）",
+      "tags": [
+        "dream",
+        "experience",
+        "consolidated",
+        "失败教训"
+      ],
+      "status": "draft",
+      "archived": false,
+      "created": "2026-08-19T14:20:09.500215+00:00",
+      "updated": "2026-08-19T14:20:09.933428+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-140": {
+      "path": "experiences/dream-20260810-120211-140.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-140",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.769538+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-20": {
+      "path": "experiences/dream-20260810-120211-20.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-20",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.578327+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-126": {
+      "path": "experiences/dream-20260810-120211-126.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-126",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.959341+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-238": {
+      "path": "experiences/dream-20260810-120211-238.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-238",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.149525+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-75": {
+      "path": "experiences/dream-20260810-120211-75.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-75",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.657691+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-11": {
+      "path": "experiences/dream-20260810-120211-11.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-11",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.383771+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-280": {
+      "path": "experiences/dream-20260810-120211-280.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-280",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.761764+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-209": {
+      "path": "experiences/dream-20260810-120211-209.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-209",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.962509+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-23": {
+      "path": "experiences/dream-20260810-120211-23.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-23",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.981969+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-176": {
+      "path": "experiences/dream-20260810-120211-176.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-176",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.828495+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-347": {
+      "path": "experiences/dream-20260810-120211-347.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-347",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.603997+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-207": {
+      "path": "experiences/dream-20260810-120211-207.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-207",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.606448+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-141": {
+      "path": "experiences/dream-20260810-120211-141.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-141",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.657749+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-68": {
+      "path": "experiences/dream-20260810-120211-68.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-68",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.563387+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-99": {
+      "path": "experiences/dream-20260810-120211-99.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-99",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.247431+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-144": {
+      "path": "experiences/dream-20260810-120211-144.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-144",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.855954+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-48": {
+      "path": "experiences/dream-20260810-120211-48.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-48",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.611888+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-213": {
+      "path": "experiences/dream-20260810-120211-213.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-213",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.573862+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-82": {
+      "path": "experiences/dream-20260810-120211-82.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-82",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.594431+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-183": {
+      "path": "experiences/dream-20260810-120211-183.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-183",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.908896+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-169": {
+      "path": "experiences/dream-20260810-120211-169.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-169",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.472754+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-253": {
+      "path": "experiences/dream-20260810-120211-253.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-253",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.794721+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-202": {
+      "path": "experiences/dream-20260810-120211-202.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-202",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.802450+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-210": {
+      "path": "experiences/dream-20260810-120211-210.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-210",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.574840+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-111": {
+      "path": "experiences/dream-20260810-120211-111.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-111",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.765653+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-341": {
+      "path": "experiences/dream-20260810-120211-341.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-341",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.082713+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-3": {
+      "path": "experiences/dream-20260810-120211-3.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-3",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.641484+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-250": {
+      "path": "experiences/dream-20260810-120211-250.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-250",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.119512+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-77": {
+      "path": "experiences/dream-20260810-120211-77.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-77",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.144422+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-327": {
+      "path": "experiences/dream-20260810-120211-327.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-327",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.837099+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-304": {
+      "path": "experiences/dream-20260810-120211-304.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-304",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.948834+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-63": {
+      "path": "experiences/dream-20260810-120211-63.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-63",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.285393+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-47": {
+      "path": "experiences/dream-20260810-120211-47.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-47",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.254419+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-251": {
+      "path": "experiences/dream-20260810-120211-251.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-251",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.396050+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-361": {
+      "path": "experiences/dream-20260810-120211-361.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-361",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.018680+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-322": {
+      "path": "experiences/dream-20260810-120211-322.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-322",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.588741+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-320": {
+      "path": "experiences/dream-20260810-120211-320.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-320",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.842300+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-284": {
+      "path": "experiences/dream-20260810-120211-284.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-284",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.865132+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-255": {
+      "path": "experiences/dream-20260810-120211-255.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-255",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.723343+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-272": {
+      "path": "experiences/dream-20260810-120211-272.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-272",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.670900+00:00",
+      "query_count": 0
+    },
+    "pipeline-analysis": {
+      "path": "summaries/pipeline-analysis.md",
+      "type": "summary",
+      "title": "Pipeline 功能分析报告",
+      "tags": [
+        "pipeline",
+        "analysis",
+        "feature",
+        "dev-assistant-rs"
+      ],
+      "status": "completed",
+      "archived": false,
+      "author": "dev-assistant",
+      "created": "2026-08-01",
+      "updated": "2026-08-01T01:04:38.358788+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-15": {
+      "path": "experiences/dream-20260810-120211-15.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-15",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.458888+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-298": {
+      "path": "experiences/dream-20260810-120211-298.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-298",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.673445+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-305": {
+      "path": "experiences/dream-20260810-120211-305.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-305",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.806703+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-167": {
+      "path": "experiences/dream-20260810-120211-167.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-167",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.850828+00:00",
+      "query_count": 0
+    },
+    "review-tools-2024": {
+      "path": "reviews/tools-code-review-2024.md",
+      "type": "review",
+      "title": "src/tools/ 目录代码审查报告",
+      "tags": [
+        "code-review",
+        "security",
+        "quality"
+      ],
+      "status": "completed",
+      "archived": false,
+      "author": "code-reviewer",
+      "created": "2024-01-01",
+      "updated": "2026-07-29T01:26:41.526001+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-138": {
+      "path": "experiences/dream-20260810-120211-138.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-138",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.465796+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-85": {
+      "path": "experiences/dream-20260810-120211-85.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-85",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.034652+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-115": {
+      "path": "experiences/dream-20260810-120211-115.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-115",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.860555+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-88": {
+      "path": "experiences/dream-20260810-120211-88.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-88",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.414116+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-64": {
+      "path": "experiences/dream-20260810-120211-64.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-64",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.445084+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-59": {
+      "path": "experiences/dream-20260810-120211-59.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-59",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.746205+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-181": {
+      "path": "experiences/dream-20260810-120211-181.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-181",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.565070+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-70": {
+      "path": "experiences/dream-20260810-120211-70.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-70",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.485258+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-195": {
+      "path": "experiences/dream-20260810-120211-195.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-195",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.744324+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-286": {
+      "path": "experiences/dream-20260810-120211-286.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-286",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.516581+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-281": {
+      "path": "experiences/dream-20260810-120211-281.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-281",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.654880+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-222": {
+      "path": "experiences/dream-20260810-120211-222.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-222",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.778408+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-265": {
+      "path": "experiences/dream-20260810-120211-265.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-265",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.439195+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-212": {
+      "path": "experiences/dream-20260810-120211-212.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-212",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.914516+00:00",
+      "query_count": 0
+    },
+    "user-habits": {
+      "path": "summaries/user-habits.md",
+      "type": "summary",
+      "title": "user-habits",
+      "tags": [
+        "user-habits",
+        "workflow",
+        "patterns"
+      ],
+      "status": "draft",
+      "archived": false,
+      "created": "2026-08-04",
+      "updated": "2026-08-04T13:58:24.811131+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-349": {
+      "path": "experiences/dream-20260810-120211-349.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-349",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.952538+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-246": {
+      "path": "experiences/dream-20260810-120211-246.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-246",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.634417+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-186": {
+      "path": "experiences/dream-20260810-120211-186.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-186",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.639730+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-119": {
+      "path": "experiences/dream-20260810-120211-119.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-119",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.754843+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-100": {
+      "path": "experiences/dream-20260810-120211-100.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-100",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.601508+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-364": {
+      "path": "experiences/dream-20260810-120211-364.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-364",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.472432+00:00",
+      "query_count": 0
     },
     "ADR-006-memory-dream": {
       "path": "decisions/ADR-006-memory-dream.md",
@@ -138,21 +3418,243 @@
       "status": "proposed",
       "archived": false,
       "created": "2026-08-10",
-      "updated": "2026-08-10T03:30:52.537417+00:00"
+      "updated": "2026-08-10T03:30:52.537417+00:00",
+      "query_count": 0
     },
-    "scheduler-improvement-plan": {
-      "path": "decisions/scheduler-improvement-plan.md",
-      "type": "decision",
-      "title": "定时任务模块改进计划",
+    "dream-20260810-120211-245": {
+      "path": "experiences/dream-20260810-120211-245.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-245",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.794824+00:00",
+      "query_count": 0
+    },
+    "cleanup-p1-issues": {
+      "path": "decisions/cleanup-p1-issues.md",
+      "type": "summary",
+      "title": "cleanup-p1-issues",
       "tags": [
-        "scheduler",
-        "improvement",
-        "architecture"
+        "refactor",
+        "dead-code",
+        "dependencies",
+        "P1"
       ],
       "status": "draft",
       "archived": false,
-      "created": "2026-08-01",
-      "updated": "2026-08-01T01:15:21.367039+00:00"
+      "updated": "2026-08-06T07:38:57.645377+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-367": {
+      "path": "experiences/dream-20260810-120211-367.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-367",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.561315+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-147": {
+      "path": "experiences/dream-20260810-120211-147.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-147",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.256219+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-277": {
+      "path": "experiences/dream-20260810-120211-277.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-277",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.874521+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-316": {
+      "path": "experiences/dream-20260810-120211-316.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-316",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.614846+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-36": {
+      "path": "experiences/dream-20260810-120211-36.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-36",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.200800+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-45": {
+      "path": "experiences/dream-20260810-120211-45.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-45",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.548467+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-150": {
+      "path": "experiences/dream-20260810-120211-150.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-150",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.687697+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-114": {
+      "path": "experiences/dream-20260810-120211-114.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-114",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.552435+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-177": {
+      "path": "experiences/dream-20260810-120211-177.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-177",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.968732+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-279": {
+      "path": "experiences/dream-20260810-120211-279.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-279",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.206475+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-87": {
+      "path": "experiences/dream-20260810-120211-87.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-87",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.376960+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-113": {
+      "path": "experiences/dream-20260810-120211-113.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-113",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.905106+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-352": {
+      "path": "experiences/dream-20260810-120211-352.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-352",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.919299+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-224": {
+      "path": "experiences/dream-20260810-120211-224.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-224",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.480223+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-146": {
+      "path": "experiences/dream-20260810-120211-146.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-146",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.526554+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-368": {
+      "path": "experiences/dream-20260810-120211-368.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-368",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.177355+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-230": {
+      "path": "experiences/dream-20260810-120211-230.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-230",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.658942+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-14": {
+      "path": "experiences/dream-20260810-120211-14.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-14",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.555972+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-301": {
+      "path": "experiences/dream-20260810-120211-301.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-301",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.555052+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-346": {
+      "path": "experiences/dream-20260810-120211-346.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-346",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.698674+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-102": {
+      "path": "experiences/dream-20260810-120211-102.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-102",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.796886+00:00",
+      "query_count": 0
     },
     "read-symbol-tool-design": {
       "path": "decisions/read_symbol-tool-design.md",
@@ -171,122 +3673,128 @@
         "ADR-tool-architecture"
       ],
       "created": "2026-08-04",
-      "updated": "2026-08-04T14:31:17.467252+00:00"
+      "updated": "2026-08-04T14:31:17.467252+00:00",
+      "query_count": 0
     },
-    "pipeline-analysis": {
-      "path": "summaries/pipeline-analysis.md",
-      "type": "summary",
-      "title": "Pipeline 功能分析报告",
-      "tags": [
-        "pipeline",
-        "analysis",
-        "feature",
-        "dev-assistant-rs"
-      ],
-      "status": "completed",
-      "archived": false,
-      "author": "dev-assistant",
-      "created": "2026-08-01",
-      "updated": "2026-08-01T01:04:38.358788+00:00"
-    },
-    "task-failure-patterns": {
-      "path": "analysis/task-failure-patterns.md",
-      "type": "analysis",
-      "title": "任务失败模式分析",
-      "tags": [
-        "failure-patterns",
-        "error-analysis",
-        "llm-errors",
-        "tool-errors"
-      ],
+    "dream-20260810-120211-262": {
+      "path": "experiences/dream-20260810-120211-262.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-262",
+      "tags": [],
       "status": "draft",
       "archived": false,
-      "updated": "2026-08-04T14:03:01.020089+00:00"
+      "updated": "2026-08-19T14:20:09.586238+00:00",
+      "query_count": 0
     },
-    "user-habits": {
-      "path": "summaries/user-habits.md",
-      "type": "summary",
-      "title": "user-habits",
-      "tags": [
-        "user-habits",
-        "workflow",
-        "patterns"
-      ],
+    "dream-20260810-120211-363": {
+      "path": "experiences/dream-20260810-120211-363.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-363",
+      "tags": [],
       "status": "draft",
       "archived": false,
-      "created": "2026-08-04",
-      "updated": "2026-08-04T13:58:24.811131+00:00"
+      "updated": "2026-08-19T14:20:09.660968+00:00",
+      "query_count": 0
     },
-    "ADR-005-sync-tool-cache": {
-      "path": "decisions/ADR-005-sync-tool-cache.md",
-      "type": "decision",
-      "title": "同步工具添加缓存支持",
-      "tags": [
-        "cache",
-        "performance",
-        "tools",
-        "sync-tools"
-      ],
-      "status": "proposed",
-      "archived": false,
-      "created": "2026-08-04",
-      "updated": "2026-08-04T15:01:15.428248+00:00"
-    },
-    "optimization-plan": {
-      "path": "analysis/optimization-plan.md",
-      "type": "analysis",
-      "title": "任务失败优化方案",
-      "tags": [
-        "optimization",
-        "failure-patterns",
-        "improvement-plan",
-        "edit-file",
-        "compressor",
-        "error-handling"
-      ],
+    "dream-20260810-120211-106": {
+      "path": "experiences/dream-20260810-120211-106.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-106",
+      "tags": [],
       "status": "draft",
       "archived": false,
-      "updated": "2026-08-04T14:05:27.531291+00:00"
+      "updated": "2026-08-19T14:20:11.145912+00:00",
+      "query_count": 0
     },
-    "sync-tools-cache-analysis": {
-      "path": "reports/sync-tools-cache-analysis.md",
-      "type": "report",
-      "title": "sync-tools-cache-analysis",
-      "tags": [
-        "cache",
-        "sync-tools",
-        "code-review",
-        "performance"
-      ],
-      "status": "completed",
-      "archived": false,
-      "updated": "2026-08-04T14:58:22.807423+00:00"
-    },
-    "ADR-003-web-ui-architecture": {
-      "path": "decisions/ADR-003-web-ui-architecture.md",
-      "type": "decision",
-      "title": "Web 界面架构设计方案",
-      "tags": [
-        "web-ui",
-        "architecture",
-        "design"
-      ],
+    "dream-20260810-120211-287": {
+      "path": "experiences/dream-20260810-120211-287.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-287",
+      "tags": [],
       "status": "draft",
       "archived": false,
-      "updated": "2026-07-28T11:59:53.137839+00:00"
+      "updated": "2026-08-19T14:20:11.228291+00:00",
+      "query_count": 0
     },
-    "architecture-analysis": {
-      "path": "summaries/architecture-analysis.md",
-      "type": "summary",
-      "title": "项目代码架构分析报告",
-      "tags": [
-        "architecture",
-        "analysis",
-        "dev-assistant-rs"
-      ],
-      "status": "completed",
+    "dream-20260810-120211-108": {
+      "path": "experiences/dream-20260810-120211-108.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-108",
+      "tags": [],
+      "status": "draft",
       "archived": false,
-      "updated": "2026-07-26T08:28:00.143228+00:00"
+      "updated": "2026-08-19T14:20:10.356577+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-369": {
+      "path": "experiences/dream-20260810-120211-369.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-369",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.088996+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-18": {
+      "path": "experiences/dream-20260810-120211-18.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-18",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.717407+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-83": {
+      "path": "experiences/dream-20260810-120211-83.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-83",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.491218+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-226": {
+      "path": "experiences/dream-20260810-120211-226.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-226",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.890126+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-239": {
+      "path": "experiences/dream-20260810-120211-239.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-239",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.056314+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-259": {
+      "path": "experiences/dream-20260810-120211-259.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-259",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.223999+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-53": {
+      "path": "experiences/dream-20260810-120211-53.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-53",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.165983+00:00",
+      "query_count": 0
     },
     "ADR-002-pipeline-command-design": {
       "path": "decisions/ADR-002-pipeline-command-design.md",
@@ -302,7 +3810,118 @@
       "archived": false,
       "author": "dev-assistant",
       "created": "2026-07-26",
-      "updated": "2026-07-26T07:11:41.868542+00:00"
+      "updated": "2026-07-26T07:11:41.868542+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-142": {
+      "path": "experiences/dream-20260810-120211-142.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-142",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.881543+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-324": {
+      "path": "experiences/dream-20260810-120211-324.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-324",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.172946+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-57": {
+      "path": "experiences/dream-20260810-120211-57.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-57",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.310373+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-330": {
+      "path": "experiences/dream-20260810-120211-330.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-330",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.978261+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-92": {
+      "path": "experiences/dream-20260810-120211-92.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-92",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.601970+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-311": {
+      "path": "experiences/dream-20260810-120211-311.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-311",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.386387+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-79": {
+      "path": "experiences/dream-20260810-120211-79.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-79",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.823184+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-69": {
+      "path": "experiences/dream-20260810-120211-69.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-69",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.895416+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-278": {
+      "path": "experiences/dream-20260810-120211-278.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-278",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.110328+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-333": {
+      "path": "experiences/dream-20260810-120211-333.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-333",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.782623+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-24": {
+      "path": "experiences/dream-20260810-120211-24.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-24",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.665602+00:00",
+      "query_count": 0
     },
     "ADR-004-scheduled-task-detailed-architecture": {
       "path": "decisions/ADR-004-scheduled-task-detailed-architecture.md",
@@ -319,50 +3938,212 @@
       "archived": false,
       "author": "architect",
       "created": "2026-07-26",
-      "updated": "2026-07-30T02:36:35.541189+00:00"
+      "updated": "2026-07-30T02:36:35.541189+00:00",
+      "query_count": 0
     },
-    "agent-performance-optimization": {
-      "path": "analysis/agent-performance-optimization.md",
-      "type": "analysis",
-      "title": "agent-performance-optimization",
+    "dream-20260810-120211-127": {
+      "path": "experiences/dream-20260810-120211-127.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-127",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.817924+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-309": {
+      "path": "experiences/dream-20260810-120211-309.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-309",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.330655+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-331": {
+      "path": "experiences/dream-20260810-120211-331.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-331",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.839062+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-196": {
+      "path": "experiences/dream-20260810-120211-196.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-196",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.608873+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-254": {
+      "path": "experiences/dream-20260810-120211-254.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-254",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.878328+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-50": {
+      "path": "experiences/dream-20260810-120211-50.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-50",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.404420+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-46": {
+      "path": "experiences/dream-20260810-120211-46.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-46",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.957785+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-118": {
+      "path": "experiences/dream-20260810-120211-118.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-118",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.431725+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-191": {
+      "path": "experiences/dream-20260810-120211-191.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-191",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.376637+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-334": {
+      "path": "experiences/dream-20260810-120211-334.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-334",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.209790+00:00",
+      "query_count": 0
+    },
+    "ADR-003-web-ui-architecture": {
+      "path": "decisions/ADR-003-web-ui-architecture.md",
+      "type": "decision",
+      "title": "Web 界面架构设计方案",
       "tags": [
-        "agent",
-        "performance",
-        "optimization",
-        "analysis"
+        "web-ui",
+        "architecture",
+        "design"
       ],
       "status": "draft",
       "archived": false,
-      "updated": "2026-08-08T13:28:39.573870+00:00"
+      "updated": "2026-07-28T11:59:53.137839+00:00",
+      "query_count": 0
     },
-    "finish-decision-tree-optimization": {
-      "path": "summaries/finish-decision-tree-optimization.md",
-      "type": "summary",
-      "title": "finish-decision-tree-optimization",
-      "tags": [
-        "prompt",
-        "finish",
-        "decision-tree",
-        "optimization"
-      ],
-      "status": "completed",
+    "dream-20260810-120211-240": {
+      "path": "experiences/dream-20260810-120211-240.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-240",
+      "tags": [],
+      "status": "draft",
       "archived": false,
-      "updated": "2026-08-08T10:39:39.192014+00:00"
+      "updated": "2026-08-19T14:20:11.265795+00:00",
+      "query_count": 0
     },
-    "review-tools-2024": {
-      "path": "reviews/tools-code-review-2024.md",
-      "type": "review",
-      "title": "src/tools/ 目录代码审查报告",
-      "tags": [
-        "code-review",
-        "security",
-        "quality"
-      ],
-      "status": "completed",
+    "dream-20260810-120211-117": {
+      "path": "experiences/dream-20260810-120211-117.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-117",
+      "tags": [],
+      "status": "draft",
       "archived": false,
-      "author": "code-reviewer",
-      "created": "2024-01-01",
-      "updated": "2026-07-29T01:26:41.526001+00:00"
+      "updated": "2026-08-19T14:20:11.507093+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-17": {
+      "path": "experiences/dream-20260810-120211-17.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-17",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.942557+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-93": {
+      "path": "experiences/dream-20260810-120211-93.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-93",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.497554+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-225": {
+      "path": "experiences/dream-20260810-120211-225.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-225",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:11.200936+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-164": {
+      "path": "experiences/dream-20260810-120211-164.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-164",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:09.727709+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-74": {
+      "path": "experiences/dream-20260810-120211-74.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-74",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.343777+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-10": {
+      "path": "experiences/dream-20260810-120211-10.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-10",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.704689+00:00",
+      "query_count": 0
+    },
+    "dream-20260810-120211-329": {
+      "path": "experiences/dream-20260810-120211-329.md",
+      "type": "unknown",
+      "title": "dream-20260810-120211-329",
+      "tags": [],
+      "status": "draft",
+      "archived": false,
+      "updated": "2026-08-19T14:20:10.139001+00:00",
+      "query_count": 0
     }
   }
 }

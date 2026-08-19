@@ -378,12 +378,12 @@ pub async fn aggregate_summaries(
     }
     let joined = items.join("\n\n");
     let prompt = format!(
-        "请综合以下 {count} 条{level}的摘要，批量生成一份更高级别的{level}摘要，必须保留：\n\
+        "综合以下 {count} 条{level}摘要，生成更高级别{level}摘要，保留：\n\
          - 已完成的关键步骤和进展\n\
          - 重要决策及其理由\n\
          - 跨{level}一致的问题或风险\n\
          - 待处理事项\n\
-         合并重复信息，去除冗余。控制在 {max_tokens} tokens 以内，使用 Markdown 格式。\n\n\
+         合并重复信息。控制在 {max_tokens} tokens 以内，Markdown 格式。\n\n\
          ---{level}开始---\n{joined}\n---{level}结束---\n\n聚合摘要：",
         count = items.len(),
         level = level_name,
@@ -395,7 +395,7 @@ pub async fn aggregate_summaries(
             vec![
                 LlmMessage {
                     role: "system".to_string(),
-                    content: Some("你是一个高效的对话摘要聚合助手。".to_string()),
+                    content: Some("你是摘要聚合助手。".to_string()),
                     tool_calls: None,
                     tool_call_id: None,
                 },

@@ -212,7 +212,7 @@ pub struct KbQueryResult {
 pub fn kb_store_tool() -> ToolDefinition {
     ToolDefinition {
         name: "kb_store".to_string(),
-        description: "Create or update a KnowledgeBase entry. Used for recording architecture decisions, module interface definitions, issue tracking, etc. Content must include YAML frontmatter (delimited by ---).".to_string(),
+        description: "Create or update a KB entry. For architecture decisions, interfaces, issues. Content must include YAML frontmatter (---).".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {

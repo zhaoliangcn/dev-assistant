@@ -19,7 +19,7 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
          原始需求：\n\
          {task_ref}\n\n\
          {context}\n\n\
-         请使用 kb_store 将架构决策保存到 pipeline/stage-0/ 目录下。\n\n\
+         请用 kb_store 将架构决策保存到 pipeline/stage-0/。\n\n\
          {finish}",
         "架构设计",
         "架构设计完成：模块划分、接口定义、数据流、决策理由",
@@ -32,8 +32,7 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
          {task_ref}\n\n\
          上一阶段输出（架构设计）：\n\
          {context}\n\n\
-         注意：严格遵循架构设计，不擅自修改接口定义。\n\
-         请使用 kb_store 将修改的文件列表保存到 pipeline/stage-1/ 目录下。\n\n\
+         请用 kb_store 将修改的文件列表保存到 pipeline/stage-1/。\n\n\
          {finish}",
         "代码实现",
         "代码实现完成：新增文件、关键接口、测试覆盖",
@@ -46,7 +45,7 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
          {task_ref}\n\n\
          上一阶段输出（代码实现）：\n\
          {context}\n\n\
-         请使用 kb_store 将测试结果保存到 pipeline/stage-2/ 目录下。\n\n\
+         请用 kb_store 将测试结果保存到 pipeline/stage-2/。\n\n\
          {finish}",
         "测试报告",
         "测试完成：N 个测试用例，M 个通过，K 个失败",
@@ -59,7 +58,7 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
          {task_ref}\n\n\
          上一阶段输出（测试结果和代码实现）：\n\
          {context}\n\n\
-         请使用 kb_store 将审查结果保存到 pipeline/stage-3/ 目录下。\n\n\
+         请用 kb_store 将审查结果保存到 pipeline/stage-3/。\n\n\
          {finish}",
         "审查报告",
         "审查完成：发现 N 个问题，其中严重 X 个，建议 Y 项",
@@ -73,7 +72,7 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
          上一阶段输出（审查报告）：\n\
          {context}\n\n\
          注意：只修复审查中提出的问题，不要引入新的功能变更。\n\
-         请使用 kb_store 将修复记录保存到 pipeline/stage-4/ 目录下。\n\n\
+         请用 kb_store 将修复记录保存到 pipeline/stage-4/。\n\n\
          {finish}",
         "修复",
         "修复完成：处理 N 个问题，编译通过",
@@ -86,13 +85,13 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
          {task_ref}\n\n\
          已完成的工作：\n\
          {context}\n\n\
-         请使用 kb_store 记录到 pipeline/stage-5/ 目录下：\n\
+         请用 kb_store 记录到 pipeline/stage-5/：\n\
          1. 完成的功能列表\n\
          2. 修改的文件清单\n\
          3. 测试结果概要\n\
-         4. 未解决的问题（如果有）\n\n\
-         如果代码有变更，尝试使用 `exec_command` 执行 git add 和 git commit 提交代码变更。\n\
-         如果 git 操作不可用，记录到 KB 即可。\n\n\
+         4. 未解决的问题\n\n\
+         如有代码变更，尝试 `exec_command` 执行 git add 和 git commit。\n\
+         若 git 不可用，记录到 KB 即可。\n\n\
          {finish}",
         "进度记录",
         "进度已记录：功能列表、文件清单、测试结果",

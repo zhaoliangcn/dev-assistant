@@ -17,9 +17,7 @@ pub fn context_budget_tool() -> ToolDefinition {
     ToolDefinition {
         name: "context_budget".to_string(),
         description:
-            "查询当前上下文预算使用情况。返回系统提示、记忆、历史各占用的 token 数，\
-             以及使用率、压力等级和剩余可用空间。在每 3-5 轮工具调用后检查一次，\
-             帮助规划后续行为。"
+            "查询上下文预算使用情况：系统提示、记忆、历史各占用的 token 数、使用率、压力等级、剩余空间。每 3-5 轮调用一次。"
             .to_string(),
         parameters: serde_json::json!({
             "type": "object",
@@ -39,9 +37,7 @@ pub fn compress_context_tool() -> ToolDefinition {
     ToolDefinition {
         name: "compress_context".to_string(),
         description:
-            "主动压缩上下文以释放空间。使用智能策略根据当前压力等级自动选择最佳压缩方式。\
-             调用后旧的对话会被摘要替换，释放上下文空间供后续使用。\
-             推荐在 context_budget 显示压力等级为 Critical 时调用。"
+            "主动压缩上下文：根据压力等级自动选择最优策略（摘要/截断），释放上下文空间。推荐 Critical 等级时调用。"
             .to_string(),
         parameters: serde_json::json!({
             "type": "object",
@@ -49,7 +45,7 @@ pub fn compress_context_tool() -> ToolDefinition {
                 "strategy": {
                     "type": "string",
                     "enum": ["auto", "summarize", "truncate"],
-                    "description": "压缩策略：auto=自动选择（推荐，根据压力等级自动选择），summarize=摘要压缩（保留语义），truncate=截断压缩（紧急时使用）",
+                    "description": "auto/summarize/truncate。auto=自动（推荐），summarize=摘要，truncate=截断",
                     "default": "auto"
                 }
             },
@@ -68,21 +64,19 @@ pub fn save_summary_tool() -> ToolDefinition {
     ToolDefinition {
         name: "save_summary".to_string(),
         description:
-            "将当前对话的关键信息保存为摘要到知识库（KB）。\
-             用于在上下文紧张时，先保存关键信息再压缩，避免信息丢失。\
-             保存的内容包括：已完成的步骤、关键决策、待处理事项、引用的文件等。"
+            "将关键信息保存为摘要到 KB。上下文紧张时先保存再压缩，避免信息丢失。"
             .to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "需要保存的关键信息摘要（Markdown 格式）。应包含：已完成步骤、关键决策、待处理事项、引用的文件。"
+                    "description": "关键信息摘要（Markdown）：已完成步骤、关键决策、待处理事项、引用的文件。"
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "标签列表，便于后续检索（如：[\"context-summary\", \"session-123\"]）",
+                    "description": "标签，便于检索（如 [\"context-summary\"]）",
                     "default": ["context-summary"]
                 }
             },

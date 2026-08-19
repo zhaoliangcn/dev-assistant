@@ -11,18 +11,18 @@ use tracing::debug;
 pub fn exec_command_tool() -> ToolDefinition {
     ToolDefinition {
         name: "exec_command".to_string(),
-        description: "Execute a command directly in the project directory. For security reasons, this does NOT invoke a shell, so shell syntax like pipes (|), redirects (>, >>), and logical operators (&&, ||) are NOT supported. If you need shell features, use command=\"sh\" with args=[\"-c\", \"your_pipeline_here\"] instead.".to_string(),
+        description: "Execute a command directly. No shell: pipes/redirects/&&/|| not supported. Use sh -c \"...\" for shell features.".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The executable to run (e.g., \"ls\", \"cargo\", \"git\"). Do NOT include shell syntax here."
+                    "description": "The executable (e.g., \"ls\", \"cargo\", \"git\"). No shell syntax."
                 },
                 "args": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Optional arguments passed to the command (e.g., [\"build\", \"--release\"]). For shell pipelines, use command=\"sh\" with args=[\"-c\", \"cmd1 | cmd2\"]."
+                    "description": "Optional args (e.g., [\"build\", \"--release\"]). For shell: sh -c \"cmd\"."
                 }
             },
             "required": ["command"]

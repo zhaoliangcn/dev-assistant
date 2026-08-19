@@ -35,12 +35,7 @@ pub fn get_global_scheduler() -> Option<Arc<Scheduler>> {
 pub fn schedule_task_tool() -> ToolDefinition {
     ToolDefinition {
         name: "schedule_task".to_string(),
-        description: "创建定时任务，支持 cron 表达式、固定间隔、一次性延迟三种调度方式。\n\
-                     支持 Agent 子代理执行和 Shell 命令执行两种执行模式。\n\n\
-                     使用示例:\n\
-                     - 每天 9 点执行代码审查: cron(\"0 9 * * *\"), agent 模式\n\
-                     - 每 30 分钟同步一次: interval(1800), command 模式\n\
-                     - 5 分钟后发送提醒: once(300), agent 模式".to_string(),
+        description: "创建定时任务：cron 表达式、固定间隔(秒)、一次性延迟(秒)三种调度，支持 Agent 子代理或 Shell 命令执行。".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
@@ -55,15 +50,15 @@ pub fn schedule_task_tool() -> ToolDefinition {
                         "type": {
                             "type": "string",
                             "enum": ["cron", "interval", "once"],
-                            "description": "调度类型: cron=表达式, interval=固定间隔(秒), once=一次性延迟(秒)"
+                            "description": "cron/interval(秒)/once(秒)"
                         },
                         "expression": {
                             "type": "string",
-                            "description": "cron 表达式（type=cron 时必填），格式: \"分 时 日 月 周\""
+                            "description": "cron 表达式，格式: \"分 时 日 月 周\"（type=cron 时必填）"
                         },
                         "seconds": {
                             "type": "integer",
-                            "description": "间隔秒数（type=interval 或 type=once 时必填）"
+                            "description": "间隔秒数（interval/once 时必填）"
                         }
                     },
                     "required": ["type"]
@@ -75,19 +70,19 @@ pub fn schedule_task_tool() -> ToolDefinition {
                         "type": {
                             "type": "string",
                             "enum": ["agent", "command"],
-                            "description": "执行类型: agent=子代理, command=Shell命令"
+                            "description": "agent/command"
                         },
                         "instruction": {
                             "type": "string",
-                            "description": "Agent 指令（type=agent 时必填）"
+                            "description": "Agent 指令（agent 模式必填）"
                         },
                         "command": {
                             "type": "string",
-                            "description": "Shell 命令（type=command 时必填）"
+                            "description": "Shell 命令（command 模式必填）"
                         },
                         "working_dir": {
                             "type": "string",
-                            "description": "命令执行的工作目录（可选，默认项目目录）"
+                            "description": "工作目录（可选，默认项目目录）"
                         }
                     },
                     "required": ["type"]

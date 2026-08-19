@@ -650,12 +650,9 @@ impl Agent {
             };
             let utilization_pct = pb.utilization * 100.0;
             task_description.push_str(&format!(
-                "\n\n### 父代理上下文状态\n\
-                 父代理上下文压力：{pressure_str}\n\
-                 父代理使用率：{utilization_pct:.0}%\n\
-                 请尽快完成你的任务。父代理的上下文空间有限，\
-                 你的结果需要能容纳回父代理的上下文中，请控制输出规模，\
-                 只返回必要的关键信息。",
+                "\n\n### 父代理上下文\n\
+                 压力：{pressure_str}（使用率 {utilization_pct:.0}%）。\
+                 请尽快完成，结果需能容纳回父代理上下文，只返回必要信息。",
                 pressure_str = pressure_str,
                 utilization_pct = utilization_pct,
             ));
@@ -696,8 +693,7 @@ impl Agent {
     /// 仅输出描述和示例摘要不同。提取为辅助函数减少重复。
     fn finish_warning(output_desc: &str, example_summary: &str) -> String {
         format!(
-            "✅ 完成所有上述工作后，请调用 `finish` 工具终止本阶段，\n\
-             并将{}摘要作为 `summary` 参数传入，例如：\n\
+            "✅ 完成后调 `finish` 终止本阶段，将{}摘要作为 `summary` 参数：\n\
              `finish(summary=\"{}\")`。",
             output_desc, example_summary
         )

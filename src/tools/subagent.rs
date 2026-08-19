@@ -18,32 +18,32 @@ use crate::utils::error::AppError;
 pub fn spawn_subagent_tool() -> ToolDefinition {
     ToolDefinition {
         name: "spawn_subagent".to_string(),
-        description: "Create a sub-agent to execute a task independently. Use this when a task can be decomposed into independent subtasks that can be worked on separately. The sub-agent will have its own context and tool set, and will report back with results.".to_string(),
+        description: "Create a sub-agent for independent subtasks. Has its own context and tools, reports back with results.".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task description for the sub-agent. Be specific about what the sub-agent should accomplish."
+                    "description": "Task description for the sub-agent. Be specific."
                 },
                 "context": {
                     "type": "string",
-                    "description": "Context information to pass to the sub-agent, such as relevant file paths, interface definitions, or background knowledge."
+                    "description": "Context for the sub-agent: file paths, interface definitions, background knowledge."
                 },
                 "agent_type": {
                     "type": "string",
-                    "description": "Type of sub-agent to create. Available types: architect, implementer, reviewer, tester, debugger, general. Each type has specialized skills and tools. Default: general.",
+                    "description": "Sub-agent type: architect/implementer/reviewer/tester/debugger/general. Default: general.",
                     "enum": ["architect", "implementer", "reviewer", "tester", "debugger", "general"],
                     "default": "general"
                 },
                 "max_iterations": {
                     "type": "integer",
-                    "description": "Maximum iterations for the sub-agent (default: 30). Set lower for simple tasks, higher for complex ones.",
+                    "description": "Max iterations (default: 30). Lower for simple tasks, higher for complex.",
                     "default": 30
                 },
                 "max_tokens": {
                     "type": "integer",
-                    "description": "Token budget for the sub-agent's context window (default: 262144). This is the context budget, not the model output cap. Set higher for tasks requiring large context.",
+                    "description": "Context budget for sub-agent (default: 262144). Set higher for context-heavy tasks.",
                     "default": 262144
                 }
             },

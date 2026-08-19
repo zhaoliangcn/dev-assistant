@@ -199,12 +199,12 @@ impl ContextCompressor {
         let old_text = old_text.join("\n\n");
 
         let summarize_prompt = format!(
-            "请对以下对话生成一个简洁的中文摘要，必须保留：\n\
+            "生成简洁中文摘要，保留：\n\
              - 已完成的关键步骤\n\
              - 重要决策及其理由\n\
              - 发现的问题或风险\n\
              - 待处理事项\n\
-             不要包含无关细节。摘要控制在 {} tokens 以内。\n\n\
+             摘要控制在 {} tokens 以内。\n\n\
              ---对话开始---\n{}\n---对话结束---\n\n摘要：",
             SUMMARY_MAX_TOKENS, old_text
         );
@@ -215,7 +215,7 @@ impl ContextCompressor {
                 vec![
                     LlmMessage {
                         role: "system".to_string(),
-                        content: Some("你是一个高效的对话摘要助手。".to_string()),
+                        content: Some("你是对话摘要助手。".to_string()),
                         tool_calls: None,
                         tool_call_id: None,
                     },

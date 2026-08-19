@@ -9,7 +9,7 @@ const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 pub fn run_hook_tool() -> ToolDefinition {
     ToolDefinition {
         name: "run_hook".to_string(),
-        description: "Execute configured hooks (from .dev-assistant/hooks.yaml) on demand and return their output. Use to re-run lifecycle scripts (git status, lint, tests, project context) at any point during the session. Optionally filter by event or hook name.".to_string(),
+        description: "Execute configured hooks (from .dev-assistant/hooks.yaml) on demand. Filter by event or hook name.".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
@@ -83,13 +83,13 @@ fn run_hook_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
 pub fn finish_tool() -> ToolDefinition {
     ToolDefinition {
         name: "finish".to_string(),
-        description: "Finish the task and provide a structured summary. Include: what was accomplished, key findings/decisions, modified files (if any), and unresolved issues (if any). Use this when the task is complete — do not just output text.".to_string(),
+        description: "Finish the task with a structured summary: accomplishments, key findings, modified files, unresolved issues.".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "Structured completion summary: accomplishments, key findings/decisions, modified files, unresolved issues"
+                    "description": "Structured summary: accomplishments, key findings/decisions, modified files, unresolved issues"
                 }
             },
             "required": ["summary"]
@@ -116,7 +116,7 @@ fn finish_handler(args: &ToolArgs, _context: &ToolContext) -> Result<ToolResult,
 pub fn restart_tool() -> ToolDefinition {
     ToolDefinition {
         name: "restart".to_string(),
-        description: "Save conversation state, run cargo build, and restart the dev-assistant process with the updated binary. Only available when working on the dev-assistant-rs project itself. Use this after modifying the project's Rust source code to verify changes compile.".to_string(),
+        description: "Save state, run cargo build, restart with updated binary. Only for dev-assistant-rs project.".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {

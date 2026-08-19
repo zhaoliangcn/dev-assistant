@@ -100,6 +100,7 @@ pub struct KbIndexEntry {
     /// `.kb/query-stats.json`（见 [`load_query_stats`]）。index.json 中的该值
     /// 不再被 `kb_query`/`kb_store` 维护，仅作历史字段保留；遗忘阶段会从
     /// sidecar 注水后再用于 `compute_health`。
+    #[deprecated(since = "0.2.0", note = "查询统计已迁移至 .kb/query-stats.json sidecar，此字段仅保留以兼容旧 index.json 反序列化")]
     #[serde(default)]
     pub query_count: u64,
     /// 最近一次被 kb_query 命中的时间
@@ -136,6 +137,7 @@ pub(crate) fn query_stats_path(kb_root: &Path) -> PathBuf {
 /// sidecar 不存在或损坏时，从 `baseline`（index.json 的条目）一次性迁移现有
 /// `query_count`/`last_query_at`，并尽力写回 sidecar。迁移后 sidecar 即为查询
 /// 统计的唯一真相源，index.json 中的对应字段不再被维护。
+#[allow(deprecated)] // 仅迁移代码读取 index.json 中已弃用的 `query_count` 旧值
 pub(crate) fn load_query_stats(kb_root: &Path, baseline: &KbIndex) -> HashMap<String, QueryStats> {
     let path = query_stats_path(kb_root);
     match fs::read_to_string(&path) {
@@ -600,6 +602,8 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
     // 解析 archived 字段（frontmatter 可写 archived: true，默认 false）
     let archived = fm.get("archived").map(|s| s.trim().eq_ignore_ascii_case("true")).unwrap_or(false);
 
+    // `query_count` 已弃用（真相源为 sidecar），此处仅设默认值以满足结构体初始化。
+    #[allow(deprecated)]
     let entry = KbIndexEntry {
         path: entry_path.to_string(),
         entry_type: fm.get("type").cloned().unwrap_or_else(|| "unknown".to_string()),

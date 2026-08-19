@@ -74,6 +74,10 @@ impl ForgetResult {
 ///
 /// `kb_root` 为 `.kb/` 目录。`dry_run` 为 true 时只计算并返回动作，
 /// 不修改任何文件（预演模式）。
+///
+/// `query_count` 字段已弃用，本函数通过 sidecar 注水到临时副本后计算健康分，
+/// 不写回 index.json（避免双真相源）。
+#[allow(deprecated)]
 pub fn run_forget(kb_root: &Path, dry_run: bool) -> Result<ForgetResult, AppError> {
     let index_path = kb_root.join("index.json");
     if !index_path.exists() {
@@ -174,6 +178,7 @@ pub fn compute_health(entry: &KbIndexEntry, now: DateTime<Utc>) -> f64 {
 ///
 /// 效应：0 次查询 → 0；1 次 → 0.058；3 次 → 0.149；10 次 → 0.20（上限）；
 /// 最近 30 天内查询过额外 +0.08。总激励上限 0.30。
+#[allow(deprecated)]
 fn query_bonus(entry: &KbIndexEntry, now: DateTime<Utc>) -> f64 {
     let base = (1.0f64 + entry.query_count as f64).ln() * 0.05;
     let recency = entry

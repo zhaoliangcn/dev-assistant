@@ -272,7 +272,9 @@ impl ToolRegistry {
     /// 执行工具：先做安全评估，再根据评估结果决定是否执行。
     ///
     /// - `Critical`：阻止执行，返回带评估信息的失败结果
-    /// - `High` / `Medium`：检查审批管理器，有有效审批则执行，否则返回需要审批的结果
+    /// - `High` / `Medium`：先通过 `SecurityPolicy::requires_approval()` 判断全局
+    ///   审批开关（受 `--no-approval` 控制），开关关闭则直接执行；开关打开时
+    ///   再查会话级权限存储（`ApprovalManager`），已有有效审批则执行，否则返回需审批结果
     /// - `Low`：直接执行
     pub fn execute(&self, name: &str, arguments: Value) -> Result<ToolResult, AppError> {
         debug!(tool = name, "Executing tool");
@@ -290,26 +292,32 @@ impl ToolRegistry {
                 })
             }
             ref level @ (crate::security::DangerLevel::High | crate::security::DangerLevel::Medium) => {
-                // 检查是否已有有效审批，使用参数中的具体作用域（如路径）
-                let scope_id = crate::security::approval::extract_approval_scope(name, &arguments);
-                if self.approval_manager.requires_approval(name, &scope_id, level) {
-                    warn!(tool = name, level = ?level, reason = %evaluation.reason, "Tool requires approval");
-                    Ok(ToolResult {
-                        success: false,
-                        content: format!(
-                            "⚠️  This command requires approval ({}): {}\n\
-                             Press Enter to approve, or type 'cancel' to skip.",
-                            level.as_str(),
-                            evaluation.reason
-                        ),
-                        security_evaluation: Some(evaluation),
-                        restart_requested: false,
-                        error_category: None,
-                    })
-                } else {
-                    debug!(tool = name, level = ?level, "Tool execution approved by permission store");
-                    self.execute_tool(name, arguments)
+                // 第一关：全局审批开关（受 --no-approval 控制）
+                if !self.security.requires_approval(level) {
+                    debug!(tool = name, level = ?level, "Approval disabled via --no-approval, executing directly");
+                    return self.execute_tool(name, arguments);
                 }
+
+                // 第二关：会话级权限存储（已在本次会话中对该工具+作用域批准过）
+                let scope_id = crate::security::approval::extract_approval_scope(name, &arguments);
+                if self.approval_manager.has_permission(name, &scope_id, level) {
+                    debug!(tool = name, level = ?level, scope = scope_id, "Tool execution approved by permission store");
+                    return self.execute_tool(name, arguments);
+                }
+
+                warn!(tool = name, level = ?level, reason = %evaluation.reason, scope = scope_id, "Tool requires user approval");
+                Ok(ToolResult {
+                    success: false,
+                    content: format!(
+                        "⚠️  This command requires approval ({}): {}\n\
+                         Press Enter to approve, or type 'cancel' to skip.",
+                        level.as_str(),
+                        evaluation.reason
+                    ),
+                    security_evaluation: Some(evaluation),
+                    restart_requested: false,
+                    error_category: None,
+                })
             }
             crate::security::DangerLevel::Low => self.execute_tool(name, arguments),
         }
@@ -446,7 +454,7 @@ impl ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::SecurityPolicy;
+    use crate::security::{approval::ApprovalManager, SecurityPolicy};
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -456,5 +464,93 @@ mod tests {
         let registry = ToolRegistry::new(PathBuf::new(), policy);
         let tokens = registry.schema_token_count();
         assert!(tokens > 0, "schema token count should be non-zero");
+    }
+
+    /// 审批关闭（--no-approval）时，High 危险级别工具应直接执行，不被拦截。
+    #[test]
+    fn high_danger_tool_executes_when_approval_disabled() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        // approval_required = false 模拟 --no-approval
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), false));
+        let registry = ToolRegistry::new(dir.path().to_path_buf(), policy);
+
+        let result = registry
+            .execute(
+                "exec_command",
+                serde_json::json!({"command": "chmod", "args": ["644", "test.txt"]}),
+            )
+            .unwrap();
+
+        // 审批关闭时应进入执行路径，不应返回 requires-approval 消息
+        assert!(
+            !result.content.contains("requires approval"),
+            "with --no-approval, chmod should not be blocked, got: {}",
+            result.content
+        );
+    }
+
+    /// 审批开启且无权限记录时，High 危险级别工具应返回需审批结果。
+    #[test]
+    fn high_danger_tool_requires_approval_when_enabled() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        // approval_required = true 模拟默认审批开启
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), true));
+        let registry = ToolRegistry::new(dir.path().to_path_buf(), policy);
+
+        let result = registry
+            .execute(
+                "exec_command",
+                serde_json::json!({"command": "chmod", "args": ["644", "test.txt"]}),
+            )
+            .unwrap();
+
+        assert!(
+            !result.success,
+            "chmod should not execute without approval"
+        );
+        assert!(
+            result.content.contains("requires approval"),
+            "should report requires-approval, got: {}",
+            result.content
+        );
+    }
+
+    /// 审批开启且权限存储中存在有效审批时，High 危险级别工具应执行。
+    #[test]
+    fn high_danger_tool_executes_with_stored_permission() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), true));
+        let approval_manager = Arc::new(ApprovalManager::new());
+
+        // 预授权：chmod + "644 test.txt" 作用域，High 级别，永久有效
+        approval_manager.add_permission_directly(
+            "exec_command",
+            "chmod 644 test.txt",
+            crate::security::DangerLevel::High,
+            0,
+        );
+
+        let registry = ToolRegistry::new_with_resources(
+            dir.path().to_path_buf(),
+            policy,
+            crate::tools::resources::Resources::new().into_shared(),
+            approval_manager,
+        );
+
+        let result = registry
+            .execute(
+                "exec_command",
+                serde_json::json!({"command": "chmod", "args": ["644", "test.txt"]}),
+            )
+            .unwrap();
+
+        assert!(
+            !result.content.contains("requires approval"),
+            "chmod should execute with stored permission, got: {}",
+            result.content
+        );
     }
 }

@@ -11,16 +11,36 @@ use crate::llm::{LlmClient, LlmMessage, LlmResponse};
 use crate::utils::error::AppError;
 
 /// 保留的对话轮数。
-const ROUNDS_TO_KEEP: usize = 6;
+const DEFAULT_ROUNDS_TO_KEEP: usize = 6;
 
 /// 触发压缩的 token 阈值比例（相对于 max_tokens）。
 const MAX_CONVERSATION_TOKENS_RATIO: f64 = 0.9;
 
 /// 摘要压缩时保留的完整对话轮数。
-const SUMMARY_KEEP_ROUNDS: usize = 3;
+const DEFAULT_SUMMARY_KEEP_ROUNDS: usize = 3;
 
 /// 摘要提示词的最大 token 数。
 const SUMMARY_MAX_TOKENS: usize = 800;
+
+/// 从环境变量读取保留轮数（`AGENT_ROUNDS_TO_KEEP`），默认 [`DEFAULT_ROUNDS_TO_KEEP`]。
+///
+/// 允许按任务复杂度调整：复杂长对话可设 8-12 轮，简单对话可设 3-4 轮节省上下文。
+fn rounds_to_keep() -> usize {
+    std::env::var("AGENT_ROUNDS_TO_KEEP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(DEFAULT_ROUNDS_TO_KEEP)
+}
+
+/// 从环境变量读取摘要保留轮数（`AGENT_SUMMARY_KEEP_ROUNDS`），默认 [`DEFAULT_SUMMARY_KEEP_ROUNDS`]。
+fn summary_keep_rounds() -> usize {
+    std::env::var("AGENT_SUMMARY_KEEP_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(DEFAULT_SUMMARY_KEEP_ROUNDS)
+}
 
 /// 压缩策略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +74,8 @@ pub struct CompressionInfo {
 pub struct ContextCompressor;
 
 impl ContextCompressor {
-    /// 如果 `history.used_tokens` 超过阈值，保留最近 `ROUNDS_TO_KEEP` 轮对话。
+    /// 如果 `history.used_tokens` 超过阈值，保留最近 `rounds_to_keep()` 轮对话。
+    /// 保留轮数由环境变量 `AGENT_ROUNDS_TO_KEEP` 配置（默认 [`DEFAULT_ROUNDS_TO_KEEP`]）。
     /// 返回 `CompressionInfo` 描述压缩详情。
     pub fn compress_if_needed(
         history: &mut ConversationHistory,
@@ -96,12 +117,13 @@ impl ContextCompressor {
         }
     }
 
-    /// 截断压缩：保留最近 `ROUNDS_TO_KEEP` 轮，丢弃更早的。
+    /// 截断压缩：保留最近 `rounds_to_keep()` 轮（环境变量 `AGENT_ROUNDS_TO_KEEP` 可配置），丢弃更早的。
     pub fn truncate(history: &mut ConversationHistory) -> Result<CompressionInfo, AppError> {
         let original_messages = history.messages.len();
         let original_tokens = history.used_tokens;
+        let keep = rounds_to_keep();
 
-        // Keep the last ROUNDS_TO_KEEP rounds of messages
+        // Keep the last `keep` rounds of messages
         let mut rounds: Vec<Vec<LlmMessage>> = Vec::new();
         let mut current_round: Vec<LlmMessage> = Vec::new();
 
@@ -109,14 +131,14 @@ impl ContextCompressor {
             if msg.role == "user" && !current_round.is_empty() {
                 rounds.push(current_round);
                 current_round = Vec::new();
-                if rounds.len() >= ROUNDS_TO_KEEP {
+                if rounds.len() >= keep {
                     break;
                 }
             }
             current_round.push(msg.clone());
         }
 
-        if !current_round.is_empty() && rounds.len() < ROUNDS_TO_KEEP {
+        if !current_round.is_empty() && rounds.len() < keep {
             rounds.push(current_round);
         }
 
@@ -137,14 +159,14 @@ impl ContextCompressor {
             did_compress: true,
             original_messages,
             after_messages,
-            kept_rounds: ROUNDS_TO_KEEP,
+            kept_rounds: keep,
             original_tokens,
             after_tokens,
             strategy: Some(CompressionStrategy::Truncate),
         })
     }
 
-    /// 摘要压缩：用 LLM 将旧消息压缩为摘要，保留最近 `SUMMARY_KEEP_ROUNDS` 轮完整对话。
+    /// 摘要压缩：用 LLM 将旧消息压缩为摘要，保留最近 `summary_keep_rounds()` 轮完整对话（环境变量 `AGENT_SUMMARY_KEEP_ROUNDS` 可配置）。
     ///
     /// `llm` 用于生成摘要。若 LLM 调用失败，则回退到截断压缩。
     pub async fn summarize(
@@ -153,9 +175,10 @@ impl ContextCompressor {
     ) -> Result<CompressionInfo, AppError> {
         let original_messages = history.messages.len();
         let original_tokens = history.used_tokens;
+        let keep = summary_keep_rounds();
 
         // 分离旧消息和最近保留的完整轮消息
-        let (old_messages, _) = history.split_old_messages(SUMMARY_KEEP_ROUNDS);
+        let (old_messages, _) = history.split_old_messages(keep);
 
         if old_messages.is_empty() {
             return Ok(Self::no_op(history));
@@ -236,7 +259,7 @@ impl ContextCompressor {
             did_compress: true,
             original_messages,
             after_messages: history.messages.len(),
-            kept_rounds: SUMMARY_KEEP_ROUNDS,
+            kept_rounds: keep,
             original_tokens,
             after_tokens,
             strategy: Some(CompressionStrategy::Summarize),
@@ -249,10 +272,57 @@ impl ContextCompressor {
             did_compress: false,
             original_messages: history.messages.len(),
             after_messages: history.messages.len(),
-            kept_rounds: ROUNDS_TO_KEEP,
+            kept_rounds: rounds_to_keep(),
             original_tokens: history.used_tokens,
             after_tokens: history.used_tokens,
             strategy: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rounds_to_keep_defaults_to_six() {
+        // 无环境变量时返回默认值 6
+        std::env::remove_var("AGENT_ROUNDS_TO_KEEP");
+        assert_eq!(rounds_to_keep(), DEFAULT_ROUNDS_TO_KEEP);
+    }
+
+    #[test]
+    fn rounds_to_keep_reads_env_var() {
+        std::env::set_var("AGENT_ROUNDS_TO_KEEP", "12");
+        assert_eq!(rounds_to_keep(), 12);
+        std::env::remove_var("AGENT_ROUNDS_TO_KEEP");
+    }
+
+    #[test]
+    fn rounds_to_keep_clamps_invalid_values() {
+        // 0 和负数无效，回退到默认值
+        std::env::set_var("AGENT_ROUNDS_TO_KEEP", "0");
+        assert_eq!(rounds_to_keep(), DEFAULT_ROUNDS_TO_KEEP);
+
+        std::env::set_var("AGENT_ROUNDS_TO_KEEP", "-1");
+        assert_eq!(rounds_to_keep(), DEFAULT_ROUNDS_TO_KEEP);
+
+        std::env::set_var("AGENT_ROUNDS_TO_KEEP", "abc");
+        assert_eq!(rounds_to_keep(), DEFAULT_ROUNDS_TO_KEEP);
+
+        std::env::remove_var("AGENT_ROUNDS_TO_KEEP");
+    }
+
+    #[test]
+    fn summary_keep_rounds_defaults_to_three() {
+        std::env::remove_var("AGENT_SUMMARY_KEEP_ROUNDS");
+        assert_eq!(summary_keep_rounds(), DEFAULT_SUMMARY_KEEP_ROUNDS);
+    }
+
+    #[test]
+    fn summary_keep_rounds_reads_env_var() {
+        std::env::set_var("AGENT_SUMMARY_KEEP_ROUNDS", "5");
+        assert_eq!(summary_keep_rounds(), 5);
+        std::env::remove_var("AGENT_SUMMARY_KEEP_ROUNDS");
     }
 }

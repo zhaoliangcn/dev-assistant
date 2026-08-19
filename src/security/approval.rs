@@ -258,7 +258,20 @@ impl ApprovalManager {
         }
     }
 
-    /// 检查是否需要审批
+    /// 检查是否存在有效审批（公开接口，供 ToolRegistry 在审批分支中查询）。
+    pub fn has_permission(
+        &self,
+        tool_name: &str,
+        scope_id: &str,
+        danger_level: &DangerLevel,
+    ) -> bool {
+        self.permission_store.has_permission(tool_name, scope_id, danger_level)
+    }
+
+    /// 检查是否需要审批。
+    ///
+    /// 仅检查权限存储（不关心 `--no-approval` 全局开关），调用方应先通过
+    /// `SecurityPolicy::requires_approval()` 判断全局开关再决定是否需要查询本方法。
     pub fn requires_approval(
         &self,
         tool_name: &str,

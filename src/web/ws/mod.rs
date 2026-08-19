@@ -20,6 +20,13 @@ static NEXT_CONN_ID: AtomicUsize = AtomicUsize::new(1);
 /// 连接 ID 类型
 pub type ConnectionId = usize;
 
+/// WebSocket 发送通道的有界缓冲区大小。
+///
+/// 使用有界通道替代 `unbounded_channel`：当接收端（浏览器）断开或读取慢时，
+/// 缓冲区会限制内存增长。超限后 `try_send` 返回 `Full`，事件被丢弃并记录警告，
+/// 避免 `UnboundedSender` 在断开连接上无限堆积事件导致内存泄漏。
+const WS_SEND_BUFFER: usize = 256;
+
 /// 单个 WebSocket 连接的句柄。
 /// 持有发送端，用于向该连接推送事件。
 pub struct ConnectionHandle {
@@ -27,13 +34,25 @@ pub struct ConnectionHandle {
     pub id: ConnectionId,
     #[allow(dead_code)]
     pub session_id: String,
-    sender: mpsc::UnboundedSender<ServerEvent>,
+    sender: mpsc::Sender<ServerEvent>,
 }
 
 impl ConnectionHandle {
     /// 向该连接发送一个事件。
+    ///
+    /// 使用 `try_send`（有界通道）：缓冲区满时返回 `Err(Full)` 并记录警告，
+    /// 避免事件在接收端断开或读取慢时堆积。调用方应忽略 `Full` 错误（下一条事件会跟上）。
     pub fn send(&self, event: ServerEvent) -> Result<(), String> {
-        self.sender.send(event).map_err(|e| format!("发送事件失败: {}", e))
+        match self.sender.try_send(event) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                warn!(id = self.id, "WebSocket 发送缓冲区满，事件已丢弃");
+                Ok(())
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                Err(format!("WebSocket 已断开: id={}", self.id))
+            }
+        }
     }
 
     /// 获取连接的唯一标识
@@ -61,14 +80,14 @@ impl ConnectionManager {
 
     /// 注册一个新的 WebSocket 连接。
     ///
-    /// 返回 `(ConnectionId, mpsc::UnboundedReceiver<ServerEvent>)`，
+    /// 返回 `(ConnectionId, mpsc::Receiver<ServerEvent>)`，
     /// 调用方应使用 receiver 来读取并发送事件到 WebSocket。
     pub async fn register(
         &self,
         session_id: String,
-    ) -> (ConnectionId, mpsc::UnboundedReceiver<ServerEvent>) {
+    ) -> (ConnectionId, mpsc::Receiver<ServerEvent>) {
         let id = NEXT_CONN_ID.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = mpsc::unbounded_channel::<ServerEvent>();
+        let (tx, rx) = mpsc::channel::<ServerEvent>(WS_SEND_BUFFER);
 
         let handle = ConnectionHandle {
             id,
@@ -178,5 +197,30 @@ mod tests {
             .send_to(999, ServerEvent::status("test"))
             .await;
         assert!(result.is_err());
+    }
+
+    /// 验证有界通道在缓冲区满时丢弃事件而非阻塞或泄漏内存。
+    #[tokio::test]
+    async fn test_send_drops_events_when_buffer_full() {
+        let manager = ConnectionManager::new();
+        // 用极小的通道创建 handle 以快速填满缓冲区
+        let (tx, _rx) = mpsc::channel::<ServerEvent>(2);
+        let id = NEXT_CONN_ID.fetch_add(1, Ordering::SeqCst);
+        {
+            let mut conns = manager.connections.write().await;
+            conns.insert(id, ConnectionHandle {
+                id,
+                session_id: "buffer-test".to_string(),
+                sender: tx,
+            });
+        }
+
+        // 连续发送 10 个事件（缓冲只有 2），不应 panic 或阻塞
+        for _ in 0..10 {
+            let event = ServerEvent::status("overflow");
+            let result = manager.try_send_to(id, event);
+            // Full 时返回 Ok（事件已丢弃），Closed 才返回 Err
+            assert!(result.is_ok(), "should not error on full buffer");
+        }
     }
 }

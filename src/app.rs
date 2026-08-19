@@ -340,17 +340,9 @@ impl App {
         let mut output = CliMessageOutput::new(self.config.verbose);
         output.info("启动后台模式...");
 
-        let llm = Arc::new(crate::llm::LlmClient::from_configs(vec![
-            crate::llm::ProviderConfig {
-                name: "background".to_string(),
-                provider: "openai".to_string(),
-                api_url: "http://localhost:9999/v1".to_string(),
-                api_key: Some("test".to_string()),
-                model: "test-model".to_string(),
-                temperature: Some(0.7),
-                max_output_tokens: Some(8192),
-            }
-        ])?);
+        // 复用 App 已加载的真实 LLM 客户端（含 provider / api_key / model），
+        // 不再硬编码指向 localhost:9999 的假配置——否则 --background 模式永远无法连接真实 provider。
+        let llm = self.agent.llm_client().clone();
 
         let security = Arc::new(SecurityPolicy::new(
             &self.config.working_dir,

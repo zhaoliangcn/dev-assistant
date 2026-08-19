@@ -479,9 +479,9 @@ impl SecurityPolicy {
 
     /// 判断指定危险级别是否需要交互审批。
     ///
-    /// 当前 `ToolRegistry::execute` 在 High/Medium 时直接返回需审批结果，
-    /// 此方法保留为未来接入显式 approve/cancel 交互流程时的扩展点。
-    #[allow(dead_code)]
+    /// `ToolRegistry::execute()` 在 High/Medium 分支中以此方法作为全局开关：
+    /// 返回 `false`（如 `--no-approval` 模式下）时直接执行工具；返回 `true` 时
+    /// 进入会话级权限存储查询流程。
     pub fn requires_approval(&self, danger_level: &DangerLevel) -> bool {
         match danger_level {
             DangerLevel::Critical => true,

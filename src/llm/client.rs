@@ -14,12 +14,14 @@ use crate::utils::error::AppError;
 /// 最大重试次数（连续 429 的自动重试上限）。
 const MAX_RETRIES: u32 = 5;
 
-/// 将 temperature 舍入到小数点后 2 位。
+/// 将 temperature 舍入到小数点后 2 位（在 f64 域内运算）。
 ///
-/// 部分 API（如 glm）要求 temperature 最多 2 位小数，
-/// 而 `f32` 在 JSON 序列化时可能产生如 `0.123000004` 的长小数。
-fn round_temperature(temp: f32) -> f32 {
-    (temp * 100.0).round() / 100.0
+/// 部分 API（如 glm）要求 temperature 最多 2 位小数。
+/// 注意：不能对 f32 舍入后直接交给 `serde_json::json!`——该宏会把 f32
+/// 提升为 f64 存储，序列化时又产生长小数（0.12f32 → 0.11999999731779099），
+/// 仍会被 API 以「小数点超 2 位」拒绝。故在 f64 域舍入后返回 f64。
+fn round_temperature(temp: f32) -> f64 {
+    ((temp as f64) * 100.0).round() / 100.0
 }
 
 /// 退避初始延迟（毫秒）。
@@ -536,6 +538,23 @@ mod tests {
         assert_eq!(round_temperature(0.2), 0.2);
         assert_eq!(round_temperature(0.0), 0.0);
         assert_eq!(round_temperature(0.07), 0.07);
+    }
+
+    #[test]
+    fn round_temperature_serializes_cleanly_through_json_macro() {
+        // 回归测试：`serde_json::json!` 会把 f32 提升为 f64 存储，序列化时
+        // 0.12f32 会变成 0.11999999731779099（17 位小数），被 glm API 以
+        // 「小数点超 2 位」拒绝（HTTP 400）。f64 域舍入后必须序列化为 2 位小数。
+        for raw in [0.123f32, 0.127, 0.2, 0.07, 0.345] {
+            let body = serde_json::json!({ "temperature": round_temperature(raw) });
+            let json = serde_json::to_string(&body).unwrap();
+            let temp_str = json.split("\"temperature\":").nth(1).unwrap().trim_end_matches('}');
+            let decimals = temp_str.split('.').nth(1).unwrap_or("").len();
+            assert!(
+                decimals <= 2,
+                "temperature {raw} 序列化为 {temp_str}，小数点 {decimals} 位，超过 2 位（glm 会 400）"
+            );
+        }
     }
 
     #[test]

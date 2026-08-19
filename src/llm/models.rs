@@ -90,7 +90,10 @@ pub struct LlmRequest {
     pub model: String,
     pub messages: Vec<LlmMessage>,
     pub tools: Option<Vec<ToolSchema>>,
-    pub temperature: f32,
+    /// 使用 f64：`serde_json::json!` 宏会把 f32 提升为 f64 存储，
+    /// f32 经提升后序列化会产生长小数（如 0.12 → 0.11999999731779099），
+    /// 被 glm 等 API 以「小数点超 2 位」拒绝（HTTP 400）。
+    pub temperature: f64,
     /// 单次响应的最大输出 token 数，作为 `max_tokens` 发给 LLM API。
     ///
     /// `None` 时由 provider 决定：OpenAI 兼容服务省略该字段，Anthropic 用安全默认（API 必填）。

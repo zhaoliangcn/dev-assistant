@@ -896,6 +896,7 @@ mod tests {
     fn kb_test_context(working_dir: &Path) -> ToolContext {
         ToolContext {
             working_dir: working_dir.to_path_buf(),
+            self_source_root: None,
             resources: None,
             cache: None,
             hooks: None,

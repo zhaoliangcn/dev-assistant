@@ -153,7 +153,13 @@ pub struct SecurityPolicy {
 }
 
 impl SecurityPolicy {
-    pub fn new(working_dir: &Path, approval_required: bool) -> Self {
+    /// 创建安全策略。
+    ///
+    /// `working_dir` 是项目工作目录。
+    /// `self_source_root` 是 dev-assistant-rs 自身源码根目录（可选），
+    /// 当 `--project` 指向其他项目时，仍允许修改自身源码。
+    /// `approval_required` 控制是否需用户审批（对应 `--no-approval`）。
+    pub fn new(working_dir: &Path, self_source_root: Option<&Path>, approval_required: bool) -> Self {
         fn compile_regex(pattern: &str, desc: &str) -> Regex {
             Regex::new(pattern).unwrap_or_else(|e| {
                 panic!("Failed to compile security regex '{}': {}", desc, e)
@@ -207,10 +213,20 @@ impl SecurityPolicy {
             ),
         ];
 
-        let allowed_path = working_dir.canonicalize().unwrap_or_else(|_| working_dir.to_path_buf());
+        let mut allowed_paths = vec![
+            working_dir.canonicalize().unwrap_or_else(|_| working_dir.to_path_buf()),
+        ];
+
+        // 将自身源码根目录也加入允许路径，使 `--project` 指向其他项目时仍能修改自身源码。
+        if let Some(src_root) = self_source_root {
+            let canonical = src_root.canonicalize().unwrap_or_else(|_| src_root.to_path_buf());
+            if !allowed_paths.contains(&canonical) {
+                allowed_paths.push(canonical);
+            }
+        }
 
         Self {
-            allowed_paths: vec![allowed_path],
+            allowed_paths,
             dangerous_commands,
             dangerous_files: vec![
                 Regex::new(r"(?i)\.env$").expect("invalid regex for .env files"),
@@ -503,7 +519,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn policy_in(dir: &Path) -> SecurityPolicy {
-        SecurityPolicy::new(dir, true)
+        SecurityPolicy::new(dir, None, true)
     }
 
     #[test]
@@ -628,8 +644,8 @@ mod tests {
     #[test]
     fn requires_approval_respects_approval_flag() {
         let dir = tempdir().unwrap();
-        let with_approval = SecurityPolicy::new(dir.path(), true);
-        let without_approval = SecurityPolicy::new(dir.path(), false);
+        let with_approval = SecurityPolicy::new(dir.path(), None, true);
+        let without_approval = SecurityPolicy::new(dir.path(), None, false);
 
         assert!(with_approval.requires_approval(&DangerLevel::High));
         assert!(with_approval.requires_approval(&DangerLevel::Medium));

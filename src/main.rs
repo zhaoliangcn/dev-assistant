@@ -237,12 +237,18 @@ fn main() -> Result<(), AppError> {
 
     let working_dir = PathBuf::from(&cli.project);
 
+    // 从可执行文件路径推导 dev-assistant-rs 源码根目录，
+    // 使 --project 指向其他项目时仍能定位自身源码进行自我修改。
+    let self_source_root = crate::utils::self_path::self_source_root()
+        .map(|p| p.to_path_buf());
+
     // 重启时传给子进程的 CLI 参数（保持当前会话的所有配置）
     // 使用 Cli::to_restart_args() 方法集中构建，避免与 AppConfig 字段重复
     let restart_args = cli.to_restart_args();
 
     let config = AppConfig {
         working_dir: working_dir.clone(),
+        self_source_root: self_source_root.clone(),
         config: cli.config.clone(),
         verbose: cli.verbose,
         max_iterations: cli.max_iterations.unwrap_or(15),
@@ -351,6 +357,7 @@ fn main() -> Result<(), AppError> {
                 host: cli.host,
                 port: cli.port,
                 working_dir: PathBuf::from(&cli.project),
+                self_source_root: self_source_root.clone(),
                 config: cli.config.clone(),
                 verbose: cli.verbose,
                 max_iterations: cli.max_iterations.unwrap_or(15),

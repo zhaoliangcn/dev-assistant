@@ -17,6 +17,10 @@ use crate::utils::message_level::MessageLevel;
 /// 1. 运行 `cargo build` 验证修改是否编译通过
 /// 2. 编译成功后用 `exec()` 替换当前进程（PID 保持不变）
 ///
+/// `source_root` 是 dev-assistant-rs 的源码根目录（`cargo build` 在此运行），
+/// 当 `--project` 指向其他项目时，`source_root` 与 `working_dir` 不同。
+/// `working_dir` 是项目工作目录（`exec` 后的进程工作目录）。
+///
 /// 返回 `true` 表示需要继续 REPL（构建失败或 exec 失败）；
 /// 返回 `false` 表示已经 exec 成功或将要退出。
 ///
@@ -26,6 +30,7 @@ use crate::utils::message_level::MessageLevel;
 /// `SessionStore` 在创建文件时已设置 `FD_CLOEXEC` 标志，`exec()`
 /// 后内核会自动关闭这些文件描述符。
 pub fn perform_restart(
+    source_root: &Path,
     working_dir: &Path,
     cli_args: &[String],
     emit: &mut dyn FnMut(MessageLevel, String),
@@ -37,7 +42,7 @@ pub fn perform_restart(
 
     let build_result = process::Command::new("cargo")
         .arg("build")
-        .current_dir(working_dir)
+        .current_dir(source_root)
         .status();
 
     match build_result {

@@ -37,6 +37,8 @@ pub type ToolHandler =
 pub struct ToolRegistry {
     tools: HashMap<String, ToolDefinition>,
     working_dir: PathBuf,
+    /// dev-assistant-rs 自身源码根目录（从可执行文件路径推导）。
+    self_source_root: Option<PathBuf>,
     pub security: Arc<SecurityPolicy>,
     pub approval_manager: Arc<ApprovalManager>,
     pub retry_manager: retry::RetryManager,
@@ -73,6 +75,9 @@ pub struct ToolArgs {
 /// 签名。
 pub struct ToolContext {
     pub working_dir: PathBuf,
+    /// dev-assistant-rs 自身源码根目录（从可执行文件路径推导）。
+    /// 当 `--project` 指向其他项目时，`restart` 工具等需用此路径定位自身源码。
+    pub self_source_root: Option<PathBuf>,
     /// 可选的资源容器，用于依赖注入
     pub resources: Option<crate::tools::resources::SharedResources>,
     /// 可选的文件读取缓存，用于避免重复读取同一文件
@@ -133,6 +138,7 @@ impl ToolRegistry {
         let mut registry = Self {
             tools: HashMap::new(),
             working_dir,
+            self_source_root: None,
             security,
             approval_manager: Arc::new(ApprovalManager::new()),
             retry_manager: retry::RetryManager::default(),
@@ -159,6 +165,7 @@ impl ToolRegistry {
         let mut registry = Self {
             tools: HashMap::new(),
             working_dir,
+            self_source_root: None,
             security,
             approval_manager,
             retry_manager: retry::RetryManager::default(),
@@ -338,6 +345,22 @@ impl ToolRegistry {
         &self.working_dir
     }
 
+    /// 设置 dev-assistant-rs 自身源码根目录。
+    pub fn set_self_source_root(&mut self, root: Option<PathBuf>) {
+        self.self_source_root = root;
+    }
+
+    /// 获取 dev-assistant-rs 自身源码根目录。
+    pub fn self_source_root(&self) -> Option<&PathBuf> {
+        self.self_source_root.as_ref()
+    }
+
+    /// 链式设置 dev-assistant-rs 自身源码根目录。
+    pub fn with_self_source_root(mut self, root: Option<PathBuf>) -> Self {
+        self.self_source_root = root;
+        self
+    }
+
     /// 创建子 Agent 的受限工具注册中心。
     ///
     /// 子 Agent 不应拥有以下工具：
@@ -349,6 +372,7 @@ impl ToolRegistry {
         let mut registry = Self {
             tools: HashMap::new(),
             working_dir: self.working_dir.clone(),
+            self_source_root: self.self_source_root.clone(),
             security: self.security.clone(),
             approval_manager: self.approval_manager.clone(),
             retry_manager: self.retry_manager.clone(),
@@ -381,6 +405,7 @@ impl ToolRegistry {
         let mut registry = Self {
             tools: HashMap::new(),
             working_dir: self.working_dir.clone(),
+            self_source_root: self.self_source_root.clone(),
             security: self.security.clone(),
             approval_manager: self.approval_manager.clone(),
             retry_manager: self.retry_manager.clone(),
@@ -433,6 +458,7 @@ impl ToolRegistry {
         let args = ToolArgs { arguments };
         let context = ToolContext {
             working_dir: self.working_dir.clone(),
+            self_source_root: self.self_source_root.clone(),
             resources: self.resources.clone(),
             cache: Some(self.cache.clone()),
             hooks: self.hooks.clone(),
@@ -460,7 +486,7 @@ mod tests {
 
     #[test]
     fn schema_token_count_returns_non_zero() {
-        let policy = Arc::new(SecurityPolicy::new(PathBuf::new().as_path(), true));
+        let policy = Arc::new(SecurityPolicy::new(PathBuf::new().as_path(), None, true));
         let registry = ToolRegistry::new(PathBuf::new(), policy);
         let tokens = registry.schema_token_count();
         assert!(tokens > 0, "schema token count should be non-zero");
@@ -472,7 +498,7 @@ mod tests {
         use tempfile::tempdir;
         let dir = tempdir().unwrap();
         // approval_required = false 模拟 --no-approval
-        let policy = Arc::new(SecurityPolicy::new(dir.path(), false));
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), None, false));
         let registry = ToolRegistry::new(dir.path().to_path_buf(), policy);
 
         let result = registry
@@ -496,7 +522,7 @@ mod tests {
         use tempfile::tempdir;
         let dir = tempdir().unwrap();
         // approval_required = true 模拟默认审批开启
-        let policy = Arc::new(SecurityPolicy::new(dir.path(), true));
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), None, true));
         let registry = ToolRegistry::new(dir.path().to_path_buf(), policy);
 
         let result = registry
@@ -522,7 +548,7 @@ mod tests {
     fn high_danger_tool_executes_with_stored_permission() {
         use tempfile::tempdir;
         let dir = tempdir().unwrap();
-        let policy = Arc::new(SecurityPolicy::new(dir.path(), true));
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), None, true));
         let approval_manager = Arc::new(ApprovalManager::new());
 
         // 预授权：chmod + "644 test.txt" 作用域，High 级别，永久有效

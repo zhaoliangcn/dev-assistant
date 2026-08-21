@@ -323,7 +323,7 @@ mod tests {
     async fn async_read_file_execution() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let working_dir = manifest_dir.clone();
-        let security = Arc::new(SecurityPolicy::new(&working_dir, false));
+        let security = Arc::new(SecurityPolicy::new(&working_dir, None, false));
         let approval_manager = Arc::new(crate::security::approval::ApprovalManager::new());
         let mut registry = AsyncToolRegistry::new(working_dir, security, approval_manager);
 

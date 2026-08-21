@@ -303,7 +303,7 @@ mod tests {
     }
 
     fn test_registry(dir: &Path) -> AsyncToolRegistry {
-        let policy = Arc::new(SecurityPolicy::new(dir, true));
+        let policy = Arc::new(SecurityPolicy::new(dir, None, true));
         let approval_manager = Arc::new(crate::security::approval::ApprovalManager::new());
         AsyncToolRegistry::new(dir.to_path_buf(), policy, approval_manager)
     }

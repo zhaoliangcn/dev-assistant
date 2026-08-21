@@ -2,9 +2,6 @@ use super::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
 use crate::hooks::config::HookEvent;
 use crate::utils::error::AppError;
 
-/// The project root path, embedded at compile time.
-/// restart tool is only allowed when the working directory matches this project.
-const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 pub fn run_hook_tool() -> ToolDefinition {
     ToolDefinition {
@@ -132,10 +129,12 @@ pub fn restart_tool() -> ToolDefinition {
 }
 
 fn restart_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, AppError> {
-    // Verify that the working directory is the dev-assistant-rs project itself.
+    // Verify that we're working on the dev-assistant-rs project itself.
     // This tool is only for self-modification, not for arbitrary Rust projects.
-    // Canonicalize both paths to handle relative vs absolute path comparisons.
-    let project_root = std::path::Path::new(PROJECT_ROOT);
+    // Use self_source_root from context (derived from the executable path) when
+    // available, so that --project pointing elsewhere still allows self-modification.
+    let project_root = context.self_source_root.as_deref()
+        .unwrap_or(&context.working_dir);
     let cwd = if context.working_dir.is_absolute() {
         context.working_dir.clone()
     } else {

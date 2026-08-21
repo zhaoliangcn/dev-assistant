@@ -1642,7 +1642,7 @@ mod tests {
     /// 创建一个测试用的 ToolRegistry（使用临时目录避免路径遍历问题）
     fn test_tool_registry() -> ToolRegistry {
         let dir = tempfile::tempdir().unwrap();
-        let policy = Arc::new(SecurityPolicy::new(dir.path(), true));
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), None, true));
         ToolRegistry::new(dir.path().to_path_buf(), policy)
     }
 
@@ -1739,7 +1739,7 @@ mod tests {
     #[test]
     fn new_subagent_registry_excludes_spawn_subagent() {
         let dir = tempfile::tempdir().unwrap();
-        let policy = Arc::new(SecurityPolicy::new(dir.path(), true));
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), None, true));
         let parent_registry = ToolRegistry::new(dir.path().to_path_buf(), policy);
 
         let sub_registry = parent_registry.new_subagent_registry();

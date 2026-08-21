@@ -44,6 +44,7 @@ impl WebSession {
             cwd.clone(),
             Arc::new(crate::security::SecurityPolicy::new(
                 &cwd,
+                None,
                 false,
             )),
         );

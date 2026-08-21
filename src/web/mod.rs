@@ -78,6 +78,8 @@ pub struct WebConfig {
     pub port: u16,
     /// 工作目录
     pub working_dir: PathBuf,
+    /// dev-assistant-rs 自身源码根目录（从可执行文件路径推导）
+    pub self_source_root: Option<PathBuf>,
     /// 模型配置文件路径（--config 指定，None 时按默认查找顺序）
     pub config: Option<PathBuf>,
     /// 是否启用详细日志
@@ -100,6 +102,7 @@ impl Default for WebConfig {
             host: "127.0.0.1".to_string(),
             port: 8080,
             working_dir: PathBuf::from("."),
+            self_source_root: None,
             config: None,
             verbose: false,
             max_iterations: 8,
@@ -149,6 +152,7 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
     // ── 安全策略与工具注册表 ──
     let security = Arc::new(SecurityPolicy::new(
         &config.working_dir,
+        config.self_source_root.as_deref(),
         !config.no_approval,
     ));
 

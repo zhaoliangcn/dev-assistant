@@ -730,6 +730,7 @@ mod tests {
         let llm = Arc::new(crate::llm::LlmClient::from_configs(vec![config]).unwrap());
         let security = Arc::new(crate::security::SecurityPolicy::new(
             PathBuf::from("/tmp").as_path(),
+            None,
             true,
         ));
         let tools = ToolRegistry::new(PathBuf::from("/tmp"), security);

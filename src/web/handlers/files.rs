@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn file_path_security_categories() {
         let dir = tempdir().unwrap();
-        let policy = SecurityPolicy::new(dir.path(), false);
+        let policy = SecurityPolicy::new(dir.path(), None, false);
 
         // 1) 工作目录内的已存在文件：放行（get_file_content 路径）
         fs::write(dir.path().join("ok.txt"), "hi").unwrap();

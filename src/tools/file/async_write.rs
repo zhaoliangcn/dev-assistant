@@ -257,7 +257,7 @@ mod tests {
         let file_path = dir.path().join("test.txt");
         let working_dir = dir.path().to_path_buf();
         
-        let security = Arc::new(SecurityPolicy::new(&working_dir, false));
+        let security = Arc::new(SecurityPolicy::new(&working_dir, None, false));
         let approval_manager = Arc::new(crate::security::approval::ApprovalManager::new());
         let mut registry = AsyncToolRegistry::new(working_dir, security, approval_manager);
         
@@ -284,7 +284,7 @@ mod tests {
         
         let working_dir = dir.path().to_path_buf();
         
-        let security = Arc::new(SecurityPolicy::new(&working_dir, false));
+        let security = Arc::new(SecurityPolicy::new(&working_dir, None, false));
         let approval_manager = Arc::new(crate::security::approval::ApprovalManager::new());
         let mut registry = AsyncToolRegistry::new(working_dir, security, approval_manager);
         

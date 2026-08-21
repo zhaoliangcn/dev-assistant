@@ -711,6 +711,7 @@ pub async fn process_user_message(
     agent: &mut Agent,
     input: &str,
     working_dir: &Path,
+    self_source_root: &Path,
     restart_args: &[String],
     verbose: bool,
     markdown_renderer: &MarkdownRenderer,
@@ -959,7 +960,7 @@ pub async fn process_user_message(
     if result.restart_requested {
         // exec 替换进程前先刷盘，避免缓冲区中的事件在 exec 时丢失
         agent.flush_persistence();
-        return handle_restart(agent, working_dir, restart_args, verbose);
+        return handle_restart(agent, working_dir, self_source_root, restart_args, verbose);
     }
 
     // 回合结束：刷盘，保证并发读者（Web 会话详情、背景 ingest）可见完整数据
@@ -970,11 +971,15 @@ pub async fn process_user_message(
 
 /// 处理 restart 请求：保存状态、cargo build、exec 替换进程。
 ///
+/// `source_root` 是 dev-assistant-rs 的源码根目录（`cargo build` 在此运行），
+/// 当 `--project` 指向其他项目时，`source_root` 与 `working_dir` 不同。
+///
 /// 返回 [`ReplAction::Continue`] 表示构建失败、继续 REPL；
 /// 返回 [`ReplAction::Quit`] 表示 exec 成功或失败后退出。
 pub fn handle_restart(
     agent: &mut Agent,
     working_dir: &Path,
+    self_source_root: &Path,
     restart_args: &[String],
     verbose: bool,
 ) -> Result<ReplAction, AppError> {
@@ -996,7 +1001,7 @@ pub fn handle_restart(
 
     // perform_restart 会在成功时 exec() 替换进程，永远不会返回；
     // 返回 true 表示构建失败、需要继续 REPL。
-    let should_continue = perform_restart(working_dir, restart_args, &mut |level, msg: String| {
+    let should_continue = perform_restart(self_source_root, working_dir, restart_args, &mut |level, msg: String| {
         agent.add_display_message(level, &msg);
     });
 

@@ -22,6 +22,9 @@ use crate::utils::error::AppError;
 /// 应用配置：由 CLI 参数 + 环境变量组装。
 pub struct AppConfig {
     pub working_dir: PathBuf,
+    /// dev-assistant-rs 自身源码根目录（从可执行文件路径推导）。
+    /// 当 `--project` 指向其他项目时，仍能定位自身源码进行自我修改。
+    pub self_source_root: Option<PathBuf>,
     /// 模型配置文件路径（--config 指定，None 时按默认查找顺序）
     pub config: Option<PathBuf>,
     pub verbose: bool,
@@ -87,8 +90,10 @@ impl App {
         }
 
         // SECURITY: 使用 `Arc<SecurityPolicy>` 共享所有权，避免 `Box::leak` 内存泄漏。
+        // 同时将自身源码根目录设为允许路径，使 `--project` 指向其他项目时仍能修改自身源码。
         let security = Arc::new(SecurityPolicy::new(
             &config.working_dir,
+            config.self_source_root.as_deref(),
             !config.no_approval,
         ));
         
@@ -116,7 +121,7 @@ impl App {
             security.clone(), 
             shared_resources.clone(),
             approval_manager.clone(),
-        );
+        ).with_self_source_root(config.self_source_root.clone());
         
         // 初始化全局 TaskManager（供 task_status/pause_task/resume_task/cancel_task 工具使用）
         let task_manager = crate::tools::task_tools::TaskManager::new(crate::orchestrator::DependencyGraph::new());
@@ -346,9 +351,11 @@ impl App {
 
         let security = Arc::new(SecurityPolicy::new(
             &self.config.working_dir,
+            self.config.self_source_root.as_deref(),
             !self.config.no_approval,
         ));
-        let tools = ToolRegistry::new(self.config.working_dir.clone(), security);
+        let tools = ToolRegistry::new(self.config.working_dir.clone(), security)
+            .with_self_source_root(self.config.self_source_root.clone());
         let mut orchestrator = TaskOrchestrator::new(
             self.config.working_dir.clone(),
             llm,
@@ -374,6 +381,8 @@ impl App {
         use crate::repl::{handle_restart, handle_slash, process_user_message, ReplAction};
 
         let working_dir = self.config.working_dir.clone();
+        let self_source_root = self.config.self_source_root.clone()
+            .unwrap_or_else(|| working_dir.clone());
         let restart_args = self.config.restart_args.clone();
         let mut verbose = self.config.verbose;
 
@@ -800,6 +809,7 @@ impl App {
                 &mut self.agent,
                 &input,
                 &working_dir,
+                &self_source_root,
                 &restart_args,
                 verbose,
                 &markdown_renderer,
@@ -827,7 +837,7 @@ impl App {
                 // 这里只处理 restart 失败后继续 REPL 的情况）
             }
             let action = if self.needs_restart_check() {
-                handle_restart(&mut self.agent, &working_dir, &restart_args, verbose)?
+                handle_restart(&mut self.agent, &working_dir, &self_source_root, &restart_args, verbose)?
             } else {
                 action
             };

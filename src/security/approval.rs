@@ -152,7 +152,7 @@ impl PermissionStore {
     /// 添加审批权限
     #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn add_permission(&self, entry: PermissionEntry) {
-        let mut permissions = self.permissions.write().unwrap();
+        let mut permissions = self.permissions.write().unwrap_or_else(|e| e.into_inner());
         let key = Self::make_key(&entry.tool_name, &entry.scope_id);
         debug!(
             tool = entry.tool_name,
@@ -169,7 +169,7 @@ impl PermissionStore {
         scope_id: &str,
         danger_level: &DangerLevel,
     ) -> bool {
-        let permissions = self.permissions.read().unwrap();
+        let permissions = self.permissions.read().unwrap_or_else(|e| e.into_inner());
         let key = Self::make_key(tool_name, scope_id);
         
         if let Some(entries) = permissions.get(&key) {
@@ -185,7 +185,7 @@ impl PermissionStore {
     /// 移除过期权限
     #[allow(dead_code)]
     pub fn cleanup_expired(&self) {
-        let mut permissions = self.permissions.write().unwrap();
+        let mut permissions = self.permissions.write().unwrap_or_else(|e| e.into_inner());
         permissions.retain(|_, entries| {
             entries.retain(|entry| entry.is_valid());
             !entries.is_empty()
@@ -195,7 +195,7 @@ impl PermissionStore {
     /// 撤销权限
     #[allow(dead_code)]
     pub fn revoke_permission(&self, tool_name: &str, scope_id: &str) {
-        let mut permissions = self.permissions.write().unwrap();
+        let mut permissions = self.permissions.write().unwrap_or_else(|e| e.into_inner());
         let key = Self::make_key(tool_name, scope_id);
         if let Some(entries) = permissions.get_mut(&key) {
             entries.retain(|entry| entry.status != ApprovalStatus::Approved);
@@ -206,7 +206,7 @@ impl PermissionStore {
     /// 获取所有有效权限
     #[allow(dead_code)]
     pub fn get_all_permissions(&self) -> Vec<PermissionEntry> {
-        let permissions = self.permissions.read().unwrap();
+        let permissions = self.permissions.read().unwrap_or_else(|e| e.into_inner());
         permissions
             .values()
             .flat_map(|entries| entries.iter().filter(|e| e.is_valid()).cloned())
@@ -310,7 +310,7 @@ impl ApprovalManager {
             requested_at: now_timestamp(),
         };
 
-        let mut pending = self.pending_requests.write().unwrap();
+        let mut pending = self.pending_requests.write().unwrap_or_else(|e| e.into_inner());
         pending.insert(request_id, request.clone());
 
         request
@@ -319,7 +319,7 @@ impl ApprovalManager {
     /// 审批通过
     #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn approve(&self, request_id: &str) -> bool {
-        let mut pending = self.pending_requests.write().unwrap();
+        let mut pending = self.pending_requests.write().unwrap_or_else(|e| e.into_inner());
         if let Some(request) = pending.remove(request_id) {
             let requirement = ApprovalRequirement::default_for_danger(&request.danger_level);
             
@@ -342,7 +342,7 @@ impl ApprovalManager {
     /// 拒绝审批
     #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn reject(&self, request_id: &str) -> bool {
-        let mut pending = self.pending_requests.write().unwrap();
+        let mut pending = self.pending_requests.write().unwrap_or_else(|e| e.into_inner());
         if pending.remove(request_id).is_some() {
             debug!(request_id, "Approval rejected");
             true
@@ -354,7 +354,7 @@ impl ApprovalManager {
     /// 获取待审批请求
     #[allow(dead_code)] // reserved for future interactive approval workflow
     pub fn get_pending_requests(&self) -> Vec<ApprovalRequest> {
-        let pending = self.pending_requests.read().unwrap();
+        let pending = self.pending_requests.read().unwrap_or_else(|e| e.into_inner());
         pending.values().cloned().collect()
     }
 

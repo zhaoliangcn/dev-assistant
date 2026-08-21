@@ -115,18 +115,34 @@ fn render_event(event: &SessionEvent) -> String {
 }
 
 /// 敏感信息脱敏处理，防止 API Key、密码、令牌等泄露到日志。
+///
+/// 采用**迭代替换**策略：每一轮对所有模式执行全部替换，若本轮产生任何变化
+/// 则继续下一轮，直到结果稳定。这能捕获"替换后形成新的敏感模式"的绕过场景
+/// （例如某段被脱敏后残留的片段与相邻文本拼接成另一种模式的密钥）。
+/// `MAX_PASSES` 防止两个模式互相产生对方的模式导致无限循环。
 fn sanitize(content: &str) -> String {
     let p = &*PATTERNS;
     let mut result = content.to_string();
 
-    for re in &p.api_keys {
-        result = re.replace_all(&result, "[REDACTED_API_KEY]").to_string();
+    const MAX_PASSES: usize = 5;
+
+    for _ in 0..MAX_PASSES {
+        let before = result.clone();
+
+        for re in &p.api_keys {
+            result = re.replace_all(&result, "[REDACTED_API_KEY]").to_string();
+        }
+        result = p.bearer.replace_all(&result, "${1}[REDACTED_TOKEN]").to_string();
+        result = p.password.replace_all(&result, "${1}=[REDACTED]").to_string();
+        result = p.private_key.replace_all(&result, "[REDACTED_PRIVATE_KEY]").to_string();
+        result = p.ssh_key.replace_all(&result, "[REDACTED_SSH_KEY]").to_string();
+        result = p.jwt.replace_all(&result, "[REDACTED_JWT]").to_string();
+
+        // 本轮无任何替换，结果已稳定。
+        if result == before {
+            break;
+        }
     }
-    result = p.bearer.replace_all(&result, "${1}[REDACTED_TOKEN]").to_string();
-    result = p.password.replace_all(&result, "${1}=[REDACTED]").to_string();
-    result = p.private_key.replace_all(&result, "[REDACTED_PRIVATE_KEY]").to_string();
-    result = p.ssh_key.replace_all(&result, "[REDACTED_SSH_KEY]").to_string();
-    result = p.jwt.replace_all(&result, "[REDACTED_JWT]").to_string();
 
     result
 }

@@ -220,6 +220,7 @@
         {% block content %}{% endblock %}
     </main>
     <!-- 性能监控面板（P5） -->
+    <div x-data>
     <div id="performance-panel" class="performance-panel" x-show="$store.performance.visible" x-cloak>
         <div class="performance-header">
             <strong x-text="'📊 ' + $store.i18n.performance"></strong>

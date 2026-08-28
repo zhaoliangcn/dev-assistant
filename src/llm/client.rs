@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use std::pin::Pin;
 use futures::Stream;
@@ -182,8 +183,8 @@ where
 /// 使得 `&self` 即可切换模型，支持 `Arc<LlmClient>` 在多子 Agent 间安全共享。
 pub struct LlmClient {
     http_client: Client,
-    providers: Vec<Box<dyn LlmProvider>>,
-    provider_configs: Vec<ProviderConfig>,
+    providers: std::sync::RwLock<Vec<Arc<dyn LlmProvider>>>,
+    provider_configs: std::sync::RwLock<Vec<ProviderConfig>>,
     active_idx: AtomicUsize,
 }
 
@@ -203,19 +204,19 @@ impl LlmClient {
             .build()
             .map_err(|e| AppError::Config(format!("Failed to create HTTP client: {}", e)))?;
 
-        let mut providers: Vec<Box<dyn LlmProvider>> = Vec::new();
+        let mut providers: Vec<Arc<dyn LlmProvider>> = Vec::new();
         let mut provider_configs: Vec<ProviderConfig> = Vec::new();
 
         for cfg in &configs {
             let provider = create_provider(cfg)?;
             provider_configs.push(cfg.clone());
-            providers.push(provider);
+            providers.push(Arc::from(provider));
         }
 
         Ok(Self {
             http_client,
-            providers,
-            provider_configs,
+            providers: std::sync::RwLock::new(providers),
+            provider_configs: std::sync::RwLock::new(provider_configs),
             active_idx: AtomicUsize::new(0),
         })
     }
@@ -237,8 +238,8 @@ impl LlmClient {
 
     /// 切换到指定名称的模型
     pub fn switch_model(&self, name: &str) -> Result<(), AppError> {
-        let idx = self
-            .provider_configs
+        let configs = self.provider_configs.read().unwrap();
+        let idx = configs
             .iter()
             .position(|c| c.name == name)
             .ok_or_else(|| AppError::Config(format!("Unknown model: '{}'", name)))?;
@@ -247,24 +248,121 @@ impl LlmClient {
     }
 
     /// 当前活跃模型名称
-    pub fn active_model(&self) -> &str {
+    pub fn active_model(&self) -> String {
         let idx = self.active_idx.load(Ordering::SeqCst);
-        &self.provider_configs[idx].name
+        let configs = self.provider_configs.read().unwrap();
+        configs[idx].name.clone()
     }
 
     /// 列出所有可用模型名称
-    pub fn list_models(&self) -> Vec<&str> {
-        self.provider_configs.iter().map(|c| c.name.as_str()).collect()
+    pub fn list_models(&self) -> Vec<String> {
+        let configs = self.provider_configs.read().unwrap();
+        configs.iter().map(|c| c.name.clone()).collect()
     }
 
     /// 列出所有可用模型详情：(名称, provider, 是否当前激活)
+    #[allow(dead_code)] // 保留：供未来扩展展示更多模型元信息
     pub fn list_model_info(&self) -> Vec<(String, String, bool)> {
         let active_idx = self.active_idx.load(Ordering::SeqCst);
-        self.provider_configs
+        let configs = self.provider_configs.read().unwrap();
+        configs
             .iter()
             .enumerate()
             .map(|(i, c)| (c.name.clone(), c.provider.clone(), i == active_idx))
             .collect()
+    }
+
+    /// 获取全部模型配置（含 api_key 原始值，供后端内部使用）。
+    pub fn get_configs(&self) -> Vec<ProviderConfig> {
+        self.provider_configs.read().unwrap().clone()
+    }
+
+    /// 新增或更新一个模型配置，并立即在运行时生效。
+    ///
+    /// `clear_api_key = true` 时清空 api_key；否则当 `cfg.api_key` 为空时保留原有值
+    /// （Web 端编辑表单不回显完整密钥，置空表示「保持不变」）。
+    pub fn add_or_update_config(
+        &self,
+        cfg: &ProviderConfig,
+        clear_api_key: bool,
+    ) -> Result<(), AppError> {
+        let name = cfg.name.trim();
+        if name.is_empty() {
+            return Err(AppError::Config("模型名称不能为空".to_string()));
+        }
+        if cfg.api_url.trim().is_empty() {
+            return Err(AppError::Config("API URL 不能为空".to_string()));
+        }
+        if cfg.model.trim().is_empty() {
+            return Err(AppError::Config("模型名不能为空".to_string()));
+        }
+
+        let mut effective = cfg.clone();
+        effective.name = name.to_string();
+        {
+            let configs = self.provider_configs.read().unwrap();
+            if let Some(existing) = configs.iter().find(|c| c.name == effective.name) {
+                // 仅当用户未填新密钥且未要求清空时，沿用已有密钥
+                if !clear_api_key && effective.api_key.as_deref().unwrap_or("").is_empty() {
+                    effective.api_key = existing.api_key.clone();
+                }
+            }
+        }
+        if clear_api_key {
+            effective.api_key = None;
+        }
+
+        // 用 create_provider 校验 provider 类型与必填字段，失败则不改动现有配置
+        let provider = create_provider(&effective)?;
+
+        let mut configs = self.provider_configs.write().unwrap();
+        let mut providers = self.providers.write().unwrap();
+        match configs.iter().position(|c| c.name == effective.name) {
+            Some(idx) => {
+                configs[idx] = effective;
+                providers[idx] = Arc::from(provider);
+            }
+            None => {
+                configs.push(effective);
+                providers.push(Arc::from(provider));
+            }
+        }
+        Ok(())
+    }
+
+    /// 删除指定名称的模型配置。至少保留一个配置；删除活跃模型时自动回退到下一项。
+    pub fn remove_config(&self, name: &str) -> Result<(), AppError> {
+        let mut configs = self.provider_configs.write().unwrap();
+        let mut providers = self.providers.write().unwrap();
+        let idx = configs
+            .iter()
+            .position(|c| c.name == name)
+            .ok_or_else(|| AppError::Config(format!("未知模型 '{}'", name)))?;
+        if configs.len() <= 1 {
+            return Err(AppError::Config("至少保留一个模型配置".to_string()));
+        }
+        configs.remove(idx);
+        providers.remove(idx);
+
+        // 修正活跃索引：删除项之前的活跃项左移；删除的恰为末项时回退到第一项
+        let active = self.active_idx.load(Ordering::SeqCst);
+        if active >= configs.len() {
+            self.active_idx.store(0, Ordering::SeqCst);
+        } else if active > idx {
+            self.active_idx.store(active - 1, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
+    /// 将当前全部模型配置写入 TOML 文件（持久化，重启后仍生效）。
+    pub async fn save_to_file(&self, path: &std::path::Path) -> Result<(), AppError> {
+        let configs = self.get_configs();
+        let content = toml::to_string(&ModelsConfig { models: configs })
+            .map_err(|e| AppError::Config(format!("序列化模型配置失败: {}", e)))?;
+        tokio::fs::write(path, content)
+            .await
+            .map_err(AppError::Io)?;
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -274,26 +372,29 @@ impl LlmClient {
         tools: Vec<ToolSchema>,
     ) -> Result<LlmResponse, AppError> {
         let start_idx = self.active_idx.load(Ordering::SeqCst);
-        let total_providers = self.providers.len();
+        // 克隆快照后释放读锁，避免 RwLockReadGuard 跨 await（非 Send）；Arc 克隆仅增引用计数
+        let providers = self.providers.read().unwrap().clone();
+        let configs = self.provider_configs.read().unwrap().clone();
+        let total_providers = providers.len();
         let mut last_error: Option<AppError> = None;
 
         // 从当前活跃 provider 开始尝试，逐个故障转移
         for offset in 0..total_providers {
             let idx = (start_idx + offset) % total_providers;
-            let cfg = &self.provider_configs[idx];
-            let provider = &self.providers[idx];
+            let cfg = &configs[idx];
+            let provider = &providers[idx];
 
             // 如果不是第一个尝试的 provider，记录故障转移日志
             if offset > 0 {
                 warn!(
-                    from_provider = %self.provider_configs[start_idx].name,
+                    from_provider = %configs[start_idx].name,
                     to_provider = %cfg.name,
                     error = %last_error
                         .as_ref()
                         .map(|e| e.to_string())
                         .unwrap_or_default(),
                     "LLM 故障转移：{} → {}（前一 provider 失败，见 error 字段）",
-                    self.provider_configs[start_idx].name,
+                    configs[start_idx].name,
                     cfg.name,
                 );
                 // 更新活跃索引以便后续调用使用新 provider
@@ -343,26 +444,29 @@ impl LlmClient {
         tools: Vec<ToolSchema>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<LlmStreamEvent, AppError>> + Send>>, AppError> {
         let start_idx = self.active_idx.load(Ordering::SeqCst);
-        let total_providers = self.providers.len();
+        // 克隆快照后释放读锁，避免 RwLockReadGuard 跨 await（非 Send）；Arc 克隆仅增引用计数
+        let providers = self.providers.read().unwrap().clone();
+        let configs = self.provider_configs.read().unwrap().clone();
+        let total_providers = providers.len();
         let mut last_error: Option<AppError> = None;
 
         // 从当前活跃 provider 开始尝试，逐个故障转移
         for offset in 0..total_providers {
             let idx = (start_idx + offset) % total_providers;
-            let cfg = &self.provider_configs[idx];
-            let provider = &self.providers[idx];
+            let cfg = &configs[idx];
+            let provider = &providers[idx];
 
             // 如果不是第一个尝试的 provider，记录故障转移日志
             if offset > 0 {
                 warn!(
-                    from_provider = %self.provider_configs[start_idx].name,
+                    from_provider = %configs[start_idx].name,
                     to_provider = %cfg.name,
                     error = %last_error
                         .as_ref()
                         .map(|e| e.to_string())
                         .unwrap_or_default(),
                     "LLM 故障转移：{} → {}（前一 provider 失败，见 error 字段）",
-                    self.provider_configs[start_idx].name,
+                    configs[start_idx].name,
                     cfg.name,
                 );
                 // 更新活跃索引以便后续调用使用新 provider
@@ -463,8 +567,8 @@ mod tests {
         let client = test_client();
         let models = client.list_models();
         assert_eq!(models.len(), 2);
-        assert!(models.contains(&"model-a"));
-        assert!(models.contains(&"model-b"));
+        assert!(models.iter().any(|m| m == "model-a"));
+        assert!(models.iter().any(|m| m == "model-b"));
     }
 
     #[test]

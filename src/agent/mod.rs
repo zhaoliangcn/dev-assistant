@@ -1574,12 +1574,12 @@ impl Agent {
     }
 
     /// 列出所有可用模型
-    pub fn list_models(&self) -> Vec<&str> {
+    pub fn list_models(&self) -> Vec<String> {
         self.llm.list_models()
     }
 
     /// 当前活跃模型名称
-    pub fn active_model(&self) -> &str {
+    pub fn active_model(&self) -> String {
         self.llm.active_model()
     }
 

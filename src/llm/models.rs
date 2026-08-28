@@ -44,7 +44,7 @@ fn resolve_env_var(s: &str) -> String {
 }
 
 /// TOML 文件根结构
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModelsConfig {
     pub models: Vec<ProviderConfig>,
 }

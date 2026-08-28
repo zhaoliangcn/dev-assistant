@@ -17,12 +17,29 @@ document.addEventListener('alpine:init', () => {
         list: [],
         active: '',
         loaded: false,
+        // P6: 模型设置面板状态（配置模型 URL / 提供商 / 密钥等）
+        configPath: '',
+        panelOpen: false,
+        editorOpen: false,
+        saving: false,
+        saveError: null,
+        // 编辑中的原名称（新增为 null）；名称在编辑时不可改，避免歧义
+        editingName: null,
+        // 支持的 provider 类型（与后端 create_provider 对齐）
+        providers: ['openai', 'openai-compatible', 'deepseek', 'moonshot', 'zhipu', 'baidu', 'aliyun', 'siliconflow', 'anthropic', 'ollama'],
+        // 表单模型
+        form: {
+            name: '', provider: 'openai', api_url: '', api_key: '',
+            model: '', temperature: 0.2, max_output_tokens: '', clear_api_key: false, hasKey: false,
+        },
 
         async load() {
             try {
                 const resp = await fetch('/api/models');
                 const data = await resp.json();
-                this.list = Array.isArray(data) ? data : [];
+                const models = Array.isArray(data) ? data : (data.models || []);
+                this.list = models;
+                this.configPath = data.config_path || '';
                 const active = this.list.find((m) => m.active);
                 this.active = active ? active.name : (this.list[0] ? this.list[0].name : '');
                 this.loaded = true;
@@ -48,6 +65,123 @@ document.addEventListener('alpine:init', () => {
                 }
             } catch (e) {
                 console.error('切换模型失败:', e);
+            }
+        },
+
+        // ── 设置面板（P6） ──
+
+        openPanel() {
+            this.panelOpen = true;
+            this.closeEditor();
+        },
+
+        closePanel() {
+            this.panelOpen = false;
+            this.closeEditor();
+        },
+
+        newModel() {
+            this.editingName = null;
+            this.saveError = null;
+            this.form = {
+                name: '', provider: 'openai', api_url: '', api_key: '',
+                model: '', temperature: 0.2, max_output_tokens: '', clear_api_key: false, hasKey: false,
+            };
+            this.editorOpen = true;
+            this._scrollEditorIntoView();
+        },
+
+        editModel(m) {
+            this.editingName = m.name;
+            this.saveError = null;
+            this.form = {
+                name: m.name,
+                provider: m.provider,
+                api_url: m.api_url || '',
+                api_key: '', // 不回显完整密钥；留空表示保持不变
+                model: m.model || '',
+                temperature: m.temperature ?? 0.2,
+                max_output_tokens: m.max_output_tokens ?? '',
+                clear_api_key: false,
+                hasKey: m.has_api_key,
+            };
+            this.editorOpen = true;
+            this._scrollEditorIntoView();
+        },
+
+        // 打开编辑/新增表单时，自动把面板滚动到编辑区（表单位于列表下方）。
+        // 需等 Alpine 渲染完（x-show 生效、元素有布局尺寸）后再滚动，否则 scrollHeight 为 0。
+        _scrollEditorIntoView() {
+            window.Alpine.nextTick(() => {
+                const body = document.querySelector('#model-settings-panel .model-settings-body');
+                if (body) body.scrollTop = body.scrollHeight;
+            });
+        },
+
+        closeEditor() {
+            this.editorOpen = false;
+            this.editingName = null;
+            this.saveError = null;
+            this.saving = false;
+        },
+
+        async saveForm() {
+            const i18n = window.Alpine.store('i18n');
+            const f = this.form;
+            if (!f.name || !f.provider || !f.api_url || !f.model) {
+                this.saveError = i18n.form_required;
+                return;
+            }
+            this.saving = true;
+            this.saveError = null;
+            const num = (v) => (v === '' || v === null || v === undefined) ? null : Number(v);
+            const body = {
+                name: f.name.trim(),
+                provider: f.provider.trim(),
+                api_url: f.api_url.trim(),
+                api_key: f.api_key ? f.api_key.trim() : '',
+                clear_api_key: !!f.clear_api_key,
+                model: f.model.trim(),
+                temperature: num(f.temperature),
+                max_output_tokens: num(f.max_output_tokens),
+            };
+            try {
+                const resp = await fetch('/api/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    this.closeEditor();
+                    await this.load();
+                } else {
+                    this.saveError = data.error || i18n.save_failed;
+                }
+            } catch (e) {
+                console.error('保存模型配置失败:', e);
+                this.saveError = i18n.save_failed + ': ' + e.message;
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        async deleteModel(name) {
+            const i18n = window.Alpine.store('i18n');
+            if (!confirm(i18n.delete_model_confirm + '「' + name + '」')) return;
+            try {
+                const resp = await fetch('/api/models/' + encodeURIComponent(name), {
+                    method: 'DELETE',
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    await this.load();
+                } else {
+                    alert(data.error || i18n.delete_failed);
+                }
+            } catch (e) {
+                console.error('删除模型配置失败:', e);
+                alert(i18n.delete_failed + ': ' + e.message);
             }
         },
     });

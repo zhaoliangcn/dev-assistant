@@ -68,6 +68,8 @@ pub struct AppState {
     pub verbose: bool,
     /// minijinja 模板引擎环境
     pub templates: minijinja::Environment<'static>,
+    /// 模型配置文件路径（Web 端配置持久化的读写目标，与启动时加载同源）
+    pub models_config_path: PathBuf,
 }
 
 /// Web 服务配置。
@@ -136,6 +138,8 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
 
     // ── 加载模型配置 ──
     let mut provider_configs = load_models(config.config.as_deref())?;
+    // 模型配置文件路径：Web 端增删改配置后持久化到同一路径（与加载顺序同源）
+    let models_config_path = crate::config::models_config_path(config.config.as_deref());
     if let Some(ref model) = config.model {
         if let Some(first) = provider_configs.first_mut() {
             first.model = model.clone();
@@ -222,6 +226,7 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
         max_tokens: config.max_tokens,
         verbose: config.verbose,
         templates,
+        models_config_path,
     };
 
     // ── 构建 Router ──

@@ -32,6 +32,8 @@ pub fn build_router(state: AppState) -> Router {
         // 状态/信息
         .route("/api/status", get(handlers::status::get_status))
         .route("/api/models", get(handlers::status::get_models))
+        .route("/api/models", post(handlers::status::save_model))
+        .route("/api/models/{name}", delete(handlers::status::delete_model))
         .route("/api/models/switch", post(handlers::status::switch_model))
         // 会话管理
         .route("/api/sessions", get(handlers::session::list_sessions))

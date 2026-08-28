@@ -15,6 +15,19 @@ fn models_config_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
+/// 计算模型配置文件的完整路径（与 `load_models` 的查找顺序一致，不读取文件）。
+///
+/// - `explicit_path`：`--config` 显式指定（若给出则必须存在）
+/// - 否则：可执行文件所在目录下的 `.dev-assistant-models.toml`
+///
+/// Web 端持久化模型配置时使用同一路径，保证「读取与写入同源」。
+pub fn models_config_path(explicit_path: Option<&Path>) -> std::path::PathBuf {
+    match explicit_path {
+        Some(p) => p.to_path_buf(),
+        None => models_config_dir().join(MODELS_FILE),
+    }
+}
+
 /// 从指定 TOML 文件加载模型配置，并解析 `${VAR}` 环境变量占位符。
 fn load_models_file(toml_path: &Path) -> Result<Vec<ProviderConfig>, AppError> {
     let content = std::fs::read_to_string(toml_path)
@@ -47,7 +60,7 @@ pub fn load_models(explicit_path: Option<&Path>) -> Result<Vec<ProviderConfig>, 
     }
 
     // 2. 可执行文件所在目录的默认文件
-    let toml_path = models_config_dir().join(MODELS_FILE);
+    let toml_path = models_config_path(None);
     if toml_path.exists() {
         return load_models_file(&toml_path);
     }

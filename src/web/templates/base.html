@@ -183,6 +183,13 @@
                                       x-text="$store.models.active ? ($store.i18n.model + ': ' + $store.models.active) : ''"></span>
                             </li>
                             <li>
+                                <button class="outline secondary header-btn"
+                                        @click="$store.models.openPanel()"
+                                        :title="$store.i18n.model_settings" :aria-label="$store.i18n.model_settings">
+                                    ⚙️
+                                </button>
+                            </li>
+                            <li>
                                 <span class="token-usage" x-show="$store.tokenUsage.total > 0"
                                       :title="$store.tokenUsage.detail()" style="font-size:0.8em;opacity:0.7;">
                                     <span x-text="$store.tokenUsage.label()"></span>
@@ -267,6 +274,94 @@
                 <input type="color" x-model="$store.customization.primaryColor"
                        @input="$store.customization.updatePrimaryColor($store.customization.primaryColor)">
             </div>
+        </div>
+    </div>
+    <!-- 模型设置面板（P6）：配置模型 URL / 提供商 / 密钥等信息，增删改后持久化 -->
+    <div id="model-settings-panel" class="model-settings-panel" x-show="$store.models.panelOpen" x-cloak>
+        <div class="model-settings-header">
+            <strong x-text="'⚙️ ' + $store.i18n.model_settings"></strong>
+            <button type="button" class="copy-btn" @click="$store.models.closePanel()">✕</button>
+        </div>
+        <div class="model-settings-body">
+            <p class="model-settings-path" x-show="$store.models.configPath"
+               x-text="'📄 ' + $store.i18n.config_file + ': ' + $store.models.configPath"></p>
+            <p class="model-settings-hint" x-text="$store.i18n.model_settings_hint"></p>
+
+            <!-- 已配置模型列表 -->
+            <div class="model-list">
+                <template x-for="m in $store.models.list" :key="m.name">
+                    <div class="model-item" :class="m.active ? 'model-item-active' : ''">
+                        <div class="model-item-info">
+                            <div class="model-item-title">
+                                <strong x-text="m.name"></strong>
+                                <span class="model-item-badge" x-show="m.active" x-text="$store.i18n.active"></span>
+                            </div>
+                            <small x-text="m.provider + ' · ' + m.model"></small>
+                            <small class="model-item-url" x-text="m.api_url"></small>
+                            <small x-text="m.has_api_key ? ('🔑 ' + $store.i18n.api_key_set) : $store.i18n.api_key_missing"></small>
+                        </div>
+                        <div class="model-item-actions">
+                            <button class="outline secondary" @click="$store.models.editModel(m)" x-text="$store.i18n.edit"></button>
+                            <button class="outline secondary" @click="$store.models.deleteModel(m.name)" x-text="$store.i18n.delete"></button>
+                        </div>
+                    </div>
+                </template>
+                <p class="model-list-empty" x-show="$store.models.list.length === 0" x-text="$store.i18n.no_models"></p>
+            </div>
+
+            <!-- 新增/编辑表单 -->
+            <div class="model-editor" x-show="$store.models.editorOpen" x-cloak>
+                <h5 x-text="$store.models.editingName ? $store.i18n.edit_model : $store.i18n.add_model"></h5>
+                <div class="model-form-grid">
+                    <label>
+                        <span x-text="$store.i18n.model_name"></span>
+                        <input type="text" x-model="$store.models.form.name"
+                               :disabled="$store.models.editingName !== null"
+                               :placeholder="$store.i18n.model_name_placeholder">
+                    </label>
+                    <label>
+                        <span x-text="$store.i18n.provider"></span>
+                        <select x-model="$store.models.form.provider">
+                            <template x-for="p in $store.models.providers" :key="p">
+                                <option :value="p" x-text="p"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label class="model-form-full">
+                        <span x-text="$store.i18n.api_url"></span>
+                        <input type="text" x-model="$store.models.form.api_url" placeholder="https://api.openai.com/v1">
+                    </label>
+                    <label class="model-form-full">
+                        <span x-text="$store.i18n.api_key"></span>
+                        <input type="password" x-model="$store.models.form.api_key"
+                               autocomplete="new-password"
+                               :placeholder="$store.models.form.hasKey ? $store.i18n.api_key_keep : ''">
+                        <label class="model-checkbox" x-show="$store.models.form.hasKey">
+                            <input type="checkbox" x-model="$store.models.form.clear_api_key">
+                            <span x-text="$store.i18n.clear_api_key"></span>
+                        </label>
+                    </label>
+                    <label>
+                        <span x-text="$store.i18n.model"></span>
+                        <input type="text" x-model="$store.models.form.model" placeholder="gpt-4o">
+                    </label>
+                    <label>
+                        <span x-text="$store.i18n.temperature"></span>
+                        <input type="number" step="0.1" min="0" max="2" x-model="$store.models.form.temperature">
+                    </label>
+                    <label>
+                        <span x-text="$store.i18n.max_output_tokens"></span>
+                        <input type="number" min="1" x-model="$store.models.form.max_output_tokens" placeholder="8192">
+                    </label>
+                </div>
+                <p class="model-save-error" x-show="$store.models.saveError" x-text="$store.models.saveError"></p>
+                <div class="model-editor-actions">
+                    <button @click="$store.models.saveForm()" :disabled="$store.models.saving" x-text="$store.models.saving ? $store.i18n.saving : $store.i18n.save"></button>
+                    <button class="outline secondary" @click="$store.models.closeEditor()" x-text="$store.i18n.cancel"></button>
+                </div>
+            </div>
+
+            <button class="outline" @click="$store.models.newModel()" x-show="!$store.models.editorOpen" x-text="$store.i18n.add_model"></button>
         </div>
     </div>
     <footer class="container-fluid">

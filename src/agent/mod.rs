@@ -10,7 +10,7 @@ pub mod token_counter;
 
 pub use context::ContextManager;
 pub use identity::{AgentIdentity, PipelineStage};
-pub use pipeline_context::{PipelineContext, PipelineContextStore, StageStatus};
+pub use pipeline_context::{PipelineContext, PipelineContextStore, StageContext, StageStatus};
 pub use pipeline_stages::STAGE_TEMPLATES;
 
 use std::path::PathBuf;
@@ -932,6 +932,36 @@ impl Agent {
 
                     // 保存阶段上下文到文件
                     let _ = pipeline_store.save_stage_context(stage_ctx);
+
+                    // ── 阶段间产物校验（在保存全局上下文/检查点之前）──
+                    // 子代理报告成功但未实际产出产物（如未调用 kb_store）是常见
+                    // 静默失败。在推进到下一阶段前校验：摘要非空 + 产物目录含
+                    // LLM 写入的文件。校验失败则标记失败并中止（--resume-pipeline
+                    // 可重试，因 current_stage 仅在通过后才递增）。
+                    //
+                    // 此处仍持有 stage_ctx（pipeline_ctx 的可变借用），而校验失败
+                    // 路径需再写入 stage_ctx 的状态/错误并保存——所有对 stage_ctx
+                    // 的使用在此块内结束，之后才不可变借用 pipeline_ctx 写检查点。
+                    let validation_err =
+                        validate_stage_artifacts(&pipeline_store, stage_idx, stage_ctx)
+                            .err();
+                    if let Some(reason) = validation_err {
+                        stage_ctx.status = StageStatus::Failed;
+                        stage_ctx.error = Some(reason.clone());
+                        let _ = pipeline_store.save_stage_context(stage_ctx);
+                        // stage_ctx 可变借用到此结束，可不可变借用 pipeline_ctx
+                        let _ = pipeline_store.save_pipeline_context(&pipeline_ctx);
+                        let _ = pipeline_store.save_checkpoint(&pipeline_ctx);
+                        self.add_display_message(
+                            crate::utils::message_level::MessageLevel::Error,
+                            &format!("❌ 阶段 \"{}\" 产物校验失败: {}", stage.name, reason),
+                        );
+                        return Err(AppError::Config(format!(
+                            "流水线阶段 '{}' 产物校验失败。使用 --resume-pipeline 可从当前阶段恢复。\n原因: {}",
+                            stage.name, reason
+                        )));
+                    }
+
                     // 更新 pipeline 上下文索引
                     let _ = pipeline_store.save_pipeline_context(&pipeline_ctx);
                     // 保存检查点
@@ -1760,6 +1790,48 @@ fn detect_modified_files(working_dir: &std::path::Path) -> Result<Vec<String>, A
     }
 }
 
+/// 阶段间产物校验：在阶段报告成功后、推进到下一阶段前执行。
+///
+/// 子代理通过 `finish(success=true)` 报告成功但实际未产出任何可验证的产物
+/// （如未调用 `kb_store` 写入文件）是 pipeline 中常见的静默失败模式。
+/// 所有阶段模板均明确指示 LLM 将产物写入 `pipeline/stage-N/`，因此校验：
+///
+/// 1. 摘要非空 —— 成功完成的阶段必须通过 `finish` 报告其工作内容。
+/// 2. 产物目录含 LLM 写入的文件 —— `summary.json` 由运行时自动保存，
+///    不计入 LLM 产物；目录中必须存在至少一个其他文件，证明 LLM 确实
+///    执行了 `kb_store` 写入。
+///
+/// 校验失败返回 `Err(reason)`，调用方应将阶段标记为失败并中止当前 pipeline
+/// （`--resume-pipeline` 可重试该阶段，因为 `current_stage` 仅在校验通过后递增）。
+fn validate_stage_artifacts(
+    store: &crate::agent::PipelineContextStore,
+    stage_idx: usize,
+    stage_ctx: &crate::agent::StageContext,
+) -> Result<(), String> {
+    // 1. 摘要非空
+    if stage_ctx.summary.trim().is_empty() {
+        return Err("阶段摘要为空：子代理未通过 finish 报告工作内容".to_string());
+    }
+
+    // 2. 产物目录含 LLM 通过 kb_store 写入的文件
+    let stage_dir = store.stage_dir(stage_idx);
+    let has_llm_artifact = match std::fs::read_dir(&stage_dir) {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .any(|e| e.file_name() != "summary.json"),
+        Err(_) => false,
+    };
+    if !has_llm_artifact {
+        return Err(format!(
+            "阶段产物目录 {} 中未发现 LLM 通过 kb_store 写入的文件\
+             （仅有运行时自动保存的 summary.json）",
+            stage_dir.display()
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1904,5 +1976,55 @@ mod tests {
         assert!(sub_registry.get_tool("write_file").is_some());
         assert!(sub_registry.get_tool("finish").is_some());
         assert!(sub_registry.get_tool("exec_command").is_some());
+    }
+
+    // ── validate_stage_artifacts 测试 ──
+
+    /// 辅助：在临时目录中构造一个 PipelineContextStore + StageContext。
+    fn make_store_and_stage(summary: &str) -> (tempfile::TempDir, PipelineContextStore, StageContext) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PipelineContextStore::new(dir.path()).expect("store");
+        let stage = StageContext {
+            stage_index: 0,
+            stage_name: "test-stage".into(),
+            status: StageStatus::InProgress,
+            summary: summary.into(),
+            artifacts: Vec::new(),
+            modified_files: Vec::new(),
+            error: None,
+            metadata: std::collections::HashMap::new(),
+        };
+        (dir, store, stage)
+    }
+
+    #[test]
+    fn validate_rejects_empty_summary() {
+        let (_dir, store, stage) = make_store_and_stage("   ");
+        let err = validate_stage_artifacts(&store, 0, &stage).unwrap_err();
+        assert!(err.contains("摘要为空"), "unexpected: {}", err);
+    }
+
+    #[test]
+    fn validate_rejects_missing_llm_artifact() {
+        let (dir, store, mut stage) = make_store_and_stage("工作完成");
+        // 仅写入 summary.json（模拟运行时自动保存），无 LLM 产物文件
+        let stage_dir = store.stage_dir(0);
+        std::fs::create_dir_all(&stage_dir).unwrap();
+        std::fs::write(stage_dir.join("summary.json"), "{}").unwrap();
+        // 确认 dir 仍指向 tempdir 供后续使用
+        let _ = &dir;
+        let err = validate_stage_artifacts(&store, 0, &stage).unwrap_err();
+        assert!(err.contains("kb_store"), "unexpected: {}", err);
+    }
+
+    #[test]
+    fn validate_passes_when_llm_artifact_present() {
+        let (dir, store, stage) = make_store_and_stage("架构设计完成");
+        let stage_dir = store.stage_dir(0);
+        std::fs::create_dir_all(&stage_dir).unwrap();
+        std::fs::write(stage_dir.join("summary.json"), "{}").unwrap();
+        std::fs::write(stage_dir.join("architecture.md"), "# 架构").unwrap();
+        let _ = &dir;
+        assert!(validate_stage_artifacts(&store, 0, &stage).is_ok());
     }
 }

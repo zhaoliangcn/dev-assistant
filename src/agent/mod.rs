@@ -790,7 +790,7 @@ impl Agent {
                         name: name.to_string(),
                         agent_type: agent_type.clone(),
                         task_template,
-                        max_iterations: alloc(STAGE_WEIGHTS[i]),
+                        base_iterations: alloc(STAGE_WEIGHTS[i]),
                     }
                 },
             )
@@ -798,6 +798,15 @@ impl Agent {
 
         let total = stages.len();
         let pipeline_start = std::time::Instant::now();
+
+        // ── 弹性迭代配额（共享预算池）──
+        // 所有阶段共享同一个预算池（总预算 = MAX_ITERATIONS）。每阶段取用
+        // 「基础份额 + 继承额度」，上限为池中剩余量；提前通过 finish 完成的
+        // 阶段将基础份额返还池中供后续阶段继承，耗尽配额或失败的阶段则重置
+        // 继承额度。相比静态固定分配，提前完成阶段未消耗的迭代不会被浪费，
+        // 复杂阶段（如修复）可借用到更多迭代而不改变总预算上限。
+        let mut pool_used = 0usize;
+        let mut carryover = 0usize;
 
         // ── 恢复或初始化 Pipeline 上下文 ──
         let mut pipeline_ctx = if resume {
@@ -873,6 +882,20 @@ impl Agent {
             let context_prompt = pipeline_ctx.build_context_prompt();
             let stage_task = stage.task_template.replace("{context}", &context_prompt);
 
+            // 计算本阶段动态预算：基础份额 + 继承额度，上限为池中剩余量。
+            // 至少保留 1 轮，避免池耗尽时阶段以 0 轮直接失败。
+            let base_share = stage.base_iterations;
+            let budget = elastic_budget(base_share, carryover, pool_used, env_max_iter);
+            pool_used += budget;
+            debug!(
+                stage = %stage.name,
+                base_share,
+                budget,
+                pool_used,
+                carryover,
+                "elastic stage budget"
+            );
+
             let subagent_tools = self
                 .tools
                 .new_subagent_registry_with_identity(&stage.agent_type);
@@ -883,7 +906,7 @@ impl Agent {
                 depth: self.depth + 1,
                 task: stage_task.clone(),
                 context: String::new(),
-                max_iterations: stage.max_iterations,
+                max_iterations: budget,
                 max_tokens: self.context.max_tokens,
                 agent_type: Some(stage.agent_type.clone()),
                 parent_budget: Some(self.context.get_budget_report()),
@@ -919,6 +942,13 @@ impl Agent {
 
             match result {
                 Ok(agent_result) if agent_result.success => {
+                    // 提前通过 finish 交付（在子代理上下文中 success 与 finished 等价）：
+                    // 未耗尽配额，将本阶段基础份额返还共享池供后续阶段继承。
+                    carryover = if agent_result.finished {
+                        carryover + base_share
+                    } else {
+                        0
+                    };
                     stage_ctx.status = StageStatus::Completed;
                     stage_ctx.summary = agent_result.message.clone();
                     // 检测修改的文件（通过 git diff 或 kb_store 记录）
@@ -1832,6 +1862,17 @@ fn validate_stage_artifacts(
     Ok(())
 }
 
+/// 弹性配额计算：返回阶段的实际迭代预算。
+///
+/// 预算 = `基础份额 + 继承额度`，上限为共享池剩余量
+/// (`total.saturating_sub(pool_used)`)；至少保留 1 轮，避免池耗尽时
+/// 阶段以 0 轮直接失败。
+fn elastic_budget(base_share: usize, carryover: usize, pool_used: usize, total: usize) -> usize {
+    (base_share + carryover)
+        .min(total.saturating_sub(pool_used))
+        .max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2026,5 +2067,30 @@ mod tests {
         std::fs::write(stage_dir.join("architecture.md"), "# 架构").unwrap();
         let _ = &dir;
         assert!(validate_stage_artifacts(&store, 0, &stage).is_ok());
+    }
+
+    // ── elastic_budget 测试 ──
+
+    #[test]
+    fn elastic_budget_basic_share() {
+        // 无继承额度、池充足：预算 = 基础份额
+        assert_eq!(elastic_budget(18, 0, 0, 120), 18);
+        // 池有剩余但少于基础份额：预算 = 剩余量（≥1）
+        assert_eq!(elastic_budget(18, 0, 115, 120), 5);
+    }
+
+    #[test]
+    fn elastic_budget_inherits_carryover() {
+        // 前一阶段提前完成返还 18 轮：预算 = 35 + 18
+        assert_eq!(elastic_budget(35, 18, 18, 120), 53);
+        // 但不超过池中剩余量
+        assert_eq!(elastic_budget(35, 18, 90, 120), 30);
+    }
+
+    #[test]
+    fn elastic_budget_never_zero() {
+        // 池完全耗尽：预算退化为 1 轮，避免阶段以 0 轮直接失败
+        assert_eq!(elastic_budget(9, 0, 120, 120), 1);
+        assert_eq!(elastic_budget(9, 5, 120, 120), 1);
     }
 }

@@ -330,7 +330,10 @@ pub struct PipelineStage {
     pub name: String,
     pub agent_type: AgentIdentity,
     pub task_template: String,
-    pub max_iterations: usize,
+    /// 基础迭代份额（按阶段权重从总预算分配）。
+    /// 实际运行时使用弹性配额：`基础份额 + 前一阶段提前完成返还的份额`，
+    /// 上限为共享预算池的剩余量。见 [`crate::agent::Agent::run_pipeline`]。
+    pub base_iterations: usize,
 }
 
 #[cfg(test)]

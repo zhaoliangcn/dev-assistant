@@ -30,6 +30,19 @@ use tracing::{debug, info, warn};
 /// 最大子代理深度。超过此深度时，返回 `SubagentDepthLimit` 错误。
 pub(crate) const MAX_SUBAGENT_DEPTH: usize = 3;
 
+/// 自动保存轮次摘要的间隔（工具调用轮数）。
+///
+/// 环境变量 `AGENT_SUMMARY_INTERVAL` 可配置（默认 5，最小 1）。
+/// 在上下文压力未达 Critical 时每 N 轮把当前进展落盘到分层摘要，
+/// 使崩溃恢复（orchestrator 检查点重建）始终有可用的摘要数据。
+fn summary_interval() -> usize {
+    std::env::var("AGENT_SUMMARY_INTERVAL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(5)
+}
+
 // ---------------------------------------------------------------------------
 // 子代理配置
 // ---------------------------------------------------------------------------
@@ -103,6 +116,9 @@ pub struct Agent {
     /// 子代理运行状态（用于 UI 树形可视化）。
     #[allow(dead_code)]
     subagent_statuses: Vec<(usize, String, String, bool)>,
+    /// 距上次自动保存轮次摘要以来的工具调用轮数。
+    /// 每轮工具调用 +1，达到 `summary_interval()` 时触发落盘（用于崩溃恢复）。
+    rounds_since_summary: usize,
 }
 
 impl Agent {
@@ -134,6 +150,7 @@ impl Agent {
             working_dir: wd,
             hooks: None,
             subagent_statuses: Vec::new(),
+            rounds_since_summary: 0,
         }
     }
 
@@ -459,6 +476,14 @@ impl Agent {
                 ) {
                     // 自动保存当前轮次摘要到分层摘要系统
                     let _ = self.auto_save_round_summary().await;
+                } else {
+                    // 每 N 轮自动保存轮次摘要：崩溃恢复不再依赖"压力达 Critical 才落盘"。
+                    // 长任务可能长期处于低压力状态，定期落盘保证检查点恢复时有摘要可用。
+                    self.rounds_since_summary += 1;
+                    if self.rounds_since_summary >= summary_interval() {
+                        self.rounds_since_summary = 0;
+                        let _ = self.auto_save_round_summary().await;
+                    }
                 }
 
                 // 压缩上下文，防止 token 无限制增长。
@@ -624,6 +649,7 @@ impl Agent {
                 working_dir: wd,
                 hooks: None,
                 subagent_statuses: Vec::new(),
+                rounds_since_summary: 0,
             });
         }
 
@@ -678,6 +704,7 @@ impl Agent {
             working_dir: wd,
             hooks: None,
             subagent_statuses: Vec::new(),
+            rounds_since_summary: 0,
         })
     }
 

@@ -36,6 +36,7 @@ use tracing::{debug, info, warn};
 
 use crate::agent::{Agent, AgentIdentity, ContextManager};
 use crate::llm::LlmClient;
+use crate::tools::task_tools::TaskManager;
 use crate::tools::ToolRegistry;
 use crate::utils::error::AppError;
 use checkpoint::RunningTask;
@@ -113,6 +114,9 @@ pub struct TaskOrchestrator {
     session_id: String,
     /// 从检查点重建的 Agent 上下文（task_id → ContextManager）
     restored_contexts: HashMap<String, ContextManager>,
+    /// 全局 TaskManager 的克隆（共享 pause/cancel 标志与状态图）。
+    /// 存在时执行循环在批次边界响应暂停/取消；后台模式由 `run_background_mode` 注入。
+    task_control: Option<TaskManager>,
 }
 
 impl TaskOrchestrator {
@@ -136,7 +140,15 @@ impl TaskOrchestrator {
             max_concurrent: MAX_CONCURRENT_TASKS,
             session_id: "default".to_string(),
             restored_contexts: HashMap::new(),
+            task_control: None,
         }
+    }
+
+    /// 注入全局 TaskManager（共享 pause/cancel 标志与状态图），
+    /// 使后台任务可被 `pause_task` / `cancel_task` 工具控制。
+    pub fn with_task_control(mut self, task_manager: TaskManager) -> Self {
+        self.task_control = Some(task_manager);
+        self
     }
 
     // ----- 配置方法 -----
@@ -227,6 +239,46 @@ impl TaskOrchestrator {
 
         // 主调度循环
         while !self.graph.is_complete() {
+            // ── 取消检查：收到取消请求则跳过剩余任务并保存检查点 ──
+            if self.task_control.as_ref().is_some_and(|m| m.cancelled()) {
+                let pending_ids: Vec<TaskId> = self
+                    .graph
+                    .all_tasks()
+                    .into_iter()
+                    .filter(|t| !t.status.is_terminal())
+                    .map(|t| t.id.clone())
+                    .collect();
+                info!(
+                    "收到取消请求，跳过剩余 {} 个未完成任务并保存检查点",
+                    pending_ids.len()
+                );
+                for task_id in &pending_ids {
+                    self.graph.skip(task_id);
+                }
+                if self.checkpoint_enabled {
+                    let _ = self.save_checkpoint();
+                }
+                break;
+            }
+
+            // ── 暂停检查：先保存检查点，再等待恢复（暂停期间仍响应取消）──
+            if self.task_control.as_ref().is_some_and(|m| m.paused()) {
+                if self.checkpoint_enabled {
+                    let _ = self.save_checkpoint();
+                }
+                info!("任务执行已暂停（pause_task），保存检查点后等待恢复...");
+                while self.task_control.as_ref().is_some_and(|m| m.paused()) {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    if self.task_control.as_ref().is_some_and(|m| m.cancelled()) {
+                        break;
+                    }
+                }
+                // 暂停等待期间收到取消，回到循环顶部的取消分支处理
+                if self.task_control.as_ref().is_some_and(|m| m.cancelled()) {
+                    continue;
+                }
+            }
+
             // 获取可执行的任务
             let ready_tasks = self.graph.next_ready();
 
@@ -358,6 +410,11 @@ impl TaskOrchestrator {
                                 self.graph.fail(&task_id);
                                 info!("任务 {} 重试耗尽，标记为失败", task_id);
                             }
+                        }
+
+                        // 同步依赖图状态到全局 TaskManager，供 task_status 工具查询实时进度
+                        if let Some(ref mgr) = self.task_control {
+                            mgr.sync_graph(&self.graph);
                         }
 
                         task_results.push(exec_result);
@@ -817,6 +874,34 @@ mod tests {
         assert!(!orchestrator.graph().is_complete());
         let ready = orchestrator.graph().next_ready();
         assert!(ready.is_empty(), "死锁时不应有就绪任务");
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_cancel_skips_remaining_tasks() {
+        let mut orchestrator = test_orchestrator();
+        orchestrator.add_task(Task::new("c1", "任务 1"));
+        orchestrator.add_task(Task::new("c2", "任务 2"));
+
+        // 注入 TaskManager 并在执行前取消：循环应在批次边界跳过剩余任务，
+        // 验证 pause/cancel 标志已接入执行循环（而非仅置位）。
+        let task_manager = crate::tools::task_tools::TaskManager::new(orchestrator.graph().clone());
+        task_manager.cancel();
+        orchestrator = orchestrator.with_task_control(task_manager);
+
+        let result = orchestrator.execute().await.unwrap();
+        // 取消路径：全部任务被跳过，不视为失败
+        assert_eq!(result.skipped, 2);
+        assert_eq!(result.failed, 0);
+        assert!(result.success);
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_without_task_control_runs_normally() {
+        // 未注入 TaskManager 时行为不变（兼容 REPL 等场景）
+        let mut orchestrator = test_orchestrator();
+        orchestrator.add_task(Task::new("n1", "任务 1"));
+        let result = orchestrator.execute().await.unwrap();
+        assert_eq!(result.skipped, 0);
     }
 
     #[test]

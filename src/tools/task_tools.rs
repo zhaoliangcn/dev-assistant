@@ -36,6 +36,16 @@ impl TaskManager {
         self.is_cancelled.clone()
     }
 
+    /// 读取暂停标志（带 poison 容错）。
+    pub fn paused(&self) -> bool {
+        *self.is_paused.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// 读取取消标志（带 poison 容错）。
+    pub fn cancelled(&self) -> bool {
+        *self.is_cancelled.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     pub fn pause(&self) {
         *self.is_paused.lock().unwrap() = true;
     }

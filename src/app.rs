@@ -362,6 +362,14 @@ impl App {
             tools,
         );
 
+        // 注册全局 TaskManager 并注入 orchestrator：
+        // - 注入后 pause_task / cancel_task 工具的标志会被执行循环在批次边界读取（真正生效）
+        // - 全局注册使 task_status / pause_task / resume_task / cancel_task 工具可访问，
+        //   且 orchestrator 每完成一个任务会把最新依赖图同步到该管理器供实时查询。
+        let task_manager = crate::tools::task_tools::TaskManager::new(orchestrator.graph().clone());
+        crate::tools::task_tools::set_global_task_manager(task_manager.clone());
+        orchestrator = orchestrator.with_task_control(task_manager);
+
         let config = BackgroundConfig {
             checkpoint_interval: 5,
             max_concurrent: 4,

@@ -141,8 +141,9 @@ impl ConversationHistory {
     ///
     /// 结构：`[摘要消息] + [最近 keep_rounds 轮消息]`
     /// 摘要消息以 `system` 角色插入，标注为「对话摘要」。
-    pub fn replace_old_with_summary(&mut self, summary: &str) {
-        let keep_rounds = 6usize;
+    /// `keep_rounds` 由调用方传入（通常来自 `summary_keep_rounds()`），
+    /// 与摘要压缩时分割旧消息的轮数保持一致。
+    pub fn replace_old_with_summary(&mut self, summary: &str, keep_rounds: usize) {
         let (_, mut new_messages) = self.split_old_messages(keep_rounds);
 
         let mut messages = Vec::new();

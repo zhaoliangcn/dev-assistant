@@ -252,7 +252,7 @@ impl ContextCompressor {
         }
 
         // 用摘要替换旧消息，保留最近 SUMMARY_KEEP_ROUNDS 轮完整消息
-        history.replace_old_with_summary(&summary);
+        history.replace_old_with_summary(&summary, keep);
 
         let after_tokens = history.used_tokens;
         Ok(CompressionInfo {

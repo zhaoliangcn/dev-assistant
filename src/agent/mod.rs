@@ -999,29 +999,45 @@ impl Agent {
     // 内部方法
     // -----------------------------------------------------------------------
 
-    /// 将 AppError 分类为错误类别，用于重试逻辑判断
+    /// 将 AppError 分类为错误类别，用于重试逻辑判断。
+    ///
+    /// 穷举所有错误变体：新增错误变体时编译器会强制在此归类，
+    /// 避免新错误静默落入可重试分类而掩盖永久性错误。
     fn categorize_error(e: &AppError) -> crate::tools::ErrorCategory {
+        use crate::tools::ErrorCategory;
         match e {
             // 可重试的临时性错误
-            AppError::RateLimited { .. } => crate::tools::ErrorCategory::Transient,
-            AppError::Llm(_) => crate::tools::ErrorCategory::Llm,
+            AppError::RateLimited { .. } => ErrorCategory::Transient,
+            // 5xx 服务端错误：瞬时性为主，可重试
+            AppError::ServerError(_, _) => ErrorCategory::Transient,
+            AppError::Llm(_) => ErrorCategory::Llm,
             AppError::Http(e) if e.is_timeout() || e.is_connect() => {
-                crate::tools::ErrorCategory::Transient
+                ErrorCategory::Transient
             }
+            // 其他 HTTP 错误（4xx 鉴权/参数等）：重试无益
+            AppError::Http(_) => ErrorCategory::Permanent,
             AppError::Io(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                crate::tools::ErrorCategory::Transient
+                ErrorCategory::Transient
             }
+            // 文件缺失/无权限：重试无益；其余 I/O（磁盘满、网络盘抖动等）可重试
+            AppError::Io(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+                ) =>
+            {
+                ErrorCategory::Permanent
+            }
+            AppError::Io(_) => ErrorCategory::Transient,
             // 不可重试的永久性错误
-            AppError::ToolNotFound(_) => crate::tools::ErrorCategory::Permanent,
-            AppError::Security(_) => crate::tools::ErrorCategory::Permanent,
-            AppError::Config(_) => crate::tools::ErrorCategory::Permanent,
-            AppError::SubagentDepthLimit(_) => crate::tools::ErrorCategory::Permanent,
-            AppError::Json(_) => crate::tools::ErrorCategory::Permanent,
-            AppError::Env(_) => crate::tools::ErrorCategory::Permanent,
-            AppError::Glob(_) => crate::tools::ErrorCategory::Permanent,
-            AppError::Walkdir(_) => crate::tools::ErrorCategory::Permanent,
-            // 其他错误默认为临时性
-            _ => crate::tools::ErrorCategory::Transient,
+            AppError::ToolNotFound(_) => ErrorCategory::Permanent,
+            AppError::Security(_) => ErrorCategory::Permanent,
+            AppError::Config(_) => ErrorCategory::Permanent,
+            AppError::SubagentDepthLimit(_) => ErrorCategory::Permanent,
+            AppError::Json(_) => ErrorCategory::Permanent,
+            AppError::Env(_) => ErrorCategory::Permanent,
+            AppError::Glob(_) => ErrorCategory::Permanent,
+            AppError::Walkdir(_) => ErrorCategory::Permanent,
         }
     }
 

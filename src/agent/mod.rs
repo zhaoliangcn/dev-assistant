@@ -67,6 +67,24 @@ pub struct SubagentConfig {
     pub restored_context: Option<ContextManager>,
 }
 
+/// 一个已准备好、可并发执行的子代理任务。
+///
+/// 由 [`Agent::prepare_subagent_job`] 构造（只读借用父 Agent，串行执行），
+/// 再交给模块级 [`execute_subagent_job`] 并发运行。子代理之间互不依赖
+/// （各自持有独立上下文与工具集），同一响应中的多个 spawn 调用可并行。
+struct SubagentJob {
+    /// 对应工具调用的 ID（用于把执行结果关联回原始工具调用）。
+    tool_call_id: String,
+    /// 子代理深度。
+    depth: usize,
+    /// 代理类型标签（用于子代理输出）。
+    agent_type_label: String,
+    /// 执行的任务描述。
+    task: String,
+    /// 已构造的子代理。
+    agent: Agent,
+}
+
 // ---------------------------------------------------------------------------
 // Agent 结果
 // ---------------------------------------------------------------------------
@@ -1048,6 +1066,51 @@ impl Agent {
     ) -> Result<Vec<ToolResult>, AppError> {
         let mut results = Vec::new();
 
+        // ── 并行执行同一响应中的所有 spawn_subagent 调用 ──
+        // 子代理互不依赖（各自持有独立上下文与工具集），并发可显著缩短多子任务
+        // 场景的墙钟时间。准备阶段（参数解析/深度检查/构造子代理）串行执行以
+        // 保持输出有序；仅真正耗时的 run 阶段并发。深度超限与创建失败在准备
+        // 阶段直接产出结果，不会进入并发队列。
+        let mut subagent_results: std::collections::HashMap<String, ToolResult> =
+            std::collections::HashMap::new();
+        if tool_calls
+            .iter()
+            .any(|tc| tc.function.name == "spawn_subagent")
+        {
+            let mut jobs: Vec<SubagentJob> = Vec::new();
+            for tool_call in tool_calls
+                .iter()
+                .filter(|tc| tc.function.name == "spawn_subagent")
+            {
+                match self.prepare_subagent_job(tool_call, output) {
+                    Ok(job) => jobs.push(job),
+                    Err(result) => {
+                        subagent_results.insert(tool_call.id.clone(), result);
+                    }
+                }
+            }
+
+            // 在当前任务上并发执行所有子代理 run 阶段。
+            //
+            // 不使用 tokio::spawn：agent.run 的 future 携带 Agent 内部的非 Send
+            // 状态跨越 .await，无法满足 spawn 的 Send + 'static 约束。改用
+            // futures::join_all 在同一任务上交错推进各子代理——对 I/O 密集的
+            // LLM 调用而言，仍能在 .await 点交替执行，获得真实的并发收益。
+            let job_results = futures::future::join_all(
+                jobs.into_iter().map(execute_subagent_job),
+            )
+            .await;
+            for (id, result) in job_results {
+                if result.success {
+                    output.success("子代理任务完成");
+                } else {
+                    let msg = result.content.lines().next().unwrap_or("").to_string();
+                    output.error(&format!("子代理任务失败: {}", msg));
+                }
+                subagent_results.insert(id, result);
+            }
+        }
+
         for tool_call in tool_calls {
             // 工具调用开始：显示工具名称和参数摘要
             let display_name = if tool_call.function.name.is_empty() {
@@ -1073,9 +1136,21 @@ impl Agent {
                 continue;
             }
 
-            // ── 拦截 spawn_subagent 工具调用 ──
+            // ── 拦截 spawn_subagent 工具调用（结果已在上方并行执行）──
             if tool_call.function.name == "spawn_subagent" {
-                let result = self.handle_spawn_subagent(tool_call, output).await?;
+                let result = subagent_results
+                    .remove(&tool_call.id)
+                    .unwrap_or_else(|| {
+                        // 正常不可达：准备阶段已为每个 spawn 调用产出结果或任务；
+                        // 仅当子代理线程 panic 且结果缺失时兜底。
+                        ToolResult::failure(
+                            format!(
+                                "[spawn_subagent] ❌ 执行结果缺失 (tool_call_id: {})",
+                                tool_call.id
+                            ),
+                            crate::tools::ErrorCategory::Permanent,
+                        )
+                    });
                 results.push(result);
                 continue;
             }
@@ -1219,12 +1294,16 @@ impl Agent {
         Ok(results)
     }
 
-    /// 处理 `spawn_subagent` 工具调用：创建子 Agent、执行任务、返回结果。
-    async fn handle_spawn_subagent(
-        &mut self,
+    /// 为 `spawn_subagent` 工具调用构造一个可并发执行的子代理任务。
+    ///
+    /// 解析参数、检查深度限制并构造子代理（均为只读 `&self` 操作），
+    /// 以便同一响应中的多个子代理 `run` 阶段可并发执行（见 [`execute_subagent_job`]）。
+    /// 成功返回 `Ok(SubagentJob)`；参数/深度/创建失败返回 `Err(ToolResult)`（可直接回给模型）。
+    fn prepare_subagent_job(
+        &self,
         tool_call: &ToolCall,
         output: &mut dyn MessageOutput,
-    ) -> Result<ToolResult, AppError> {
+    ) -> Result<SubagentJob, ToolResult> {
         let task = tool_call.function.arguments["task"].as_str().unwrap_or("");
 
         let context = tool_call.function.arguments["context"]
@@ -1253,7 +1332,7 @@ impl Agent {
                 "子代理深度限制 (最大: {}), 当前深度: {}",
                 MAX_SUBAGENT_DEPTH, self.depth
             ));
-            return Ok(ToolResult {
+            return Err(ToolResult {
                 success: false,
                 security_evaluation: None,
                 restart_requested: false,
@@ -1285,7 +1364,7 @@ impl Agent {
             self.tools.new_subagent_registry()
         };
 
-        let mut subagent = match Agent::new_subagent(SubagentConfig {
+        let agent = match Agent::new_subagent(SubagentConfig {
             llm: self.llm.clone(),
             tools: subagent_tools,
             depth: child_depth,
@@ -1300,7 +1379,7 @@ impl Agent {
             Ok(agent) => agent,
             Err(e) => {
                 output.error(&format!("创建子代理失败: {}", e));
-                return Ok(ToolResult {
+                return Err(ToolResult {
                     success: false,
                     security_evaluation: None,
                     restart_requested: false,
@@ -1310,48 +1389,13 @@ impl Agent {
             }
         };
 
-        let mut sub_output = crate::ui::RealtimeOutput::new(false, child_depth, agent_type_str);
-        let result = Box::pin(subagent.run(task.to_string(), &mut sub_output)).await;
-
-        match result {
-            Ok(agent_result) => {
-                if agent_result.success {
-                    output.success("子代理任务完成");
-                    Ok(ToolResult {
-                        success: true,
-                        security_evaluation: None,
-                        restart_requested: false,
-                        error_category: None,
-                        content: format!(
-                            "[spawn_subagent] ✅ 子代理任务完成\n深度: {}\n结果: {}",
-                            child_depth, agent_result.message
-                        ),
-                    })
-                } else {
-                    output.error(&format!("子代理任务失败: {}", agent_result.message));
-                    Ok(ToolResult {
-                        success: false,
-                        security_evaluation: None,
-                        restart_requested: false,
-                        error_category: None,
-                        content: format!(
-                            "[spawn_subagent] ❌ 子代理任务失败\n深度: {}\n错误: {}",
-                            child_depth, agent_result.message
-                        ),
-                    })
-                }
-            }
-            Err(e) => {
-                output.error(&format!("子代理执行出错: {}", e));
-                Ok(ToolResult {
-                    success: false,
-                    security_evaluation: None,
-                    restart_requested: false,
-                    error_category: None,
-                    content: format!("[spawn_subagent] ❌ 子代理执行出错: {}", e),
-                })
-            }
-        }
+        Ok(SubagentJob {
+            tool_call_id: tool_call.id.clone(),
+            depth: child_depth,
+            agent_type_label: agent_type_str.to_string(),
+            task: task.to_string(),
+            agent,
+        })
     }
 
     /// 处理上下文管理工具调用（context_budget / compress_context / save_summary）。
@@ -1629,6 +1673,62 @@ impl Agent {
     /// 获取共享的 LLM 客户端引用（供 dream 等外部模块复用）。
     pub fn llm_client(&self) -> &Arc<LlmClient> {
         &self.llm
+    }
+}
+
+/// 执行一个已准备好的子代理任务（并发入口，不依赖父 Agent 状态）。
+///
+/// 由 [`Agent::prepare_subagent_job`] 构造的 [`SubagentJob`] 在此并发运行，
+/// 返回 `(tool_call_id, ToolResult)` 以便调用方把结果关联回原始工具调用。
+/// 与旧串行实现等价：子代理必须显式调用 `finish` 工具终止。
+async fn execute_subagent_job(job: SubagentJob) -> (String, ToolResult) {
+    let SubagentJob {
+        tool_call_id,
+        depth,
+        task,
+        mut agent,
+        agent_type_label,
+    } = job;
+    let mut sub_output = crate::ui::RealtimeOutput::new(false, depth, &agent_type_label);
+    let result = Box::pin(agent.run(task, &mut sub_output)).await;
+
+    match result {
+        Ok(agent_result) if agent_result.success => (
+            tool_call_id,
+            ToolResult {
+                success: true,
+                security_evaluation: None,
+                restart_requested: false,
+                error_category: None,
+                content: format!(
+                    "[spawn_subagent] ✅ 子代理任务完成\n深度: {}\n结果: {}",
+                    depth, agent_result.message
+                ),
+            },
+        ),
+        Ok(agent_result) => (
+            tool_call_id,
+            ToolResult {
+                success: false,
+                security_evaluation: None,
+                restart_requested: false,
+                error_category: None,
+                content: format!(
+                    "[spawn_subagent] ❌ 子代理任务失败\n深度: {}\n错误: {}",
+                    depth, agent_result.message
+                ),
+            },
+        ),
+        Err(e) => (
+            tool_call_id,
+            ToolResult {
+                success: false,
+                security_evaluation: None,
+                restart_requested: false,
+                error_category: None,
+                content: format!("[spawn_subagent] ❌ 子代理执行出错: {}", e),
+            },
+        ),
     }
 }
 

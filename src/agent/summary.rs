@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent::token_counter::TokenCounter;
 use crate::llm::{LlmClient, LlmMessage, LlmResponse};
+use crate::utils::atomic_write::atomic_write;
 use crate::utils::error::AppError;
 
 /// 每个阶段聚合的轮次数。
@@ -130,7 +131,7 @@ impl SummaryStore {
             "---\nid: phase-{}\ntype: phase-summary\nphase: {}\nround_start: {}\nround_end: {}\n---\n",
             phase, phase, round_start, round_end
         );
-        std::fs::write(&path, format!("{}\n{}", frontmatter, content)).map_err(AppError::Io)?;
+        atomic_write(&path, format!("{}\n{}", frontmatter, content).as_bytes())?;
         Ok(())
     }
 
@@ -138,7 +139,7 @@ impl SummaryStore {
     pub fn save_final(&self, content: &str) -> Result<(), AppError> {
         let path = self.root.join(FINAL_FILE);
         let frontmatter = "---\nid: final\ntype: session-summary\ntitle: 会话摘要\n---\n";
-        std::fs::write(&path, format!("{}\n{}", frontmatter, content)).map_err(AppError::Io)?;
+        atomic_write(&path, format!("{}\n{}", frontmatter, content).as_bytes())?;
         Ok(())
     }
 
@@ -311,7 +312,7 @@ impl SummaryStore {
         content: &str,
     ) -> Result<(), AppError> {
         let frontmatter = format!("---\nid: {}-{}\ntype: {}-summary\n---\n", kind, num, kind);
-        std::fs::write(path, format!("{}\n{}", frontmatter, content)).map_err(AppError::Io)?;
+        atomic_write(path, format!("{}\n{}", frontmatter, content).as_bytes())?;
         Ok(())
     }
 }

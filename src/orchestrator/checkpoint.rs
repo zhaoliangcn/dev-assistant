@@ -19,6 +19,7 @@ use crate::agent::summary::SummaryStore;
 use crate::agent::token_counter::TokenCounter;
 use crate::agent::ContextManager;
 use crate::llm::LlmMessage;
+use crate::utils::atomic_write::atomic_write;
 use crate::utils::error::AppError;
 
 /// 检查点版本号（用于向后兼容）
@@ -231,7 +232,7 @@ impl CheckpointManager {
             AppError::Config(format!("Failed to serialize checkpoint: {}", e))
         })?;
 
-        fs::write(&latest_path, &json).map_err(|e| {
+        atomic_write(&latest_path, json.as_bytes()).map_err(|e| {
             AppError::Io(std::io::Error::other(
                 format!("Failed to write checkpoint '{}': {}",
                     latest_path.display(), e),

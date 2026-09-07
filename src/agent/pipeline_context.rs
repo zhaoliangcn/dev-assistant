@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+use crate::utils::atomic_write::atomic_write;
 use crate::utils::error::AppError;
 
 /// 阶段执行状态
@@ -203,9 +204,7 @@ impl PipelineContextStore {
                 AppError::Io(std::io::Error::new(e.kind(), format!("创建目录失败: {}", e)))
             })?;
         }
-        fs::write(&path, &data).map_err(|e| {
-            AppError::Io(std::io::Error::new(e.kind(), format!("写入 pipeline context 失败: {}", e)))
-        })?;
+        atomic_write(&path, data.as_bytes())?;
         Ok(())
     }
 
@@ -239,9 +238,7 @@ impl PipelineContextStore {
         let data = serde_json::to_string_pretty(context).map_err(|e| {
             AppError::Config(format!("序列化阶段上下文失败: {}", e))
         })?;
-        fs::write(&path, &data).map_err(|e| {
-            AppError::Io(std::io::Error::new(e.kind(), format!("写入阶段上下文失败: {}", e)))
-        })?;
+        atomic_write(&path, data.as_bytes())?;
 
         info!(
             "Pipeline stage {} ({}) context saved to {}",
@@ -275,9 +272,7 @@ impl PipelineContextStore {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        fs::write(&path, &data).map_err(|e| {
-            AppError::Io(std::io::Error::new(e.kind(), format!("写入 checkpoint 失败: {}", e)))
-        })?;
+        atomic_write(&path, data.as_bytes())?;
         Ok(())
     }
 

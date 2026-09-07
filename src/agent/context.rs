@@ -3,6 +3,7 @@ use crate::agent::display::DisplayBuffer;
 use crate::agent::history::ConversationHistory;
 use crate::agent::summary::SummaryStore;
 use crate::llm::{LlmMessage, ToolCall};
+use crate::utils::atomic_write::atomic_write;
 use crate::utils::error::AppError;
 use crate::utils::message_level::MessageLevel;
 use serde::{Deserialize, Serialize};
@@ -351,7 +352,7 @@ impl ContextManager {
     pub fn save_state(&self, path: &std::path::Path) -> Result<(), AppError> {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| AppError::Config(format!("Failed to serialize state: {}", e)))?;
-        std::fs::write(path, json).map_err(AppError::Io)?;
+        atomic_write(path, json.as_bytes())?;
         Ok(())
     }
 

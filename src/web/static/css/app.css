@@ -4,14 +4,51 @@
 
 /* ── CSS 变量（主题色） ── */
 
+/* ── 语义色 token：浅色为基准值（无条件定义），暗色块只做覆盖 ── */
+
 :root {
+    /* 用户消息气泡 */
     --message-user-bg: #e3f2fd;
     --message-user-color: #1a1a2e;
     --message-user-border: #bbdefb;
     --status-thinking-color: #6aaef2;
+
+    /* 骨架屏 */
+    --skeleton-bg: var(--pico-muted-border-color);
+    --skeleton-highlight: var(--pico-muted-border-color);
+
+    /* 错误 Toast（语义错误色，与强调色分开） */
+    --toast-bg: #fef2f2;
+    --toast-border: #fecaca;
+    --toast-text: #991b1b;
+
+    /* Diff 视图（语义成功/错误色，与强调色分开） */
+    --diff-add-bg: rgba(40, 167, 69, 0.15);
+    --diff-del-bg: rgba(220, 53, 69, 0.15);
+    --diff-add-fg: #21a453;
+    --diff-del-fg: #d33;
+
+    /* 代码块运行结果 */
+    --run-success-bg: #d1fae5;
+    --run-success-fg: #065f46;
+    --run-success-border: #10b981;
+    --run-error-bg: #fee2e2;
+    --run-error-fg: #991b1b;
+    --run-error-border: #ef4444;
+
+    /* 状态点（在线/离线） */
+    --status-online: #22c55e;
+    --status-offline: #ef4444;
+
+    /* 运行按钮（语义成功色） */
+    --run-btn-bg: #10b981;
+    --run-btn-bg-hover: #059669;
+
+    /* 高对比/焦点色（暗色下加亮） */
+    --focus-color: var(--pico-primary);
 }
 
-/* 暗色模式适配：使用 Pico CSS 的 data-theme 属性 */
+/* 暗色模式适配：使用 Pico CSS 的 data-theme 属性（只覆盖与浅色不同的值） */
 [data-theme="dark"] {
     --message-user-bg: #1a3a5c;
     --message-user-color: #e0e0e0;
@@ -22,13 +59,17 @@
     --toast-bg: #3b1111;
     --toast-border: #7f1d1d;
     --toast-text: #fecaca;
-    --search-bg: #1e1e2e;
-    --search-border: #3a3a4a;
-    --sidebar-hover-bg: #2a2a3a;
-    --file-row-hover-bg: #2a2a3a;
     --diff-add-bg: rgba(40, 167, 69, 0.25);
     --diff-del-bg: rgba(220, 53, 69, 0.25);
-    --code-block-header-bg: #2a2a3a;
+    --diff-add-fg: #6fcf97;
+    --diff-del-fg: #ff7b7b;
+    --run-success-bg: #064e3b;
+    --run-success-fg: #6ee7b7;
+    --run-success-border: #10b981;
+    --run-error-bg: #3b1111;
+    --run-error-fg: #fecaca;
+    --run-error-border: #ef4444;
+    --focus-color: #60a5fa;
 }
 
 /* ── 布局 ── */
@@ -193,9 +234,27 @@ footer {
     background: var(--pico-card-background-color);
     border: 1px solid var(--pico-muted-border-color);
     max-width: 85%;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
     /* C5: 浏览器级廉价虚拟化 —— 视口外消息跳过布局/绘制 */
     content-visibility: auto;
     contain-intrinsic-size: auto 96px;
+    animation: message-in 0.2s ease-out;
+}
+
+.message:hover {
+    box-shadow: var(--shadow-md);
+}
+
+@keyframes message-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* C4: 会话事件被 limit 裁剪时的"加载更多"横幅 */
@@ -223,17 +282,19 @@ footer {
 
 .message.user {
     align-self: flex-end;
-    background: var(--message-user-bg, #e3f2fd);
-    color: var(--message-user-color, #1a1a2e);
-    border-color: var(--message-user-border, #bbdefb);
+    background: linear-gradient(135deg, var(--message-user-bg), color-mix(in srgb, var(--message-user-bg) 88%, #ffffff));
+    color: var(--message-user-color);
+    border-color: var(--message-user-border);
 }
 
 .message.user .message-content {
-    color: var(--message-user-color, #1a1a2e);
+    color: var(--message-user-color);
 }
 
 .message.assistant {
     align-self: flex-start;
+    background: linear-gradient(180deg, var(--pico-card-background-color), color-mix(in srgb, var(--pico-card-background-color) 96%, var(--pico-muted-color)));
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .message.tool-result {
@@ -364,7 +425,7 @@ footer {
 .run-btn {
     font-size: 0.75em;
     padding: 0.125rem 0.5rem;
-    background: #10b981;
+    background: var(--run-btn-bg);
     color: #fff;
     border: none;
     border-radius: 0.25rem;
@@ -375,7 +436,7 @@ footer {
 }
 
 .run-btn:hover {
-    background: #059669;
+    background: var(--run-btn-bg-hover);
 }
 
 .code-run-output {
@@ -389,27 +450,27 @@ footer {
 }
 
 .code-run-success {
-    background: #d1fae5;
-    color: #065f46;
-    border: 1px solid #10b981;
+    background: var(--run-success-bg);
+    color: var(--run-success-fg);
+    border: 1px solid var(--run-success-border);
 }
 
 .code-run-error {
-    background: #fee2e2;
-    color: #991b1b;
-    border: 1px solid #ef4444;
+    background: var(--run-error-bg);
+    color: var(--run-error-fg);
+    border: 1px solid var(--run-error-border);
 }
 
 [data-theme="dark"] .code-run-success {
-    background: #064e3b;
-    color: #6ee7b7;
-    border-color: #10b981;
+    background: var(--run-success-bg);
+    color: var(--run-success-fg);
+    border-color: var(--run-success-border);
 }
 
 [data-theme="dark"] .code-run-error {
-    background: #3b1111;
-    color: #fecaca;
-    border-color: #ef4444;
+    background: var(--run-error-bg);
+    color: var(--run-error-fg);
+    border-color: var(--run-error-border);
 }
 
 .code-block pre {
@@ -523,7 +584,7 @@ footer {
 }
 
 [data-theme="dark"] .thinking {
-    --status-thinking-color: #6aaef2;
+    --status-thinking-color: var(--status-thinking-color);
 }
 
 .spinner {
@@ -585,20 +646,20 @@ footer {
 
 .search-toggle-btn.search-active {
     background: var(--pico-primary);
-    color: var(--pico-primary-inverse, #fff);
+    color: var(--pico-primary-inverse);
     border-color: var(--pico-primary);
 }
 
 /* 错误消息样式 */
 .message.error-message {
     align-self: center;
-    background: #fef2f2;
-    border-color: #fecaca;
+    background: var(--toast-bg);
+    border-color: var(--toast-border);
 }
 
 [data-theme="dark"] .message.error-message {
-    background: #3b1111;
-    border-color: #7f1d1d;
+    background: var(--toast-bg);
+    border-color: var(--toast-border);
 }
 
 /* 重试按钮 */
@@ -607,7 +668,7 @@ footer {
     padding: 0.25rem 0.75rem;
     font-size: 0.8em;
     background: var(--pico-primary);
-    color: var(--pico-primary-inverse, #fff);
+    color: var(--pico-primary-inverse);
     border-color: var(--pico-primary);
 }
 
@@ -669,11 +730,11 @@ footer {
 }
 
 .status-indicator.online .status-dot {
-    background: #22c55e;
+    background: var(--status-online);
 }
 
 .status-indicator.offline .status-dot {
-    background: #ef4444;
+    background: var(--status-offline);
 }
 
 /* ── 响应式 ── */
@@ -843,13 +904,13 @@ footer {
     width: 2rem;
     height: 2rem;
     border-radius: 50%;
-    background: var(--skeleton-bg, var(--pico-muted-border-color));
+    background: var(--skeleton-bg);
     flex-shrink: 0;
     opacity: 0.5;
 }
 
 [data-theme="dark"] .skeleton-avatar {
-    background: var(--skeleton-highlight, #3a3a4a);
+    background: var(--skeleton-highlight);
 }
 
 .skeleton-body {
@@ -879,12 +940,12 @@ footer {
 .skeleton-line {
     height: 0.625rem;
     border-radius: 0.25rem;
-    background: var(--skeleton-bg, var(--pico-muted-border-color));
+    background: var(--skeleton-bg);
     opacity: 0.6;
 }
 
 [data-theme="dark"] .skeleton-line {
-    background: var(--skeleton-highlight, #3a3a4a);
+    background: var(--skeleton-highlight);
 }
 
 .skeleton-line-short {
@@ -1040,9 +1101,30 @@ footer {
 }
 
 .session-item.session-active {
-    background: var(--pico-primary);
-    color: var(--pico-primary-inverse, #fff);
+    background: linear-gradient(90deg, var(--pico-primary), color-mix(in srgb, var(--pico-primary) 80%, transparent));
+    border-left: 3px solid color-mix(in srgb, var(--pico-primary) 120%, #000);
 }
+
+.session-item.session-active .session-item-title {
+    color: var(--pico-primary-inverse);
+}
+
+.session-item.session-active .session-item-meta {
+    color: var(--pico-primary-inverse);
+    opacity: 0.85;
+}
+
+.session-item .session-delete {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.session-item:hover .session-delete,
+.session-item:focus-within .session-delete {
+    opacity: 1;
+}
+
+/* ── 空状态美化 ── */
 
 .session-item-main {
     min-width: 0;
@@ -1129,17 +1211,17 @@ footer {
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.625rem 0.875rem;
-    background: var(--toast-bg, #fef2f2);
-    border: 1px solid var(--toast-border, #fecaca);
+    background: var(--toast-bg);
+    border: 1px solid var(--toast-border);
     border-radius: 0.375rem;
-    color: var(--toast-text, #991b1b);
+    color: var(--toast-text);
     font-size: 0.85em;
 }
 
 [data-theme="dark"] .connection-error-toast {
-    background: var(--toast-bg, #3b1111);
-    border-color: var(--toast-border, #7f1d1d);
-    color: var(--toast-text, #fecaca);
+    background: var(--toast-bg);
+    border-color: var(--toast-border);
+    color: var(--toast-text);
 }
 
 /* ── 搜索面板（P2） ── */
@@ -1282,7 +1364,7 @@ footer {
 
 .file-row.file-active {
     background: var(--pico-primary);
-    color: var(--pico-primary-inverse, #fff);
+    color: var(--pico-primary-inverse);
 }
 
 .file-size {
@@ -1330,11 +1412,11 @@ footer {
 .file-content-actions .view-active {
     background: var(--pico-primary);
     border-color: var(--pico-primary);
-    color: var(--pico-primary-inverse, #fff);
+    color: var(--pico-primary-inverse);
 }
 
 .file-content-actions .view-active:hover {
-    color: var(--pico-primary-inverse, #fff);
+    color: var(--pico-primary-inverse);
 }
 
 .file-content-actions .copy-btn:disabled {
@@ -1424,8 +1506,8 @@ footer {
     z-index: 1;
 }
 
-.diff-stat-add { color: var(--diff-add-fg, #21a453); font-weight: 600; }
-.diff-stat-del { color: var(--diff-del-fg, #d33); font-weight: 600; }
+.diff-stat-add { color: var(--diff-add-fg); font-weight: 600; }
+.diff-stat-del { color: var(--diff-del-fg); font-weight: 600; }
 .diff-stat-ctx { color: var(--pico-muted-color); }
 
 .diff-line {
@@ -1449,13 +1531,13 @@ footer {
 }
 
 .diff-add {
-    background: rgba(40, 167, 69, 0.15);
-    color: var(--diff-add-fg, #21a453);
+    background: var(--diff-add-bg);
+    color: var(--diff-add-fg);
 }
 
 .diff-del {
-    background: rgba(220, 53, 69, 0.15);
-    color: var(--diff-del-fg, #d33);
+    background: var(--diff-del-bg);
+    color: var(--diff-del-fg);
 }
 
 .diff-ctx {
@@ -1463,13 +1545,13 @@ footer {
 }
 
 [data-theme="dark"] .diff-add {
-    background: rgba(40, 167, 69, 0.25);
-    color: #6fcf97;
+    background: var(--diff-add-bg);
+    color: var(--diff-add-fg);
 }
 
 [data-theme="dark"] .diff-del {
-    background: rgba(220, 53, 69, 0.25);
-    color: #ff7b7b;
+    background: var(--diff-del-bg);
+    color: var(--diff-del-fg);
 }
 
 @media (max-width: 768px) {
@@ -1550,7 +1632,7 @@ footer {
     padding: 0.5rem 1rem;
     font-size: 0.85em;
     background: var(--pico-primary);
-    color: var(--pico-primary-inverse, #fff);
+    color: var(--pico-primary-inverse);
     border: none;
     border-radius: 0.375rem;
     cursor: pointer;
@@ -1805,7 +1887,7 @@ footer {
     padding: 0.0625rem 0.375rem;
     border-radius: 0.75rem;
     background: var(--pico-primary);
-    color: var(--pico-primary-inverse, #fff);
+    color: var(--pico-primary-inverse);
 }
 
 .model-item-info small {
@@ -1956,7 +2038,7 @@ footer {
     left: 0;
     padding: 8px 16px;
     background: var(--pico-primary);
-    color: var(--pico-primary-inverse, #fff);
+    color: var(--pico-primary-inverse);
     text-decoration: none;
     z-index: 100;
     border-radius: 0 0 4px 0;
@@ -2013,7 +2095,7 @@ select:focus-visible {
 
 /* 暗色模式下的焦点指示器 */
 [data-theme="dark"] :focus-visible {
-    outline-color: #60a5fa;
+    outline-color: var(--focus-color);
 }
 
 /* 工具结果折叠区域可访问性 */
@@ -2033,33 +2115,7 @@ details[aria-expanded] summary::-webkit-details-marker {
    视觉美化优化块
    ============================================================ */
 
-/* ── 消息入场动效与卡片质感 ── */
-
-@keyframes message-in {
-    from {
-        opacity: 0;
-        transform: translateY(6px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.message {
-    animation: message-in 0.2s ease-out;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.message.user {
-    background: linear-gradient(135deg, var(--message-user-bg, #e3f2fd), var(--message-user-bg, #e3f2fd) 85%);
-}
-
-.message.assistant {
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-/* 流式生成中的光标动画 */
+/* ── 流式生成中的光标动画 ── */
 .message.streaming .message-content::after {
     content: '▌';
     display: inline-block;
@@ -2080,30 +2136,6 @@ details[aria-expanded] summary::-webkit-details-marker {
 .copy-btn,
 .session-new {
     transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-}
-
-.session-item.session-active {
-    background: linear-gradient(90deg, var(--pico-primary), color-mix(in srgb, var(--pico-primary) 80%, transparent));
-    border-left: 3px solid color-mix(in srgb, var(--pico-primary) 120%, #000);
-}
-
-.session-item.session-active .session-item-title {
-    color: var(--pico-primary-inverse, #fff);
-}
-
-.session-item.session-active .session-item-meta {
-    color: var(--pico-primary-inverse, #fff);
-    opacity: 0.85;
-}
-
-.session-item .session-delete {
-    opacity: 0;
-    transition: opacity 0.15s ease;
-}
-
-.session-item:hover .session-delete,
-.session-item:focus-within .session-delete {
-    opacity: 1;
 }
 
 /* ── 空状态美化 ── */
@@ -2159,15 +2191,25 @@ details[aria-expanded] summary::-webkit-details-marker {
    视觉美化增强块（V2）
    ============================================================ */
 
-/* ── 设计令牌：渐变强调色与阴影层次 ── */
+/* ── 设计令牌：渐变强调色与阴影层次（渐变随 --pico-primary 跟随） ── */
 
 :root {
-    --accent-gradient: linear-gradient(135deg, #3b82f6, #8b5cf6 55%, #ec4899);
-    --accent-gradient-soft: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(139, 92, 246, 0.12));
+    /* 强调色渐变：从主题色向同色系更亮/更深偏移，保持与自定义主题色联动 */
+    --accent-gradient: linear-gradient(135deg,
+        var(--pico-primary),
+        color-mix(in srgb, var(--pico-primary) 75%, #8b5cf6) 45%,
+        color-mix(in srgb, var(--pico-primary) 50%, #ec4899) 80%,
+        #ec4899);
+    --accent-gradient-soft: linear-gradient(135deg,
+        color-mix(in srgb, var(--pico-primary) 12%, transparent),
+        color-mix(in srgb, #8b5cf6 12%, transparent));
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.04);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
     --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.06);
-    --avatar-bg-user: linear-gradient(135deg, #3b82f6, #2563eb);
+    /* 头像：用户侧偏主题色，助手侧偏紫色 */
+    --avatar-bg-user: linear-gradient(135deg,
+        var(--pico-primary),
+        color-mix(in srgb, var(--pico-primary) 90%, #1d4ed8));
     --avatar-bg-assistant: linear-gradient(135deg, #8b5cf6, #6d28d9);
     --header-blur-bg: color-mix(in srgb, var(--pico-background-color) 78%, transparent);
 }
@@ -2176,7 +2218,9 @@ details[aria-expanded] summary::-webkit-details-marker {
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.55), 0 4px 8px rgba(0, 0, 0, 0.35);
-    --accent-gradient-soft: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15));
+    --accent-gradient-soft: linear-gradient(135deg,
+        color-mix(in srgb, var(--pico-primary) 15%, transparent),
+        color-mix(in srgb, #8b5cf6 15%, transparent));
 }
 
 /* ── 主题切换过渡（避免生硬跳变） ── */
@@ -2295,31 +2339,6 @@ header nav ul li strong a {
     background: var(--avatar-bg-assistant);
 }
 
-/* ── 消息气泡质感：层次阴影 + 渐变 ── */
-
-.message {
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-.message:hover {
-    box-shadow: var(--shadow-md);
-}
-
-.message.user {
-    background: linear-gradient(135deg, var(--message-user-bg, #e3f2fd), color-mix(in srgb, var(--message-user-bg, #e3f2fd) 88%, #ffffff));
-}
-
-.message.assistant {
-    background: linear-gradient(180deg, var(--pico-card-background-color), color-mix(in srgb, var(--pico-card-background-color) 96%, var(--pico-muted-color)));
-}
-
-/* 流式生成：主色呼吸光晕 */
-.message.streaming {
-    border-left: 3px solid var(--pico-primary);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--pico-primary) 25%, transparent), var(--shadow-md);
-}
-
 /* ── 消息头部角色徽标 ── */
 
 .message-role {
@@ -2379,17 +2398,17 @@ header nav ul li strong a {
     gap: 0.5rem;
     margin-top: 0.375rem;
     font-size: 0.72em;
-    color: var(--pico-muted-color);
-    opacity: 0.75;
+    color: var(--pico-color);
 }
 
 .input-hint kbd {
     display: inline-block;
     padding: 0.0625rem 0.375rem;
-    border: 1px solid var(--pico-muted-border-color);
+    border: 1px solid #4a4a52;
     border-bottom-width: 2px;
     border-radius: 0.25rem;
-    background: var(--pico-card-sectioning-background-color);
+    background: #3a3a42;
+    color: #e8e8ec;
     font-family: var(--pico-font-family-monospace, monospace);
     font-size: 0.9em;
 }

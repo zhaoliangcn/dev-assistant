@@ -116,6 +116,15 @@ const TRANSLATIONS = {
         shortcut_focus: 'Ctrl+/ 聚焦输入',
         shortcut_new: 'Ctrl+N 新对话',
         shortcut_copy: 'Ctrl+Shift+C 复制最后一条回复',
+        // 项目目录
+        switch_project: '选择项目目录',
+        project_dir_placeholder: '粘贴或输入项目目录路径...',
+        project_dir_invalid: '无效路径，请输入绝对路径或相对路径（相对于服务器工作目录）',
+        project_dir_rejected: '项目目录超出服务器工作目录范围（{0}）',
+        project_dir_loading: '正在切换到项目目录…',
+        welcome_select_project: '选择或输入项目目录后开始对话',
+        current_project: '当前项目',
+        open_project_picker: '📂 {0}',
     },
     en: {
         app_name: 'Dev-Assistant',
@@ -214,6 +223,15 @@ performance: 'Performance',
 	        shortcut_focus: 'Ctrl+/ Focus Input',
         shortcut_new: 'Ctrl+N New Chat',
         shortcut_copy: 'Ctrl+Shift+C Copy Last Reply',
+        // Project directory
+        switch_project: 'Select Project',
+        project_dir_placeholder: 'Paste or type a project path...',
+        project_dir_invalid: 'Invalid path. Please provide an absolute path or a path relative to the server working directory.',
+        project_dir_rejected: 'Project directory is outside server working directory ({0})',
+        project_dir_loading: 'Switching project directory…',
+        welcome_select_project: 'Select a project directory to start chatting',
+        current_project: 'Current project',
+        open_project_picker: '📂 {0}',
     }
 };
 

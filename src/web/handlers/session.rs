@@ -97,18 +97,28 @@ fn session_path(working_dir: &Path, id: &str) -> PathBuf {
         .join(format!("session_{}.jsonl", safe_id))
 }
 
+/// 当前生效的项目目录（会话 store 的隔离根）。
+///
+/// 由 `AppState.current_project` 承载，WebSocket 建连时随 `?project_dir=` 更新。
+/// 所有会话 handler 都基于它读写，确保「列表/详情/删除/改名/导出」
+/// 与当前 WS 会话所在项目一致，实现子目录级别的 store 隔离。
+async fn project_dir(state: &AppState) -> PathBuf {
+    state.current_project.read().await.clone()
+}
+
 /// 获取会话列表。
 ///
 /// `GET /api/sessions`
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
 ) -> Json<Vec<SessionSummary>> {
-    let Ok(paths) = SessionStore::list_sessions(&state.working_dir) else {
+    let proj = project_dir(&state).await;
+    let Ok(paths) = SessionStore::list_sessions(&proj) else {
         return Json(Vec::new());
     };
 
     let mut sessions = Vec::new();
-    let titles = load_titles(&state.working_dir);
+    let titles = load_titles(&proj);
     for path in paths {
         let id = session_id_from_path(&path);
         // 廉价扫描：仅逐行子串计数 + 首行解析 timestamp，
@@ -141,7 +151,8 @@ pub async fn get_session(
     AxumPath(id): AxumPath<String>,
     Query(query): Query<GetSessionQuery>,
 ) -> Json<SessionDetail> {
-    let path = session_path(&state.working_dir, &id);
+    let proj = project_dir(&state).await;
+    let path = session_path(&proj, &id);
     let events = if path.exists() {
         SessionStore::read_events(&path).unwrap_or_default()
     } else {
@@ -178,13 +189,14 @@ pub async fn delete_session(
     State(state): State<Arc<AppState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Json<serde_json::Value> {
-    let path = session_path(&state.working_dir, &id);
+    let proj = project_dir(&state).await;
+    let path = session_path(&proj, &id);
     match std::fs::remove_file(&path) {
         Ok(_) => {
             // 同步清理标题元数据
-            let mut titles = load_titles(&state.working_dir);
+            let mut titles = load_titles(&proj);
             titles.remove(&id);
-            let _ = save_titles(&state.working_dir, &titles);
+            let _ = save_titles(&proj, &titles);
             Json(serde_json::json!({"deleted": true, "id": id}))
         }
         Err(e) => Json(serde_json::json!({
@@ -203,8 +215,10 @@ pub async fn rename_session(
     AxumPath(id): AxumPath<String>,
     Json(body): Json<RenameRequest>,
 ) -> Json<serde_json::Value> {
+    let proj = project_dir(&state).await;
+
     // 校验会话存在
-    let path = session_path(&state.working_dir, &id);
+    let path = session_path(&proj, &id);
     if !path.exists() {
         return Json(serde_json::json!({
             "success": false,
@@ -223,9 +237,9 @@ pub async fn rename_session(
         }));
     }
 
-    let mut titles = load_titles(&state.working_dir);
+    let mut titles = load_titles(&proj);
     titles.insert(id.clone(), title.clone());
-    if save_titles(&state.working_dir, &titles) {
+    if save_titles(&proj, &titles) {
         Json(serde_json::json!({
             "success": true,
             "id": id,
@@ -257,7 +271,8 @@ pub async fn export_session(
     AxumPath(id): AxumPath<String>,
     Query(query): Query<ExportQuery>,
 ) -> impl IntoResponse {
-    let path = session_path(&state.working_dir, &id);
+    let proj = project_dir(&state).await;
+    let path = session_path(&proj, &id);
     if !path.exists() {
         return (
             axum::http::StatusCode::NOT_FOUND,
@@ -271,7 +286,7 @@ pub async fn export_session(
     }
     let events = SessionStore::read_events(&path).unwrap_or_default();
 
-    let titles = load_titles(&state.working_dir);
+    let titles = load_titles(&proj);
     let title = titles.get(&id).cloned().unwrap_or_default();
 
     let format = query.format.as_deref().unwrap_or("md");

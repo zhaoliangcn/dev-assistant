@@ -74,6 +74,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, override_project
         state.working_dir.clone()
     };
 
+    // 同步"当前项目目录"，让会话列表/详情等 handler 读取隔离 store 时保持一致
+    {
+        let mut guard = state.current_project.write().await;
+        *guard = target_dir.clone();
+    }
+
     // 创建会话级别的 SessionStore
     let session_store = SessionStore::create(&target_dir)
         .map_err(|e| {

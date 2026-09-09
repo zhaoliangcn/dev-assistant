@@ -395,6 +395,13 @@ function chatApp() {
                 self.setConnected(true);
                 self.setConnectionStatus('connected');
                 self.reconnectCount = 0;
+                // 项目切换后：后端 current_project 已指向新目录，重拉当前项目的会话列表
+                if (self._newProjectConnected) {
+                    self._newProjectConnected = false;
+                    if (self.$store && self.$store.sessions) {
+                        self.$store.sessions.load();
+                    }
+                }
                 // 刷新重试时暂存的消息（retryLastAction 在建连前暂存）
                 if (self._pendingRetryMessage) {
                     const msg = self._pendingRetryMessage;
@@ -609,14 +616,15 @@ function chatApp() {
             this.connectionError = null;
             this.projectDirError = null;
             this.projectDir = dir;
-            // 提示用户：后端正在加载
-            const hint = this.$store.i18n.project_dir_loading || `📂 正在切换到 ${dir}…`;
+            // 提示用户：正在切换到该项目目录
             this.addMessage('system', `📂 ${dir}`);
             this.scrollToBottomLater();
             // 断开旧连接，触发新的 WS 建连（携带 project_dir 查询参数）
             this._pendingRetryMessage = null;
             this.connected = false;
             this.connectionStatus = 'connecting';
+            // 标记：待新连接就绪后重拉历史会话（当前项目已切换）
+            this._newProjectConnected = true;
             if (wsInstance) {
                 wsInstance.onclose = null;
                 wsInstance.onerror = null;
@@ -625,6 +633,8 @@ function chatApp() {
                 }
             }
             this.connectWS(dir);
+            // 切换即结束旧会话的生成状态；新连接建立后可立即发消息
+            this.busy = false;
         },
 
         // 浏览文件夹选择（可选增强：部分浏览器支持 directory picker）

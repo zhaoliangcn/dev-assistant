@@ -245,6 +245,7 @@ impl LlmClient {
             model: config.model.clone(),
             temperature: Some(config.temperature),
             max_output_tokens: Some(config.max_output_tokens),
+            reasoning_effort: None,
         };
         Self::from_configs(vec![provider_config])
     }
@@ -318,6 +319,10 @@ impl LlmClient {
                 // 仅当用户未填新密钥且未要求清空时，沿用已有密钥
                 if !clear_api_key && effective.api_key.as_deref().unwrap_or("").is_empty() {
                     effective.api_key = existing.api_key.clone();
+                }
+                // 表单未提交推理力度（None）时沿用已有配置，避免 Web 端编辑丢档
+                if effective.reasoning_effort.is_none() {
+                    effective.reasoning_effort = existing.reasoning_effort.clone();
                 }
             }
         }
@@ -422,6 +427,7 @@ impl LlmClient {
                 tools: Some(tools.clone()),
                 temperature: round_temperature(cfg.temperature.unwrap_or(0.2)),
                 max_output_tokens: cfg.max_output_tokens,
+                reasoning_effort: cfg.reasoning_effort.clone(),
             };
 
             match retry_with_backoff(|| provider.chat(&self.http_client, &request)).await {
@@ -494,6 +500,7 @@ impl LlmClient {
                 tools: Some(tools.clone()),
                 temperature: round_temperature(cfg.temperature.unwrap_or(0.2)),
                 max_output_tokens: cfg.max_output_tokens,
+                reasoning_effort: cfg.reasoning_effort.clone(),
             };
 
             match retry_with_backoff(|| provider.chat_stream(&self.http_client, &request)).await {
@@ -532,6 +539,7 @@ impl LlmClient {
             model: config.model,
             temperature: Some(config.temperature),
             max_output_tokens: Some(config.max_output_tokens),
+            reasoning_effort: None,
         }])
         .expect("Failed to create LlmClient from legacy config")
     }
@@ -551,6 +559,7 @@ mod tests {
                 model: "gpt-4o".to_string(),
                 temperature: Some(0.0),
                 max_output_tokens: Some(100),
+                reasoning_effort: None,
             },
             ProviderConfig {
                 name: "model-b".to_string(),
@@ -560,6 +569,7 @@ mod tests {
                 model: "claude-3".to_string(),
                 temperature: Some(0.5),
                 max_output_tokens: Some(200),
+                reasoning_effort: None,
             },
         ])
         .unwrap()
@@ -627,6 +637,7 @@ mod tests {
             model: "test-model".to_string(),
             temperature: Some(0.0),
             max_output_tokens: Some(100),
+            reasoning_effort: None,
         }])
         .unwrap();
 

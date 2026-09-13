@@ -6,6 +6,12 @@ use unicode_width::UnicodeWidthStr;
 /// 用于计算续行缩进与可用宽度，避免把转义序列计入宽度导致错位。
 const ASSISTANT_STREAM_PREFIX: &str = "🤖 助手: ";
 
+/// 流式思考区域的前缀（与助手区域同机制，独立清行）。
+const THINKING_STREAM_PREFIX: &str = "💭 思考: ";
+
+/// 思考区域尾部窗口：只实时展示推理内容的最后 N 个字符，防止长思考刷屏。
+const THINKING_TAIL_CHARS: usize = 140;
+
 // ---------------------------------------------------------------------------
 // 交互模式：消息暂存到缓冲区，run() 返回后再写入 ContextManager
 // ---------------------------------------------------------------------------
@@ -29,6 +35,11 @@ pub struct UIMessageOutput {
     token_usage: Option<(usize, usize, usize)>,
     /// 缓存的流式输出前缀（含主题色），避免每次渲染都获取主题锁
     stream_prefix: String,
+    /// 思考流式区域前缀（缓存）
+    thinking_prefix: String,
+    /// 上一次思考流式渲染的内容与占用行数（独立于助手流区域）
+    last_thinking_content: String,
+    last_thinking_lines: usize,
 }
 
 impl UIMessageOutput {
@@ -42,6 +53,9 @@ impl UIMessageOutput {
             pending_assistant_content: None,
             token_usage: None,
             stream_prefix: format!("{}🤖 助手:{} ", theme.tool_fg, crate::ui::theme::RESET),
+            thinking_prefix: format!("{}💭 思考:{} ", theme.tool_fg, crate::ui::theme::RESET),
+            last_thinking_content: String::new(),
+            last_thinking_lines: 0,
         }
     }
 
@@ -68,6 +82,9 @@ impl UIMessageOutput {
     /// 其他内容前先清空活跃流区域，让流式内容始终位于屏幕最底部。
     pub fn clear_active_stream(&mut self) {
         use std::io::Write;
+
+        // 一并结算思考区域，防止其在渲染其他内容后残留
+        self.finalize_thinking();
 
         if self.last_streamed_lines == 0 {
             return;
@@ -125,6 +142,9 @@ impl MessageOutput for UIMessageOutput {
     fn streaming_assistant(&mut self, content: &str, is_final: bool) {
         use std::io::Write;
 
+        // 助手流一旦开始，确保思考区域已结算（幂等防交错）
+        self.finalize_thinking();
+
         let mut stdout = std::io::stdout();
         let term_width = crate::ui::get_terminal_width().unwrap_or(80);
         // 流式显示保留实际换行符，正确计算终端占用行数
@@ -175,13 +195,76 @@ impl MessageOutput for UIMessageOutput {
             let _ = stdout.flush();
         }
     }
+
+    /// 流式输出思考模型的推理过程：在终端底部单独区域实时刷新"💭 思考"行。
+    ///
+    /// 只保留尾部窗口（[`THINKING_TAIL_CHARS`] 字符、压平换行），避免长思考刷屏；
+    /// `is_final=true` 时清除该区域（思考内容不进入正式消息流）。
+    fn streaming_thinking(&mut self, content: &str, is_final: bool) {
+        use std::io::Write;
+
+        if is_final {
+            self.finalize_thinking();
+            return;
+        }
+        if content == self.last_thinking_content {
+            return;
+        }
+
+        // 尾部窗口：取最后 THINKING_TAIL_CHARS 个字符并压平换行
+        let flat: String = content
+            .chars()
+            .rev()
+            .take(THINKING_TAIL_CHARS)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        let display: String = flat
+            .chars()
+            .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+            .collect();
+
+        let mut stdout = std::io::stdout();
+        let term_width = crate::ui::get_terminal_width().unwrap_or(80);
+        let prefix_width = THINKING_STREAM_PREFIX.width();
+        let cursor_width = " ▊".width();
+        let available = term_width.saturating_sub(prefix_width).max(1);
+        let visual_width: usize = display.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).sum();
+        let total_lines = (visual_width + cursor_width).div_ceil(available).max(1);
+
+        // 清除上一次思考区域占用的行
+        for _ in 0..self.last_thinking_lines.saturating_sub(1) {
+            let _ = write!(stdout, "\r\x1b[2K\x1b[A");
+        }
+        let _ = write!(stdout, "\r\x1b[2K");
+
+        self.last_thinking_content = content.to_string();
+        self.last_thinking_lines = total_lines;
+
+        let _ = write!(stdout, "{}{}", self.thinking_prefix, display);
+        let _ = write!(stdout, " ▊");
+        let _ = stdout.flush();
+    }
 }
 
-// ---------------------------------------------------------------------------
-// UIMessageOutput 自有方法（非 trait 方法）
-// ---------------------------------------------------------------------------
-
 impl UIMessageOutput {
+    /// 结算思考区域：清除其占用的终端行并重置状态（幂等）。
+    fn finalize_thinking(&mut self) {
+        use std::io::Write;
+        if self.last_thinking_lines == 0 {
+            self.last_thinking_content.clear();
+            return;
+        }
+        let mut stdout = std::io::stdout();
+        for _ in 0..self.last_thinking_lines.saturating_sub(1) {
+            let _ = write!(stdout, "\r\x1b[2K\x1b[A");
+        }
+        let _ = write!(stdout, "\r\x1b[2K");
+        let _ = stdout.flush();
+        self.last_thinking_content.clear();
+        self.last_thinking_lines = 0;
+    }
     /// 计算流式内容在终端上显示时占用的总行数。
     ///
     /// 流式渲染保留真实换行：第一行带前缀，后续行以相同宽度的空格缩进对齐，

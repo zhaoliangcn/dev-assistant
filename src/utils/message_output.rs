@@ -46,4 +46,12 @@ pub trait MessageOutput: Send + Sync {
     fn report_token_usage(&mut self, _prompt_tokens: usize, _completion_tokens: usize, _total_tokens: usize) {
         // 默认空实现
     }
+
+    /// 流式输出思考模型的推理过程增量（`reasoning_content` 累计内容）。
+    ///
+    /// 默认不展示（测试/后台等静默场景）；交互 CLI 覆盖为实时"💭 思考中"区域，
+    /// `is_final = true` 表示思考阶段结束、应清除该区域。
+    fn streaming_thinking(&mut self, _content: &str, _is_final: bool) {
+        // 默认空实现：不展示思考过程
+    }
 }

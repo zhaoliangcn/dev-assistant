@@ -20,6 +20,13 @@ pub struct ProviderConfig {
     /// 旧 TOML key `max_tokens` 仍作别名接受（向后兼容）。
     #[serde(default, alias = "max_tokens")]
     pub max_output_tokens: Option<usize>,
+    /// 思考模型的推理力度（透传 API 顶层 `reasoning_effort`）。
+    ///
+    /// 取值 `low` / `medium` / `high` / `none`（部分模型支持 `max`/`xhigh`）。
+    /// `None` 不发送该字段，由服务端用自身默认（多数为 medium/high）。
+    /// 仅 OpenAI 兼容 provider 发送；其他 provider 忽略此字段。
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 impl ProviderConfig {
@@ -99,6 +106,9 @@ pub struct LlmRequest {
     /// `None` 时由 provider 决定：OpenAI 兼容服务省略该字段，Anthropic 用安全默认（API 必填）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<usize>,
+    /// 推理力度；`None` 时 provider 省略该字段（服务端默认）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +135,10 @@ pub struct TokenUsage {
 pub enum LlmStreamEvent {
     /// 文本增量片段（content 为累计内容，非增量）。
     Chunk(String),
+    /// 思考模型推理过程增量（reasoning_content / thinking_content 字段）。
+    ///
+    /// 仅用于 UI 实时展示"模型在想什么"，**不**进入对话历史、不回传给 API。
+    Reasoning(String),
     /// 单个工具调用增量（首批 chunk 中就包含完整的 tool_calls 信息）。
     ToolCallDelta(ToolCall),
     /// Token 用量信息（来自流式响应的最后一块）。
@@ -162,6 +176,7 @@ mod tests {
             model: "gpt-4o".to_string(),
             temperature: Some(0.0),
             max_output_tokens: Some(100),
+            reasoning_effort: None,
         };
         config.resolve_env_vars();
         assert_eq!(config.api_key, Some("sk-test123".to_string()));
@@ -179,6 +194,7 @@ mod tests {
             model: "gpt-4o".to_string(),
             temperature: Some(0.0),
             max_output_tokens: Some(100),
+            reasoning_effort: None,
         };
         config.resolve_env_vars();
         assert_eq!(config.api_url, "http://${UNDEFINED_VAR}:8080");
@@ -262,6 +278,7 @@ mod tests {
             tools: Some(vec![]),
             temperature: 0.5,
             max_output_tokens: Some(100),
+            reasoning_effort: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"gpt-4o\""));

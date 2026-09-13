@@ -399,16 +399,25 @@ impl Agent {
                 .call_streaming(messages.clone(), tool_schemas.clone())
                 .await?;
             let mut assistant_content = String::new();
+            let mut reasoning_content = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
 
             // 循环读取流式事件
             while let Some(event_result) = stream.next().await {
                 match event_result {
                     Ok(LlmStreamEvent::Chunk(text)) => {
+                        // 回答流开始前先结算思考区域（UI 实现幂等，重复调用无副作用）
+                        output.streaming_thinking(&reasoning_content, true);
                         assistant_content.push_str(&text);
                         // 实时渲染流式内容
                         output.streaming_assistant(&assistant_content, false);
                         debug!(content = %text, "Received streaming chunk");
+                    }
+                    Ok(LlmStreamEvent::Reasoning(text)) => {
+                        // 思考模型推理增量：实时渲染"思考中"区域。
+                        // 仅展示用，不进对话历史、不回传 API（官方最佳实践）。
+                        reasoning_content.push_str(&text);
+                        output.streaming_thinking(&reasoning_content, false);
                     }
                     Ok(LlmStreamEvent::ToolCallDelta(tc)) => {
                         // 收集工具调用
@@ -422,6 +431,10 @@ impl Agent {
                         );
                     }
                     Ok(LlmStreamEvent::Done) => {
+                        // 思考区域收尾（仅本轮确实收到过思考增量时才结算）
+                        if !reasoning_content.is_empty() {
+                            output.streaming_thinking(&reasoning_content, true);
+                        }
                         // 最终渲染（移除闪烁光标）
                         output.streaming_assistant(&assistant_content, true);
                         debug!("Streaming complete");
@@ -1954,6 +1967,7 @@ mod tests {
             model: "test-model".to_string(),
             temperature: Some(0.0),
             max_output_tokens: Some(100),
+            reasoning_effort: None,
         };
         Arc::new(LlmClient::from_configs(vec![config]).unwrap())
     }

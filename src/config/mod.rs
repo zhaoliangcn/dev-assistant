@@ -83,6 +83,12 @@ pub fn load_models(explicit_path: Option<&Path>) -> Result<Vec<ProviderConfig>, 
         .and_then(|v| v.parse().ok())
         .or_else(|| env::var("LLM_MAX_TOKENS").ok().and_then(|v| v.parse().ok()));
 
+    // 推理力度：LLM_REASONING_EFFORT（low/medium/high/none）；未设 → None（服务端默认）
+    let reasoning_effort: Option<String> = env::var("LLM_REASONING_EFFORT")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+
     Ok(vec![ProviderConfig {
         name: "default".to_string(),
         provider,
@@ -91,6 +97,7 @@ pub fn load_models(explicit_path: Option<&Path>) -> Result<Vec<ProviderConfig>, 
         model,
         temperature: Some(temperature),
         max_output_tokens,
+        reasoning_effort,
     }])
 }
 

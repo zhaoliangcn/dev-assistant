@@ -65,6 +65,8 @@ pub struct ModelInfo {
     pub model: String,
     pub temperature: Option<f32>,
     pub max_output_tokens: Option<usize>,
+    /// 推理力度（low/medium/high/none），None = 服务端默认
+    pub reasoning_effort: Option<String>,
     pub active: bool,
 }
 
@@ -92,6 +94,8 @@ pub struct SaveModelRequest {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub max_output_tokens: Option<usize>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 /// 密钥脱敏：`sk-abc12345` → `****12345`（保留末尾 4 位），过短则仅显示 `****`。
@@ -123,6 +127,7 @@ pub async fn get_models(
                 model: c.model,
                 temperature: c.temperature,
                 max_output_tokens: c.max_output_tokens,
+                reasoning_effort: c.reasoning_effort,
             }
         })
         .collect();
@@ -163,6 +168,7 @@ pub async fn save_model(
         model: body.model.clone(),
         temperature: body.temperature,
         max_output_tokens: body.max_output_tokens,
+        reasoning_effort: body.reasoning_effort,
     };
 
     let result = match state.llm.add_or_update_config(&cfg, body.clear_api_key) {

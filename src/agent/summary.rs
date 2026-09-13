@@ -527,6 +527,7 @@ mod tests {
             model: "test-model".to_string(),
             temperature: Some(0.0),
             max_output_tokens: Some(100),
+            reasoning_effort: None,
         };
         let llm = LlmClient::from_configs(vec![config]).unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();

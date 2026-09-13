@@ -33,6 +33,13 @@ impl OpenAIProvider {
         if let Some(n) = request.max_output_tokens {
             body["max_tokens"] = serde_json::json!(n);
         }
+        // 推理力度：未配置则省略，由服务端默认（多数为 medium/high）。
+        // 商汤 SenseNova、DeepSeek、Kimi、GLM 等 OpenAI 兼容端点均支持顶层该字段。
+        if let Some(ref effort) = request.reasoning_effort {
+            if !effort.trim().is_empty() {
+                body["reasoning_effort"] = serde_json::json!(effort.trim());
+            }
+        }
         if stream {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
@@ -315,6 +322,17 @@ where
                     .and_then(|arr| arr.first())
                     .and_then(|c| c["delta"].as_object())
                 {
+                    // 处理思考模型推理增量：reasoning_content（OpenAI o系列/商汤/GLM/DeepSeek-flash 风格）
+                    // 与 thinking_content（DeepSeek-v4-pro/Kimi 风格）。仅用于 UI 展示，不进历史。
+                    let reasoning = delta
+                        .get("reasoning_content")
+                        .or_else(|| delta.get("thinking_content"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if !reasoning.is_empty() {
+                        yield LlmStreamEvent::Reasoning(reasoning.to_string());
+                    }
+
                     // 处理文本增量
             if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
                 if !content.is_empty() {

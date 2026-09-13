@@ -783,6 +783,7 @@ mod tests {
             model: "test-model".to_string(),
             temperature: Some(0.0),
             max_output_tokens: Some(100),
+            reasoning_effort: None,
         };
         let llm = Arc::new(crate::llm::LlmClient::from_configs(vec![config]).unwrap());
         let security = Arc::new(crate::security::SecurityPolicy::new(

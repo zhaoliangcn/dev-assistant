@@ -221,13 +221,24 @@ fn main() -> Result<(), AppError> {
 
     // Initialize tracing subscriber — logs go to stderr so they don't
     // interfere with the split-pane UI rendered on stdout.
-    let level = if cli.verbose {
-        tracing_subscriber::filter::LevelFilter::DEBUG
+    //
+    // 使用 EnvFilter 按 target 过滤，避免第三方库（rustyline/reqwest/hyper 等）
+    // 的 DEBUG 日志刷屏（如 rustyline 每次按键都会输出 VEOF/VINTR 调试日志）：
+    // - verbose 模式：仅本 crate（dev_assistant_rs）输出 DEBUG+，第三方库只保留 WARN+
+    // - 普通模式：全局 WARN+
+    // - 若设置了非空 RUST_LOG 环境变量，则优先使用其规则（空字符串视为未设置，
+    //   避免 EnvFilter::new("") 产生空过滤器导致所有日志被静默过滤）
+    let default_filter = if cli.verbose {
+        "dev_assistant_rs=debug,warn"
     } else {
-        tracing_subscriber::filter::LevelFilter::WARN
+        "warn"
+    };
+    let filter = match std::env::var("RUST_LOG") {
+        Ok(v) if !v.trim().is_empty() => tracing_subscriber::EnvFilter::new(v),
+        _ => tracing_subscriber::EnvFilter::new(default_filter),
     };
     fmt::Subscriber::builder()
-        .with_max_level(level)
+        .with_env_filter(filter)
         .with_target(false)
         .with_thread_ids(false)
         .with_file(cli.verbose)

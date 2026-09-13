@@ -538,11 +538,15 @@ impl Agent {
                 }
 
                 return Ok(AgentStep::Continue);
-            } else if !assistant_content.is_empty() {
-                debug!(content = %assistant_content, "LLM responded directly");
+            } else if !assistant_content.trim().is_empty() {
+                // trim() 判空：LLM 可能返回纯空白（"\n"、空格等），
+                // is_empty() 对这些返回 false，导致空白被当作"有效回复"，
+                // 回合直接结束，用户看到空输出（静默返回 bug）。
+                let trimmed = assistant_content.trim().to_string();
+                debug!(content = %trimmed, "LLM responded directly");
                 self.context.add_message(
                     crate::agent::context::Role::Assistant,
-                    assistant_content.clone(),
+                    trimmed.clone(),
                     None,
                     None,
                 );
@@ -550,7 +554,7 @@ impl Agent {
 
                 // 持久化：记录助手文本回复
                 if let Some(ref mut store) = self.session_store {
-                    store.record_assistant_message(&assistant_content);
+                    store.record_assistant_message(&trimmed);
                 }
 
                 // 主 Agent 单轮纯文本回应即视为任务完成（交互式 REPL 场景）。
@@ -565,7 +569,7 @@ impl Agent {
                 if self.depth == 0 {
                     return Ok(AgentStep::Done(AgentResult {
                         success: true,
-                        message: assistant_content,
+                        message: trimmed,
                         restart_requested: false,
                         finished: false,
                     }));

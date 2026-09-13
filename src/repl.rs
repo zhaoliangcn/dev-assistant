@@ -1005,8 +1005,11 @@ pub fn handle_restart(
         agent.add_display_message(level, &msg);
     });
 
+    // 无论构建失败还是 exec 失败，都要渲染消息让用户看到错误信息。
+    // exec 成功时进程已被替换，不会执行到这里。
+    render_agent_messages(agent, verbose)?;
+
     if should_continue {
-        render_agent_messages(agent, verbose)?;
         Ok(ReplAction::Continue)
     } else {
         Ok(ReplAction::Quit)

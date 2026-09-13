@@ -63,10 +63,6 @@ pub fn perform_restart(
                 "构建成功，正在重启 (PID 保持不变)...".to_string(),
             );
 
-            // 调用方需确保所有打开的文件描述符设置了 FD_CLOEXEC 标志，
-            // 否则 exec() 替换进程后这些 fd 会保持打开状态，导致资源泄漏。
-            // SessionLogger 和 SessionStore 在创建文件时已设置 O_CLOEXEC，
-            // 确保 exec() 后内核自动关闭这些文件描述符。
             // exec() replaces the current process on success (same PID).
             // It only returns on error.
             let exec_err = process::Command::new(&exe)
@@ -74,7 +70,8 @@ pub fn perform_restart(
                 .current_dir(working_dir)
                 .exec();
 
-            // If we reach here, exec() failed — show error and exit REPL
+            // If we reach here, exec() failed — show error and continue REPL
+            // (return true so user can fix the issue and retry)
             emit(
                 MessageLevel::Error,
                 format!(
@@ -91,7 +88,7 @@ pub fn perform_restart(
                     cli_args.join(" ")
                 ),
             );
-            false
+            true
         }
         Ok(status) => {
             let exit_code = status.code().unwrap_or(-1);

@@ -187,6 +187,11 @@
                 <span class="spinner" x-show="pendingStatus && pendingStatus.role === 'thinking'"></span>
                 <span x-text="pendingStatus ? pendingStatus.content : ''"></span>
             </div>
+            <!-- 💭 思考流窗口：reasoning_content 滚动尾窗，不进历史 -->
+            <div class="reasoning-box" x-show="reasoningActive" x-ref="reasoningBox" x-transition.opacity>
+                <span class="reasoning-label">💭 思考</span>
+                <span class="reasoning-text" x-text="reasoningText"></span>
+            </div>
             <div class="tool-activity-list">
                 <template x-for="msg in toolMessages" :key="msg._id">
                     <div>
@@ -230,27 +235,26 @@
                 <div class="message-body">
                     <p class="welcome-title"><span x-text="$store.i18n.assistant"></span>！</p>
                     <p class="welcome-subtitle" x-text="$store.i18n.welcome_select_project"></p>
-                    <div class="project-picker" style="margin-top:1rem;">
-                        <label style="font-size:0.85em;color:var(--pico-muted-color);display:block;margin-bottom:0.375rem;">
+                    <div class="project-picker">
+                        <label class="project-picker-label">
                             <span x-text="$store.i18n.current_project"></span>
                         </label>
                         <input type="text"
                                x-model="projectDir"
                                :placeholder="$store.i18n.project_dir_placeholder"
-                               class="primary"
-                               style="width:100%;padding:0.5rem;border-radius:0.5rem;font-size:0.9em;"
+                               class="primary project-picker-input"
                                @keydown.enter="applyProjectDir()"
                                aria-label="项目目录">
-                        <div class="grid" style="margin-top:0.5rem;">
-                            <button type="button" class="primary" @click="applyProjectDir()" style="flex:1;">
+                        <div class="grid project-picker-actions">
+                            <button type="button" class="primary" @click="applyProjectDir()">
                                 ✓ <span x-text="$store.i18n.switch_project"></span>
                             </button>
-                            <button type="button" class="secondary" @click="openFilePicker()" style="flex:1;" :disabled="busy">
+                            <button type="button" class="secondary" @click="openFilePicker()" :disabled="busy">
                                 📂 <span x-text="$store.i18n.open_project_picker.replace('{0}','')"></span>
                             </button>
                         </div>
-                        <p x-show="projectDirError" x-text="projectDirError" class="connection-error-toast" style="margin-top:0.5rem;font-size:0.8em;padding:0.25rem 0.5rem;"></p>
-                        <p x-show="!projectDirError && projectDir" style="margin-top:0.375rem;font-size:0.8em;color:var(--pico-muted-color);">
+                        <p x-show="projectDirError" x-text="projectDirError" class="connection-error-toast project-picker-error"></p>
+                        <p x-show="!projectDirError && projectDir" class="project-picker-hint">
                             💡 <span x-text="projectDir"></span>
                         </p>
                     </div>
@@ -293,26 +297,28 @@
                                         @click="copyMessage(msg._id, msg.content)"
                                         x-text="copiedMessageId === msg._id ? $store.i18n.copied : $store.i18n.copy"></button>
                             </div>
-                            <div class="message-content markdown-body" x-html="formatContent(msg.content)"></div>
+                            <div class="message-content markdown-body"
+                                 x-html="msg.streaming ? renderPlain(msg.content) : formatContent(msg.content)"></div>
                         </div>
                     </div>
 
                     <!-- 系统/状态 -->
-                    <div x-show="msg.role === 'system'" class="message system" style="font-size:0.85em;opacity:0.7;">
+                    <div x-show="msg.role === 'system'" class="message system message-system">
                         <div class="message-body">
                             <div class="message-content" x-text="msg.content"></div>
                         </div>
                     </div>
 
                     <!-- 错误 -->
-                    <div x-show="msg.role === 'error'" class="message error-message" style="align-self:center;color:var(--pico-del-color);">
+                    <div x-show="msg.role === 'error'" class="message error-message message-error">
                         <div class="message-body">
                             <div class="message-content" x-text="msg.content"></div>
                             <!-- P3: 错误重试按钮 -->
                             <button type="button" class="copy-btn small retry-btn"
                                     @click="retryLastAction()"
-                                    x-show="canRetry">
-                                x-text="$store.i18n.retry">
+                                    x-show="canRetry"
+                                    x-text="$store.i18n.retry">
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -74,6 +74,16 @@ pub enum ServerEvent {
         #[serde(default)]
         id: String,
     },
+    /// 思考模型推理过程的流式增量（delta）。
+    ///
+    /// 与 `AssistantStreamDelta` 同构：只下发增量，`is_final=true` 表示
+    /// 思考阶段结束（回答首帧前或流结束时结算）。仅展示用，不进历史。
+    ReasoningDelta {
+        delta: String,
+        is_final: bool,
+        #[serde(default)]
+        id: String,
+    },
     /// 错误信息
     Error {
         content: String,
@@ -145,6 +155,15 @@ impl ServerEvent {
     /// 创建一个助手流式增量事件（仅本次 delta，非全量内容）。
     pub fn assistant_stream_delta(delta: impl Into<String>, is_final: bool) -> Self {
         Self::AssistantStreamDelta {
+            delta: delta.into(),
+            is_final,
+            id: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+
+    /// 创建一个思考流增量事件（仅本次 delta，非全量内容）。
+    pub fn reasoning_delta(delta: impl Into<String>, is_final: bool) -> Self {
+        Self::ReasoningDelta {
             delta: delta.into(),
             is_final,
             id: uuid::Uuid::new_v4().to_string(),
@@ -237,5 +256,14 @@ mod tests {
         let id = parsed.get("id").unwrap().as_str().unwrap();
         assert_eq!(id.len(), 36);
         assert_eq!(id.as_bytes()[14], b'4'); // version nibble
+    }
+
+    #[test]
+    fn test_reasoning_delta_ser() {
+        let event = ServerEvent::reasoning_delta("让我想想", true);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"reasoning_delta\""));
+        assert!(json.contains("\"delta\":\"让我想想\""));
+        assert!(json.contains("\"is_final\":true"));
     }
 }

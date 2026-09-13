@@ -290,6 +290,9 @@ struct WebMessageOutput {
     /// 注意：用字节而非字符计数，因 `content` 是 UTF-8，按字节切片在 char 边界对齐，
     /// 切到半个多字节字符会 panic——见下方 `safe_slice_from` 处理。
     sent_len: usize,
+    /// 思考流（`streaming_thinking`）已发送的字节数，语义同 `sent_len`。
+    /// 与回答流各自独立计数：同一回合内两者交错增长，互不干扰。
+    reasoning_sent_len: usize,
 }
 
 impl WebMessageOutput {
@@ -299,6 +302,7 @@ impl WebMessageOutput {
             conn_id,
             streamed: false,
             sent_len: 0,
+            reasoning_sent_len: 0,
         }
     }
 
@@ -401,6 +405,35 @@ impl MessageOutput for WebMessageOutput {
         let event = ServerEvent::assistant_stream_delta(delta, is_final);
         if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event) {
             tracing::warn!("WebSocket 流式增量事件发送失败: {}", e);
+        }
+    }
+
+    /// 将思考模型的推理增量转发为 `reasoning_delta` 事件。
+    ///
+    /// 与 `streaming_assistant` 同构：agent 传累计的 reasoning_content，
+    /// 本实现按 `reasoning_sent_len` 截取增量下发。多步 tool loop 中每个
+    /// step 重新累积，内容变短即视为新思考回合，重置计数器。
+    ///
+    /// `is_final=true` 表示思考阶段结束（回答首帧前或流结束），前端据此
+    /// 结算/收起💭窗口。思考内容仅供展示，不落会话历史。
+    fn streaming_thinking(&mut self, content: &str, is_final: bool) {
+        // 新 step 的思考重新从空累积：比已发送长度短 → 回合切换，从头发
+        if content.len() < self.reasoning_sent_len {
+            self.reasoning_sent_len = 0;
+        }
+        let mut idx = self.reasoning_sent_len;
+        while idx > 0 && !content.is_char_boundary(idx) {
+            idx -= 1;
+        }
+        let delta = if content.len() >= idx { &content[idx..] } else { "" };
+        let delta = delta.to_string();
+        self.reasoning_sent_len = content.len();
+        if delta.is_empty() && !is_final {
+            return;
+        }
+        let event = ServerEvent::reasoning_delta(delta, is_final);
+        if let Err(e) = self.conn_manager.try_send_to(self.conn_id, event) {
+            tracing::warn!("WebSocket 思考增量事件发送失败: {}", e);
         }
     }
 

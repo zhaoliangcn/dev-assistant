@@ -30,7 +30,7 @@ document.addEventListener('alpine:init', () => {
         // 表单模型
         form: {
             name: '', provider: 'openai', api_url: '', api_key: '',
-            model: '', temperature: 0.2, max_output_tokens: '', clear_api_key: false, hasKey: false,
+            model: '', temperature: 0.2, max_output_tokens: '', reasoning_effort: '', clear_api_key: false, hasKey: false,
         },
 
         async load() {
@@ -85,7 +85,7 @@ document.addEventListener('alpine:init', () => {
             this.saveError = null;
             this.form = {
                 name: '', provider: 'openai', api_url: '', api_key: '',
-                model: '', temperature: 0.2, max_output_tokens: '', clear_api_key: false, hasKey: false,
+                model: '', temperature: 0.2, max_output_tokens: '', reasoning_effort: '', clear_api_key: false, hasKey: false,
             };
             this.editorOpen = true;
             this._scrollEditorIntoView();
@@ -102,6 +102,7 @@ document.addEventListener('alpine:init', () => {
                 model: m.model || '',
                 temperature: m.temperature ?? 0.2,
                 max_output_tokens: m.max_output_tokens ?? '',
+                reasoning_effort: m.reasoning_effort ?? '',
                 clear_api_key: false,
                 hasKey: m.has_api_key,
             };
@@ -144,6 +145,7 @@ document.addEventListener('alpine:init', () => {
                 model: f.model.trim(),
                 temperature: num(f.temperature),
                 max_output_tokens: num(f.max_output_tokens),
+                reasoning_effort: (f.reasoning_effort || '').trim() || null,
             };
             try {
                 const resp = await fetch('/api/models', {
@@ -332,8 +334,8 @@ document.addEventListener('alpine:init', () => {
             const hlCss = document.getElementById('hljs-theme');
             if (hlCss) {
                 hlCss.href = this.dark
-                    ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css'
-                    : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+                    ? '/static/vendor/github-dark.min.css'
+                    : '/static/vendor/github.min.css';
             }
             // 同步 PWA 状态栏/浏览器主题色，避免亮暗切换后残留白色状态栏
             const meta = document.querySelector('meta[name="theme-color"]');

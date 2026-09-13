@@ -12,11 +12,11 @@
     <meta name="apple-mobile-web-app-title" content="Dev-Assistant">
     <link rel="manifest" href="/static/manifest.json">
     <link rel="apple-touch-icon" href="/static/icons/icon-192x192.png">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/static/vendor/pico.min.css">
     <!-- highlight.js 主题样式：由 theme.js 按当前主题切换（暗色 github-dark / 亮色 github） -->
-    <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <link id="hljs-theme" rel="stylesheet" href="/static/vendor/github.min.css">
     <link rel="stylesheet" href="/static/css/app.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="/static/vendor/highlight.min.js"></script>
     <!-- 首屏主题防闪烁：在 Alpine 加载前按 localStorage 提前应用主题，
          避免暗色用户先看到一帧白屏（FOUC） -->
     <script>
@@ -41,7 +41,7 @@
     <script type="module" src="/static/js/sidebar.js"></script>
     <script type="module" src="/static/js/chat.js"></script>
     <script type="module" src="/static/js/file-explorer.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="/static/vendor/alpine.min.js"></script>
     <!-- P3: Service Worker 注册（离线缓存） -->
     <script>
         if ('serviceWorker' in navigator) {
@@ -353,6 +353,16 @@
                         <span x-text="$store.i18n.max_output_tokens"></span>
                         <input type="number" min="1" x-model="$store.models.form.max_output_tokens" placeholder="8192">
                     </label>
+                    <label>
+                        <span x-text="$store.i18n.reasoning_effort"></span>
+                        <select x-model="$store.models.form.reasoning_effort">
+                            <option value="" x-text="$store.i18n.reasoning_effort_hint"></option>
+                            <option value="none">none</option>
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                        </select>
+                    </label>
                 </div>
                 <p class="model-save-error" x-show="$store.models.saveError" x-text="$store.models.saveError"></p>
                 <div class="model-editor-actions">
@@ -363,6 +373,7 @@
 
             <button class="outline" @click="$store.models.newModel()" x-show="!$store.models.editorOpen" x-text="$store.i18n.add_model"></button>
         </div>
+    </div>
     </div>
     <footer class="container-fluid">
         <small>Dev-Assistant-RS — 本地 AI 编程助手</small>

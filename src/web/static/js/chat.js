@@ -4,7 +4,7 @@
 // 依赖：Alpine.js 3.x, theme.js, utils.js
 // 功能：WS 连接/重连、消息渲染、会话管理、工具活动区
 
-import { escapeHtml, renderMarkdown, copyTextToClipboard, lcsDiff } from './utils.js';
+import { escapeHtml, renderMarkdown, renderPlain, copyTextToClipboard, lcsDiff } from './utils.js';
 
 function chatApp() {
     let wsInstance = null;
@@ -44,6 +44,11 @@ function chatApp() {
         sessionLoading: false,
         // 状态条
         pendingStatus: null,
+        // 💭 思考流（对齐 CLI：仅展示，不进消息历史；140 字符滚动窗口）
+        reasoningText: '',
+        reasoningActive: false,
+        _reasoningBuf: '',
+        _reasoningFlushTimer: null,
         // Token 消耗累计
         tokenUsage: { prompt: 0, completion: 0, total: 0 },
         // ── 消息搜索（P2） ──
@@ -288,6 +293,14 @@ function chatApp() {
             this.pendingStatus = null;
             this.sessionTotal = 0;
             this.sessionReturned = 0;
+            // 清理思考流状态
+            if (this._reasoningFlushTimer) {
+                clearTimeout(this._reasoningFlushTimer);
+                this._reasoningFlushTimer = null;
+            }
+            this._reasoningBuf = '';
+            this.reasoningText = '';
+            this.reasoningActive = false;
         },
 
         deleteSession(id) {
@@ -505,6 +518,11 @@ function chatApp() {
                     this.pendingStatus = null;
                     this.applyStreamDelta(msg.delta || '', msg.is_final);
                     break;
+                case 'reasoning_delta':
+                    // 💭 思考流增量：仅渲染到思考窗口，不进消息列表
+                    this.pendingStatus = null;
+                    this.applyReasoningDelta(msg.delta || '', msg.is_final);
+                    break;
                 case 'error':
                     this.pendingStatus = null;
                     this.busy = false;
@@ -696,8 +714,63 @@ function chatApp() {
             this.scrollToBottomLater();
         },
 
-        // 注意：sendMessage 只定义一次（历史误删重复定义曾导致聚焦等逻辑丢失）。
+        // ── 💭 思考流渲染（对齐 CLI 行为） ──
+        // 后端每 token 只下发增量 delta；前端缓冲后每 80ms 合并写入一次，
+        // 窗口只保留末尾 140 字符滚动展示。is_final 时结算：短暂显示完整
+        // 思考尾部后收起窗口（回答已经开始，思考不再占用界面）。
 
+        applyReasoningDelta(delta, isFinal) {
+            this._reasoningBuf = (this._reasoningBuf || '') + (delta || '');
+            if (isFinal) {
+                this._flushReasoning(true);
+            } else if (!this._reasoningFlushTimer) {
+                this._reasoningFlushTimer = setTimeout(() => {
+                    this._reasoningFlushTimer = null;
+                    this._flushReasoning(false);
+                }, 80);
+            }
+        },
+
+        _flushReasoning(isFinal) {
+            if (this._reasoningFlushTimer) {
+                clearTimeout(this._reasoningFlushTimer);
+                this._reasoningFlushTimer = null;
+            }
+            const full = this._reasoningBuf || '';
+            if (isFinal) {
+                this._reasoningBuf = '';
+                if (full) {
+                    // 结算：保留尾部文本让用户瞥见最终思路，1.2s 后收起
+                    this.reasoningText = this._reasoningWindow(full);
+                    this.reasoningActive = true;
+                    setTimeout(() => {
+                        this.reasoningText = '';
+                        this.reasoningActive = false;
+                    }, 1200);
+                }
+                return;
+            }
+            if (!full) return;
+            this.reasoningActive = true;
+            this.reasoningText = this._reasoningWindow(full);
+            this._scrollReasoning();
+        },
+
+        // 140 字符滚动窗口：超长时截尾并加省略号前缀
+        _reasoningWindow(text) {
+            const compact = text.replace(/\s+/g, ' ').trim();
+            if (compact.length <= 140) return compact;
+            return '…' + compact.slice(-140);
+        },
+
+        _scrollReasoning() {
+            this.$nextTick(() => {
+                const el = this.$refs.reasoningBox;
+                if (el) el.scrollTop = el.scrollHeight;
+            });
+        },
+
+        // 注意：sendMessage 只定义一次（历史误删重复定义曾导致聚焦等逻辑丢失）。
         stopGeneration() {
             if (!wsInstance || wsInstance.readyState !== WebSocket.OPEN) {
                 this.busy = false;
@@ -724,6 +797,11 @@ function chatApp() {
         formatContent(content) {
             if (!content) return '';
             return renderMarkdown(content);
+        },
+
+        // 流式期间的廉价渲染：转义+换行，避免每帧全量 Markdown 重解析
+        renderPlain(content) {
+            return renderPlain(content);
         },
 
         // ── 复制消息 ──

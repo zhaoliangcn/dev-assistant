@@ -587,6 +587,37 @@ footer {
     --status-thinking-color: var(--status-thinking-color);
 }
 
+/* ── 💭 思考流窗口（reasoning_content 滚动尾窗） ── */
+
+.reasoning-box {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.5rem 0.625rem;
+    margin: 0.25rem 0;
+    font-size: 0.82em;
+    color: var(--pico-muted-color);
+    background: var(--pico-card-sectioning-background-color);
+    border: 1px dashed var(--pico-muted-border-color);
+    border-radius: 0.375rem;
+    max-height: 3.6em;
+    overflow: hidden;
+}
+
+.reasoning-label {
+    flex-shrink: 0;
+    font-weight: 600;
+    opacity: 0.85;
+}
+
+.reasoning-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: italic;
+}
+
 .spinner {
     display: inline-block;
     width: 1rem;
@@ -2315,6 +2346,59 @@ header nav ul li strong a {
     font-size: 0.95em;
     color: var(--pico-muted-color);
     margin: 0;
+}
+
+/* ── 项目选择器（欢迎区内，原为内联样式） ── */
+
+.project-picker {
+    margin-top: 1rem;
+    text-align: left;
+}
+
+.project-picker-label {
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+    display: block;
+    margin-bottom: 0.375rem;
+}
+
+.project-picker-input {
+    width: 100%;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    font-size: 0.9em;
+}
+
+.project-picker-actions {
+    margin-top: 0.5rem;
+}
+
+.project-picker-actions button {
+    flex: 1;
+}
+
+.project-picker-error {
+    margin-top: 0.5rem;
+    font-size: 0.8em;
+    padding: 0.25rem 0.5rem;
+}
+
+.project-picker-hint {
+    margin-top: 0.375rem;
+    font-size: 0.8em;
+    color: var(--pico-muted-color);
+}
+
+/* 系统/错误消息（原为内联样式） */
+
+.message.message-system {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.message.message-error {
+    align-self: center;
+    color: var(--pico-del-color);
 }
 
 /* ── 消息头像：渐变圆底 ── */

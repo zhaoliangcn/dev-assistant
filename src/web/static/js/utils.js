@@ -38,8 +38,12 @@ export function inlineFormat(line) {
     let out = escapeHtml(line);
     // 行内代码 `x`
     out = out.replace(/`([^`]+)`/g, (_, code) => '<code>' + code + '</code>');
-    // 粗体 **x**
+    // 粗体 **x**（先于斜体处理，避免 ** 被拆成两个 *）
     out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // 斜体 *x*（粗体已消耗成对 **，剩余单 * 即斜体）
+    out = out.replace(/\*([^*\s][^*]*)\*/g, '<em>$1</em>');
+    // 斜体 _x_（仅当两侧是词边界，避免 snake_case 被误伤）
+    out = out.replace(/(^|[\s(>])_([^_\s][^_]*?)_(?=$|[\s).,;:!?\u3002\uff0c<b]|\b)/g, '$1<em>$2</em>');
     // 删除线 ~~x~~
     out = out.replace(/~~([^~]+)~~/g, '<del>$1</del>');
     // 链接 [text](url)
@@ -93,6 +97,83 @@ export function highlightCode(code, lang, collapseThreshold = 20) {
         '</div>';
 }
 
+// ── Markdown 列表解析（支持嵌套） ──
+
+/**
+ * 解析一段连续列表行为嵌套 HTML。
+ * 以 2 个空格为一级缩进；缩进大于当前层的行递归处理为子列表。
+ * @param {string[]} lines - 列表行（可含后续非列表行，遇到即停止）
+ * @returns {{ html: string, consumed: number }}
+ */
+function renderListBlock(lines) {
+    const itemRe = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
+    // 预扫描：确定本块消费多少行
+    let consumed = 0;
+    for (let i = 0; i < lines.length; i++) {
+        if (itemRe.test(lines[i]) || /^\s+\S/.test(lines[i])) {
+            consumed = i + 1;
+        } else {
+            break;
+        }
+    }
+    const block = lines.slice(0, consumed);
+
+    // 逐项解析为 {indent, ordered, text}，缩进 >= 当前层 +2 的归入上一条的子项
+    const parseItems = (arr) => arr.map((l) => {
+        const m = l.match(itemRe);
+        return m ? { indent: m[1].length, ordered: /^\d/.test(m[2]), text: m[3] } : null;
+    }).filter(Boolean);
+
+    const build = (items) => {
+        if (items.length === 0) return '';
+        const ordered = items[0].ordered;
+        let html = ordered ? '<ol>' : '<ul>';
+        let i = 0;
+        while (i < items.length) {
+            const it = items[i];
+            const baseIndent = it.indent;
+            // 收集比当前项更深缩进的连续子项
+            const children = [];
+            let j = i + 1;
+            while (j < items.length && items[j].indent > baseIndent) {
+                children.push({ ...items[j], indent: items[j].indent - baseIndent - 2 });
+                j++;
+            }
+            const taskMatch = it.text.match(/^\[([ xX])\]\s*(.*)$/);
+            let content;
+            if (taskMatch) {
+                const checked = taskMatch[1] === 'x' || taskMatch[1] === 'X';
+                content = '<input type="checkbox" ' + (checked ? 'checked' : '') + ' disabled> ' +
+                    inlineFormat(taskMatch[2]);
+                html += '<li class="task-item" data-checked="' + checked + '">' + content;
+            } else {
+                html += '<li>' + inlineFormat(it.text);
+            }
+            if (children.length) html += build(children);
+            html += '</li>';
+            i = j;
+        }
+        html += ordered ? '</ol>' : '</ul>';
+        return html;
+    };
+
+    return { html: build(parseItems(block)), consumed };
+}
+
+// ── 轻量流式渲染 ──
+
+/**
+ * 流式期间的廉价渲染：仅转义 + 换行，不解析 Markdown、不做代码高亮。
+ * 终帧到达后用 renderMarkdown 全量渲染一次替换，避免每 50ms
+ * 对整条消息重复 O(n) 解析与 hljs 高亮（长回复越写越卡）。
+ * @param {string} content
+ * @returns {string}
+ */
+export function renderPlain(content) {
+    if (!content) return '';
+    return escapeHtml(content).replace(/\n/g, '<br>');
+}
+
 // ── Markdown 渲染 ──
 
 /**
@@ -144,52 +225,14 @@ export function renderMarkdown(content) {
             continue;
         }
 
-        // 无序列表 - / * / + item（含任务列表）
-        const ul = line.match(/^[-*+]\s+(.*)$/);
-        if (ul) {
-            const items = [];
-            while (i < lines.length) {
-                const m = lines[i].match(/^[-*+]\s+(.*)$/);
-                if (!m) break;
-                // 任务列表：- [ ] 或 - [x]
-                const taskMatch = m[1].match(/^\[([ xX])\]\s*(.*)$/);
-                if (taskMatch) {
-                    const checked = taskMatch[1] === 'x' || taskMatch[1] === 'X';
-                    const taskContent = inlineFormat(taskMatch[2]);
-                    items.push('<li class="task-item" data-checked="' + checked + '">' +
-                        '<input type="checkbox" ' + (checked ? 'checked' : '') + ' disabled> ' +
-                        taskContent + '</li>');
-                } else {
-                    items.push('<li>' + inlineFormat(m[1]) + '</li>');
-                }
-                i++;
+        // 列表（无序 -/*/+ 或有序 1.，支持缩进嵌套与任务列表）
+        if (/^(\s*)([-*+]|\d+\.)\s+/.test(line)) {
+            const { html, consumed } = renderListBlock(lines.slice(i));
+            if (consumed > 0) {
+                out.push(html);
+                i += consumed;
+                continue;
             }
-            out.push('<ul>' + items.join('') + '</ul>');
-            continue;
-        }
-
-        // 有序列表 1. item
-        const ol = line.match(/^\d+\.\s+(.*)$/);
-        if (ol) {
-            const items = [];
-            while (i < lines.length) {
-                const m = lines[i].match(/^\d+\.\s+(.*)$/);
-                if (!m) break;
-                // 任务列表：- [ ] 或 - [x]
-                const taskMatch = m[1].match(/^\[([ xX])\]\s*(.*)$/);
-                if (taskMatch) {
-                    const checked = taskMatch[1] === 'x' || taskMatch[1] === 'X';
-                    const taskContent = inlineFormat(taskMatch[2]);
-                    items.push('<li class="task-item" data-checked="' + checked + '">' +
-                        '<input type="checkbox" ' + (checked ? 'checked' : '') + ' disabled> ' +
-                        taskContent + '</li>');
-                } else {
-                    items.push('<li>' + inlineFormat(m[1]) + '</li>');
-                }
-                i++;
-            }
-            out.push('<ol>' + items.join('') + '</ol>');
-            continue;
         }
 
         // 数学公式块 $$...$$ 或 $...$

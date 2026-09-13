@@ -6,7 +6,7 @@
 // E1: 缓存版本。每次静态资源发生破坏性变更（文件改名/结构变动）后，
 // 必须递增此版本以触发旧缓存清理；同时下方 message 通道允许页面在
 // 检测到新 SW 时主动激活，降低"忘记 bump 导致用户拿到旧资源"的风险。
-const CACHE_NAME = 'dev-assistant-v3';
+const CACHE_NAME = 'dev-assistant-v4';
 const STATIC_ASSETS = [
     '/',
     '/static/css/app.css',
@@ -16,6 +16,11 @@ const STATIC_ASSETS = [
     '/static/js/sidebar.js',
     '/static/js/chat.js',
     '/static/js/file-explorer.js',
+    '/static/vendor/pico.min.css',
+    '/static/vendor/highlight.min.js',
+    '/static/vendor/github.min.css',
+    '/static/vendor/github-dark.min.css',
+    '/static/vendor/alpine.min.js',
 ];
 
 // 安装：预缓存静态资源

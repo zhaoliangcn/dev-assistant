@@ -75,7 +75,7 @@ pub fn build_system_prompt(skills: &[Skill]) -> String {
 
 ## 特殊工具说明
 - **spawn_subagent**：创建子代理。可选类型：{agent_types}。深度限制 {max_depth} 层，不要嵌套。
-- **exec_command**：`command` 为可执行文件，`args` 为参数列表。不经过 shell，管道/重定向需 `sh -c "..."`。
+- **exec_command**：执行命令。支持管道/重定向/`&&` 等 shell 语法——直接传完整命令字符串即可（如 `ls -la | head`、`cargo build 2>&1`），无需 `sh -c` 包装；或用 `args` 传参数列表执行非 shell 命令。
 - **restart**：修改 Rust 源码后调用，自动编译重启。**重启后不再调 restart**。
 - **edit_file**：`old_content` 必须精确匹配原内容（含缩进空格），注意复制粘贴格式。
 - **read_symbol**：按符号名定位读取（函数/结构体/trait/常量等），比 `read_file` 更精确。

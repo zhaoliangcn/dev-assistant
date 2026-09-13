@@ -11,18 +11,18 @@ use tracing::debug;
 pub fn exec_command_tool() -> ToolDefinition {
     ToolDefinition {
         name: "exec_command".to_string(),
-        description: "Execute a command directly. No shell: pipes/redirects/&&/|| not supported. Use sh -c \"...\" for shell features.".to_string(),
+        description: "执行命令，支持管道/重定向/&& 等 shell 语法（自动通过 shell 执行）。可直接传完整命令字符串，如 \"ls -la | head\"；或用 args 传参数列表执行非 shell 命令。".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The executable (e.g., \"ls\", \"cargo\", \"git\"). No shell syntax."
+                    "description": "要执行的命令。未提供 args 时作为完整 shell 命令执行（支持管道/重定向，如 \"ls -la | grep foo\"、\"cargo build 2>&1\"）。"
                 },
                 "args": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Optional args (e.g., [\"build\", \"--release\"]). For shell: sh -c \"cmd\"."
+                    "description": "可选参数列表。提供 args 时按非 shell 模式直接执行 command + args（如 [\"build\", \"--release\"]）。"
                 }
             },
             "required": ["command"]
@@ -69,10 +69,29 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
     const MAX_TOTAL_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
     let remaining = Arc::new(AtomicUsize::new(MAX_TOTAL_OUTPUT_BYTES));
 
-    // Spawn with piped output
-    let mut cmd = Command::new(command);
-    cmd.args(&extra_args)
-        .current_dir(working_dir)
+    // Spawn with piped output.
+    // - 提供 args 时：非 shell 模式，直接执行 command + args
+    // - 未提供 args 时：shell 模式，整个 command 作为 shell 命令执行（支持管道/重定向/&& 等），
+    //   避免 LLM 因 sh -c 包装多花一轮工具调用。
+    let mut cmd = if extra_args.is_empty() {
+        #[cfg(unix)]
+        {
+            let mut c = Command::new("sh");
+            c.arg("-c").arg(command);
+            c
+        }
+        #[cfg(not(unix))]
+        {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(command);
+            c
+        }
+    } else {
+        let mut c = Command::new(command);
+        c.args(&extra_args);
+        c
+    };
+    cmd.current_dir(working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -93,12 +112,7 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
     }
 
     let mut child = cmd.spawn().map_err(|e| {
-        AppError::Llm(format!(
-            "Command execution failed for '{}': {}. \
-             Note: exec_command no longer supports shell syntax (pipes, redirects, etc.). \
-             Use command=\"sh\" with args=[\"-c\", \"your_command_here\"] if shell features are required.",
-            command, e
-        ))
+        AppError::Llm(format!("Command execution failed for '{}': {}", command, e))
     })?;
 
     let pid = child.id();

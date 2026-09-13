@@ -229,7 +229,31 @@
                 <div class="welcome-logo" aria-hidden="true">🤖</div>
                 <div class="message-body">
                     <p class="welcome-title"><span x-text="$store.i18n.assistant"></span>！</p>
-                    <p class="welcome-subtitle" x-text="$store.i18n.chat"></p>
+                    <p class="welcome-subtitle" x-text="$store.i18n.welcome_select_project"></p>
+                    <div class="project-picker" style="margin-top:1rem;">
+                        <label style="font-size:0.85em;color:var(--pico-muted-color);display:block;margin-bottom:0.375rem;">
+                            <span x-text="$store.i18n.current_project"></span>
+                        </label>
+                        <input type="text"
+                               x-model="projectDir"
+                               :placeholder="$store.i18n.project_dir_placeholder"
+                               class="primary"
+                               style="width:100%;padding:0.5rem;border-radius:0.5rem;font-size:0.9em;"
+                               @keydown.enter="applyProjectDir()"
+                               aria-label="项目目录">
+                        <div class="grid" style="margin-top:0.5rem;">
+                            <button type="button" class="primary" @click="applyProjectDir()" style="flex:1;">
+                                ✓ <span x-text="$store.i18n.switch_project"></span>
+                            </button>
+                            <button type="button" class="secondary" @click="openFilePicker()" style="flex:1;" :disabled="busy">
+                                📂 <span x-text="$store.i18n.open_project_picker.replace('{0}','')"></span>
+                            </button>
+                        </div>
+                        <p x-show="projectDirError" x-text="projectDirError" class="connection-error-toast" style="margin-top:0.5rem;font-size:0.8em;padding:0.25rem 0.5rem;"></p>
+                        <p x-show="!projectDirError && projectDir" style="margin-top:0.375rem;font-size:0.8em;color:var(--pico-muted-color);">
+                            💡 <span x-text="projectDir"></span>
+                        </p>
+                    </div>
                 </div>
             </div>
 

@@ -59,6 +59,12 @@ pub struct AppState {
     pub security: Arc<SecurityPolicy>,
     /// 工作目录
     pub working_dir: PathBuf,
+    /// 当前生效的项目目录（会话 store 的隔离根）。
+    ///
+    /// Web 端支持通过 `?project_dir=` 在启动时 `working_dir` 下动态切换子目录，
+    /// 每个项目目录拥有独立的 `.dev-assistant-store/`，会话历史互不干扰。
+    /// 初始等于 `working_dir`，由 WebSocket 建连时更新。
+    pub current_project: std::sync::Arc<tokio::sync::RwLock<PathBuf>>,
     /// 系统提示词
     pub system_prompt: String,
     /// 上下文窗口 token 预算（不发给 API；输出上限见模型配置 max_output_tokens）
@@ -222,6 +228,7 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
         agent_config,
         security,
         working_dir: config.working_dir.clone(),
+        current_project: std::sync::Arc::new(tokio::sync::RwLock::new(config.working_dir.clone())),
         system_prompt,
         max_tokens: config.max_tokens,
         verbose: config.verbose,

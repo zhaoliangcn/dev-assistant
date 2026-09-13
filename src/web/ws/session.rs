@@ -30,20 +30,22 @@ impl WebSession {
     ///
     /// 每个会话持有独立的 `Agent`，共享 `Arc<LlmClient>`。
     /// `ToolRegistry` 和 `AsyncToolRegistry` 在 Phase 2 中集成。
+    ///
+    /// `working_dir` 指代要操作的项目目录（所有工具的工作根），
+    /// 由 `chat` handler 在建立连接时注入，而非 `env::current_dir()`。
     pub fn new(
         llm: Arc<LlmClient>,
         config: AgentConfig,
         session_store: Option<SessionStore>,
         system_prompt: String,
         max_tokens: usize,
+        working_dir: std::path::PathBuf,
     ) -> Self {
         let context = crate::agent::ContextManager::new(system_prompt, max_tokens);
-        // Phase 1: 创建一个无工具的 Agent（仅用于对话）
-        let cwd = std::env::current_dir().unwrap_or_default();
         let tools = crate::tools::ToolRegistry::new(
-            cwd.clone(),
+            working_dir.clone(),
             Arc::new(crate::security::SecurityPolicy::new(
-                &cwd,
+                &working_dir,
                 None,
                 false,
             )),

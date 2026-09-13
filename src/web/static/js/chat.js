@@ -56,6 +56,9 @@ function chatApp() {
         connectionStatus: 'disconnected', // disconnected | connecting | connected | error
         connectionError: null,
         reconnectCount: 0,
+        // ── 项目目录切换（P4） ──
+        projectDir: '',
+        projectDirError: null,
 
         init() {
             this.connectWS();
@@ -367,10 +370,12 @@ function chatApp() {
 
         // ── WebSocket ──
 
-        connectWS() {
+        connectWS(projectDirOverride) {
             this.setConnectionStatus('connecting');
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const url = protocol + '//' + window.location.host + '/ws/chat';
+            const base = protocol + '//' + window.location.host + '/ws/chat';
+            const dir = projectDirOverride || this.projectDir;
+            const url = dir ? `${base}?project_dir=${encodeURIComponent(dir)}` : base;
 
             if (wsInstance) {
                 wsInstance.onclose = null;
@@ -390,6 +395,13 @@ function chatApp() {
                 self.setConnected(true);
                 self.setConnectionStatus('connected');
                 self.reconnectCount = 0;
+                // 项目切换后：后端 current_project 已指向新目录，重拉当前项目的会话列表
+                if (self._newProjectConnected) {
+                    self._newProjectConnected = false;
+                    if (self.$store && self.$store.sessions) {
+                        self.$store.sessions.load();
+                    }
+                }
                 // 刷新重试时暂存的消息（retryLastAction 在建连前暂存）
                 if (self._pendingRetryMessage) {
                     const msg = self._pendingRetryMessage;
@@ -420,6 +432,7 @@ function chatApp() {
             wsInstance.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data);
+                    // 若后端拒绝 project_dir，会关闭连接（或发 error 事件）——此处在 onclose 兜底处理
                     self.handleServerEvent(msg);
                 } catch (e) {
                     console.error('WebSocket 消息解析失败:', e);
@@ -577,6 +590,68 @@ function chatApp() {
                 if (m.role === 'assistant' && m.streaming) return i;
             }
             return -1;
+        },
+
+        // ── 项目目录切换（P4） ──
+
+        applyProjectDir() {
+            const dir = (this.projectDir || '').trim();
+            if (!dir) {
+                this.projectDirError = this.$store.i18n.project_dir_invalid;
+                return;
+            }
+            // 校验：拒绝相对路径上溯与明显异常路径（前端基础防护，后端还会重验）
+            const normalized = dir.replace(/\/+/g, '/');
+            if (normalized.includes('//') || normalized.startsWith('..')) {
+                this.projectDirError = this.$store.i18n.project_dir_invalid;
+                return;
+            }
+            this.projectDirError = null;
+            this.projectDir = normalized;
+            this.$nextTick(() => this._switchToProject(normalized));
+        },
+
+        async _switchToProject(dir) {
+            this.busy = true;
+            this.connectionError = null;
+            this.projectDirError = null;
+            this.projectDir = dir;
+            // 提示用户：正在切换到该项目目录
+            this.addMessage('system', `📂 ${dir}`);
+            this.scrollToBottomLater();
+            // 断开旧连接，触发新的 WS 建连（携带 project_dir 查询参数）
+            this._pendingRetryMessage = null;
+            this.connected = false;
+            this.connectionStatus = 'connecting';
+            // 标记：待新连接就绪后重拉历史会话（当前项目已切换）
+            this._newProjectConnected = true;
+            if (wsInstance) {
+                wsInstance.onclose = null;
+                wsInstance.onerror = null;
+                if (wsInstance.readyState === WebSocket.OPEN || wsInstance.readyState === WebSocket.CONNECTING) {
+                    wsInstance.close();
+                }
+            }
+            this.connectWS(dir);
+            // 切换即结束旧会话的生成状态；新连接建立后可立即发消息
+            this.busy = false;
+        },
+
+        // 浏览文件夹选择（可选增强：部分浏览器支持 directory picker）
+        async openFilePicker() {
+            try {
+                // 尝试 HTML5 File System Access API
+                if (window.showDirectoryPicker) {
+                    const handle = await window.showDirectoryPicker();
+                    // 构造一个可传给后端的路径：浏览器端无"工作目录"概念，只能尝试用 name 或 fullPath
+                    // 这里用 handle.name 作为相对提示；实际路径不可靠，因此 fallback 到手动输入
+                    this.projectDir = handle.name || '';
+                    return;
+                }
+            } catch (_) { /* user cancelled or not supported */ }
+            // fallback：聚焦输入框让用户粘贴路径
+            const input = document.querySelector('input[aria-label="项目目录"]');
+            if (input) input.focus();
         },
 
         // C1: 应用流式增量——追加到当前 streaming 助手消息，节流渲染。

@@ -7,10 +7,11 @@ use std::sync::Arc;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
-        State, WebSocketUpgrade,
+        Query, State, WebSocketUpgrade,
     },
     response::IntoResponse,
 };
+use serde::Deserialize;
 use futures::stream::StreamExt;
 use futures::SinkExt;
 use tokio::sync::{Mutex, Notify};
@@ -26,32 +27,74 @@ use crate::web::AppState;
 /// WebSocket 升级处理器。
 ///
 /// 路径: `GET /ws/chat`
+/// 可选的工作目录查询参数（`?project_dir=...`）。
+///
+/// 若提供，会覆盖 `state.working_dir`，让同一个 web 实例可以动态切换到不同项目目录。
+/// 未提供时回落到 `state.working_dir`，保持向后兼容（不破坏已有的 WS 路径 `/ws/chat`）。
+#[derive(Deserialize)]
+pub struct ProjectDirQuery {
+    #[serde(default)]
+    pub project_dir: Option<String>,
+}
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
+    Query(query): Query<ProjectDirQuery>,
 ) -> impl IntoResponse {
     info!("新的 WebSocket 连接请求");
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+    ws.on_upgrade(move |socket| {
+        let state = state.clone();
+        handle_socket(socket, state, query.project_dir.clone())
+    })
 }
 
 /// 处理单个 WebSocket 连接。
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
+async fn handle_socket(socket: WebSocket, state: Arc<AppState>, override_project_dir: Option<String>) {
     let (sender, mut receiver) = socket.split();
 
+    // 若前端传了 project_dir 覆盖，则校验并切换到对应目录，否则沿用 state.working_dir
+    let target_dir = if let Some(dir) = &override_project_dir {
+        let raw = std::path::PathBuf::from(dir);
+        if raw.is_absolute() && !raw.starts_with(&state.working_dir) {
+            let msg = format!(
+                "project_dir '{}' 超出工作目录范围（只允许 {} 及其子目录）",
+                dir,
+                state.working_dir.display()
+            );
+            warn!(dir=%dir, msg=%msg, "拒绝越界 project_dir");
+            // 不建连：直接 return，让调用方的 Upgrade 响应以 close 帧结束
+            return;
+        }
+        // 允许相对路径 / 子目录
+        state.working_dir.join(dir).canonicalize().unwrap_or_else(|_| {
+            state.working_dir.join(dir)
+        })
+    } else {
+        state.working_dir.clone()
+    };
+
+    // 同步"当前项目目录"，让会话列表/详情等 handler 读取隔离 store 时保持一致
+    {
+        let mut guard = state.current_project.write().await;
+        *guard = target_dir.clone();
+    }
+
     // 创建会话级别的 SessionStore
-    let session_store = SessionStore::create(&state.working_dir)
+    let session_store = SessionStore::create(&target_dir)
         .map_err(|e| {
             warn!(error = %e, "无法创建会话持久化存储，将跳过持久化");
         })
         .ok();
 
-    // 创建 WebSession
+    // 创建 WebSession（注入实际使用的项目目录）
     let web_session = Arc::new(Mutex::new(WebSession::new(
         state.llm.clone(),
         state.agent_config.clone(),
         session_store,
         state.system_prompt.clone(),
         state.max_tokens,
+        target_dir,
     )));
 
     // 获取会话 ID 用于注册

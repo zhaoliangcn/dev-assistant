@@ -323,7 +323,7 @@ pub fn phase_number(round: usize) -> usize {
 }
 
 /// 去掉 YAML frontmatter（`---` 包裹的部分）。
-fn strip_frontmatter(content: &str) -> &str {
+pub(crate) fn strip_frontmatter(content: &str) -> &str {
     let trimmed = content.trim_start();
     if let Some(rest) = trimmed.strip_prefix("---") {
         if let Some(end) = rest.find("---") {

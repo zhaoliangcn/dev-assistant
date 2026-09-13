@@ -3,6 +3,7 @@ pub mod context;
 pub mod display;
 pub mod history;
 pub mod identity;
+pub mod memory;
 pub mod pipeline_context;
 pub mod pipeline_stages;
 pub mod summary;
@@ -467,6 +468,18 @@ impl Agent {
                     self.context.add_tool_result(tool_call, &result.content);
 
                     if tool_call.function.name == "finish" {
+                        // 会话终结钩子：仅顶层 Agent（depth==0）晋升长期记忆。
+                        // 子代理的 finish 是内部任务完成，不应污染跨会话记忆。
+                        // 幂等由 promote_to_long_term 内部保证（与最新条目相同则跳过）。
+                        if self.depth == 0 {
+                            let summary_text = result
+                                .content
+                                .strip_prefix("[finish] ")
+                                .unwrap_or(&result.content);
+                            if let Err(e) = self.promote_to_long_term(summary_text).await {
+                                warn!(error = %e, "长期记忆晋升失败（不影响任务完成）");
+                            }
+                        }
                         return Ok(AgentStep::Done(AgentResult {
                             success: true,
                             message: result.content.clone(),
@@ -1585,15 +1598,32 @@ impl Agent {
             }
         }
 
-        // 4. 若已积累多个阶段摘要，聚合为会话摘要（层级 3，final.md）
+        // 4. 会话摘要（final.md）滚动增量聚合：
+        //    本次新聚合的阶段 + 上一版 final，而不是全部历史阶段。
+        //    旧实现每次把全部 phase 重喂 LLM（87 个阶段 ≈ 4 万+ tokens/次），
+        //    既慢又逼近输出上限；滚动聚合成本与阶段总数无关，且保留信息传承。
         let mut final_aggregated = None;
-        let phases = store.load_phases()?;
-        if phases.len() >= 2 {
-            let items: Vec<String> = phases.iter().map(|p| p.content.clone()).collect();
-            let final_summary = aggregate_summaries(&self.llm, "阶段", &items, 1000).await?;
-            if !final_summary.is_empty() {
-                store.save_final(&final_summary)?;
-                final_aggregated = Some(phases.len());
+        if let Some(new_phase) = phase_aggregated {
+            let prev_final = store.load_final().unwrap_or(None);
+            let new_phase_content = store
+                .load_phases()?
+                .into_iter()
+                .find(|p| p.phase == new_phase)
+                .map(|p| p.content);
+            if let Some(phase_text) = new_phase_content {
+                let mut items: Vec<String> = Vec::new();
+                if let Some(ref prev) = prev_final {
+                    let prev_trimmed = prev.trim();
+                    if !prev_trimmed.is_empty() {
+                        items.push(format!("（前情摘要）\n{}", prev_trimmed));
+                    }
+                }
+                items.push(format!("（本阶段新增）\n{}", phase_text));
+                let final_summary = aggregate_summaries(&self.llm, "阶段", &items, 1000).await?;
+                if !final_summary.is_empty() {
+                    store.save_final(&final_summary)?;
+                    final_aggregated = Some(new_phase);
+                }
             }
         }
 
@@ -1607,10 +1637,39 @@ impl Agent {
         if let Some(p) = phase_aggregated {
             msg.push_str(&format!("\n已聚合为阶段摘要 phase-{}", p));
         }
-        if let Some(n) = final_aggregated {
-            msg.push_str(&format!("\n已聚合为会话摘要 final.md（{} 个阶段）", n));
+        if let Some(p) = final_aggregated {
+            msg.push_str(&format!("\n已滚动更新会话摘要 final.md（聚合至 phase-{}）", p));
         }
         Ok(msg)
+    }
+
+    /// 把当前会话的成果晋升为长期记忆条目（`.kb/memory/entries/`）。
+    ///
+    /// 优先用传入文本（finish 总结）；为空时聚合会话的分层摘要（final 优先）。
+    /// 幂等：内容与最新条目相同则跳过（restart 后恢复会话再次 finish 的场景）。
+    async fn promote_to_long_term(&self, text: &str) -> Result<(), AppError> {
+        use crate::agent::memory::MemoryStore;
+        use crate::agent::summary::SummaryStore;
+        let kb_root = self.working_dir().join(".kb");
+        let store = MemoryStore::new(&kb_root);
+
+        let body = if !text.trim().is_empty() {
+            text.trim().to_string()
+        } else {
+            let sstore = SummaryStore::new(&self.context.session_id, &kb_root);
+            let layered = sstore.load_all().unwrap_or_default();
+            layered.final_summary.unwrap_or_default()
+        };
+        let body = body.trim().to_string();
+        if body.is_empty() {
+            tracing::debug!("无可用总结内容，跳过长期记忆晋升");
+            return Ok(());
+        }
+        if store.latest_body().as_deref().map(str::trim) == Some(body.as_str()) {
+            tracing::debug!("与最新长期记忆条目相同，跳过晋升（幂等）");
+            return Ok(());
+        }
+        store.save_entry(&body, &format!("session:{}", self.context.session_id))
     }
 
     /// 自动保存当前轮次摘要到分层摘要系统。

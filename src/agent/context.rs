@@ -1,6 +1,7 @@
 use crate::agent::compressor::{CompressionInfo, ContextCompressor};
 use crate::agent::display::DisplayBuffer;
 use crate::agent::history::ConversationHistory;
+use crate::agent::memory::MemoryStore;
 use crate::agent::summary::SummaryStore;
 use crate::llm::{LlmMessage, ToolCall};
 use crate::utils::atomic_write::atomic_write;
@@ -8,6 +9,12 @@ use crate::utils::error::AppError;
 use crate::utils::message_level::MessageLevel;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
+
+/// 记忆注入预算占总上下文预算的百分比上限。
+///
+/// 无论走长期记忆条目还是分层摘要回退路径，注入内容都不超过
+/// `max_tokens * MEMORY_BUDGET_PERCENT / 100`，为正常工作上下文留足空间。
+pub const MEMORY_BUDGET_PERCENT: usize = 15;
 
 #[derive(Debug, Clone)]
 pub enum Role {
@@ -250,28 +257,68 @@ impl ContextManager {
         self.budget_manager.set_memory_tokens(tokens);
     }
 
-    /// 注入跨会话历史摘要（分层摘要 → 上下文）。
+    /// 注入跨会话记忆（长期记忆优先，分层摘要桶回退）。
     ///
-    /// 从 `.kb/summaries/{session_id}/` 按预算（max_tokens 减去系统提示词与
-    /// 工具 schema 固定开销后的剩余空间）加载 final → phase → round 摘要，
-    /// 以 system 角色消息注入上下文历史，实现跨会话记忆。
+    /// 优先加载 `.kb/memory/entries/` 中的长期记忆条目（finish 时晋升沉淀），
+    /// 渲染为单条 system 消息并附时效/来源标注；长期区为空时回退到旧行为
+    /// （`.kb/summaries/{session_id}/` 的 final → phase → round 分层摘要）。
     ///
-    /// 仅在历史为空（新会话）时注入；已恢复的会话（`load_state`）包含完整
-    /// 历史，跳过注入避免重复。
+    /// 两条路径统一受记忆区独立预算约束（总量的 [`MEMORY_BUDGET_PERCENT`]），
+    /// 避免注入挤占正常工作上下文。仅在历史为空（新会话）时注入；
+    /// 已恢复的会话（`load_state`）包含完整历史，跳过注入避免重复。
     pub fn inject_historical_summaries(&mut self, kb_root: &std::path::Path) {
         if !self.history.messages.is_empty() {
             return;
         }
+        let budget = self.memory_budget();
+
+        // —— 主路径：长期记忆区 ——
+        let mem_store = MemoryStore::new(kb_root);
+        if !mem_store.is_empty() {
+            let entries = mem_store.load_recent(budget);
+            if entries.is_empty() {
+                return;
+            }
+            let text = crate::agent::memory::render_entries(&entries);
+            let tokens =
+                crate::agent::token_counter::TokenCounter::estimate(&text);
+            self.history.messages.push(LlmMessage {
+                role: "system".to_string(),
+                content: Some(text),
+                tool_calls: None,
+                tool_call_id: None,
+            });
+            self.history.recount_tokens();
+            self.budget_manager.set_memory_tokens(tokens);
+            debug!(
+                session = %self.session_id,
+                entries = entries.len(),
+                tokens,
+                "已注入长期记忆条目"
+            );
+            return;
+        }
+
+        // —— 回退路径：分层摘要桶（升级前旧行为，预算同样受记忆区上限约束）——
         let store = SummaryStore::new(&self.session_id, kb_root);
-        let budget = self
-            .max_tokens
-            .saturating_sub(crate::agent::token_counter::TokenCounter::estimate(
-                &self.history.system_prompt,
-            ));
-        let summaries = store.build_summary_messages(budget);
+        let mut summaries = store.build_summary_messages(budget);
         if summaries.is_empty() {
             return;
         }
+        // 为旧路径注入同样附加时效与冲突指引，避免模型把过期上下文当作当前事实
+        summaries.insert(
+            0,
+            LlmMessage {
+                role: "system".to_string(),
+                content: Some(
+                    "【记忆注入说明】以下摘要为此前会话沉淀的分层记忆，可能已过时；\
+                     与当前任务或当前代码状态冲突时，以当前信息为准。"
+                        .to_string(),
+                ),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        );
         let tokens: usize = summaries
             .iter()
             .map(|m| {
@@ -293,8 +340,14 @@ impl ContextManager {
             session = %self.session_id,
             summaries = injected_count,
             tokens,
-            "已注入跨会话历史摘要"
+            "已注入跨会话历史摘要（分层摘要回退路径）"
         );
+    }
+
+    /// 记忆注入预算：不超过总预算的 [`MEMORY_BUDGET_PERCENT`]%（保底 1024 tokens）。
+    fn memory_budget(&self) -> usize {
+        let cap = self.max_tokens.saturating_mul(MEMORY_BUDGET_PERCENT) / 100;
+        cap.max(1024).min(self.max_tokens)
     }
 
     /// 将当前上下文预算报告格式化为 JSON 字符串（用于工具返回）。

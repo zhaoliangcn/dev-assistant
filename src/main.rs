@@ -165,15 +165,35 @@ impl Cli {
     /// 构建重启时传给子进程的 CLI 参数列表（不含 argv[0]）。
     ///
     /// 集中在此处定义，避免与 `AppConfig` 字段重复。
+    ///
+    /// # 相对路径绝对化（修复重启后静默退出）
+    ///
+    /// `restart` 工具 exec 替换进程时会把 cwd 切换为 `--project` 目录（`working_dir`）。
+    /// 若 `--config` / `--project` 是相对路径，重启后基于新 cwd 解析会失败
+    /// （如 `--config .dev-assistant-models.toml` 在 `--project /other/dir` 下找不到文件
+    /// → `App::build` 返回 Err → main 返回 Err → 进程静默退出）。
+    /// 因此这里在启动时（cwd 仍是用户启动目录）把相对路径统一转为绝对路径。
     fn to_restart_args(&self) -> Vec<String> {
+        // 启动时 cwd 作为相对路径解析基准
+        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        // 相对路径 → 绝对路径（绝对路径原样返回）
+        let absolutize = |p: &str| -> String {
+            let pb = PathBuf::from(p);
+            if pb.is_absolute() {
+                p.to_string()
+            } else {
+                startup_cwd.join(pb).display().to_string()
+            }
+        };
+
         let mut args: Vec<String> = vec![
             "--resume".to_string(),
             "--project".to_string(),
-            self.project.clone(),
+            absolutize(&self.project),
         ];
         if let Some(ref config) = self.config {
             args.push("--config".to_string());
-            args.push(config.display().to_string());
+            args.push(absolutize(&config.display().to_string()));
         }
         if self.no_approval {
             args.push("--no-approval".to_string());
@@ -221,13 +241,24 @@ fn main() -> Result<(), AppError> {
 
     // Initialize tracing subscriber — logs go to stderr so they don't
     // interfere with the split-pane UI rendered on stdout.
-    let level = if cli.verbose {
-        tracing_subscriber::filter::LevelFilter::DEBUG
+    //
+    // 使用 EnvFilter 按 target 过滤，避免第三方库（rustyline/reqwest/hyper 等）
+    // 的 DEBUG 日志刷屏（如 rustyline 每次按键都会输出 VEOF/VINTR 调试日志）：
+    // - verbose 模式：仅本 crate（dev_assistant_rs）输出 DEBUG+，第三方库只保留 WARN+
+    // - 普通模式：全局 WARN+
+    // - 若设置了非空 RUST_LOG 环境变量，则优先使用其规则（空字符串视为未设置，
+    //   避免 EnvFilter::new("") 产生空过滤器导致所有日志被静默过滤）
+    let default_filter = if cli.verbose {
+        "dev_assistant_rs=debug,warn"
     } else {
-        tracing_subscriber::filter::LevelFilter::WARN
+        "warn"
+    };
+    let filter = match std::env::var("RUST_LOG") {
+        Ok(v) if !v.trim().is_empty() => tracing_subscriber::EnvFilter::new(v),
+        _ => tracing_subscriber::EnvFilter::new(default_filter),
     };
     fmt::Subscriber::builder()
-        .with_max_level(level)
+        .with_env_filter(filter)
         .with_target(false)
         .with_thread_ids(false)
         .with_file(cli.verbose)

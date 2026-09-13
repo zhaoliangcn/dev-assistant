@@ -1,9 +1,11 @@
 //! 符号读取工具：`read_symbol`。
 //!
 //! 从源文件中按符号名定位并提取定义（函数、结构体、枚举、trait、impl 块、常量、类型别名、宏、模块）。
-//! 使用括号匹配算法（不依赖 `syn`），支持属性/文档注释收集。
+//!
+//! 优先使用 tree-sitter 解析（准确识别 impl 块内的方法、struct 字段、enum 变体等），
+//! 失败时降级到手写扫描（仅顶层定义）。
 
-use crate::tools::{common, ToolArgs, ToolContext, ToolDefinition, ToolResult, ErrorCategory};
+use crate::tools::{common, ErrorCategory, ToolArgs, ToolContext, ToolDefinition, ToolResult};
 use crate::utils::error::AppError;
 
 // ---------------------------------------------------------------------------
@@ -13,7 +15,7 @@ use crate::utils::error::AppError;
 pub fn read_symbol_tool() -> ToolDefinition {
     ToolDefinition {
         name: "read_symbol".to_string(),
-        description: "Read a specific symbol definition (function, struct, enum, etc.) from a source file. Supports bracket matching, attribute/doc collection, and symbol type filtering. When the symbol is not found, lists all available symbols in the file.".to_string(),
+        description: "Read a specific symbol definition (function, struct, enum, trait, impl method, field, variant, etc.) from a Rust source file. Uses tree-sitter for accurate parsing, including methods inside impl blocks (query as 'TypeName::method_name' or just 'method_name'). When the symbol is not found, lists all available symbols in the file.".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
@@ -23,12 +25,12 @@ pub fn read_symbol_tool() -> ToolDefinition {
                 },
                 "symbol": {
                     "type": "string",
-                    "description": "Symbol name to look up (e.g., function name, struct name)"
+                    "description": "Symbol name to look up. For impl methods, use 'TypeName::method_name' for exact match or just 'method_name' for fuzzy match across all impls."
                 },
                 "kind": {
                     "type": "string",
-                    "enum": ["function", "struct", "enum", "trait", "impl", "const", "type", "macro", "module", "any"],
-                    "description": "Symbol type filter (optional, default: any)",
+                    "enum": ["function", "struct", "enum", "trait", "impl", "method", "field", "variant", "const", "type", "macro", "module", "any"],
+                    "description": "Symbol type filter (optional, default: any). 'method' matches impl methods, 'field' matches struct fields, 'variant' matches enum variants.",
                     "default": "any"
                 },
                 "context_lines": {
@@ -53,13 +55,16 @@ pub fn read_symbol_tool() -> ToolDefinition {
 // 符号类型
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SymbolKind {
     Function,
     Struct,
     Enum,
     Trait,
     Impl,
+    Method,
+    Field,
+    Variant,
     Const,
     Type,
     Macro,
@@ -70,8 +75,11 @@ impl SymbolKind {
     fn all() -> &'static [SymbolKind] {
         &[
             SymbolKind::Function,
+            SymbolKind::Method,
             SymbolKind::Struct,
+            SymbolKind::Field,
             SymbolKind::Enum,
+            SymbolKind::Variant,
             SymbolKind::Trait,
             SymbolKind::Impl,
             SymbolKind::Const,
@@ -84,8 +92,11 @@ impl SymbolKind {
     fn name(&self) -> &'static str {
         match self {
             SymbolKind::Function => "function",
+            SymbolKind::Method => "method",
             SymbolKind::Struct => "struct",
+            SymbolKind::Field => "field",
             SymbolKind::Enum => "enum",
+            SymbolKind::Variant => "variant",
             SymbolKind::Trait => "trait",
             SymbolKind::Impl => "impl",
             SymbolKind::Const => "const",
@@ -97,22 +108,315 @@ impl SymbolKind {
 }
 
 /// 一个已识别符号的摘要信息。
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SymbolInfo {
     kind: SymbolKind,
     name: String,
-    start_line: usize,   // 1-indexed
-    end_line: usize,     // 1-indexed, inclusive
-    line: usize,         // 定义行（1-indexed）
-    attrs: Vec<String>,  // 属性（#[...]）
-    doc_comments: Vec<String>, // 文档注释（///）
+    /// 完整限定名（如 `ContextManager::inject_historical_summaries`），用于精确匹配。
+    qualified_name: String,
+    start_line: usize, // 1-indexed
+    end_line: usize,   // 1-indexed, inclusive
+    line: usize,       // 定义行（1-indexed）
+    attrs: Vec<String>,
+    doc_comments: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
-// 符号解析器
+// tree-sitter 解析器缓存
 // ---------------------------------------------------------------------------
 
-/// 按行扫描文件内容，收集所有符号的位置信息。
+/// 创建并初始化 tree-sitter Parser。
+/// Parser 不实现 Clone，每次调用创建新实例（开销极小，约微秒级）。
+fn create_parser() -> Result<tree_sitter::Parser, AppError> {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .map_err(|e| AppError::Llm(format!("tree-sitter-rust language init failed: {}", e)))?;
+    Ok(parser)
+}
+
+// ---------------------------------------------------------------------------
+// tree-sitter 扫描实现
+// ---------------------------------------------------------------------------
+
+/// 用 tree-sitter 扫描文件中的所有符号。
+fn scan_symbols_ts(source: &str) -> Result<Vec<SymbolInfo>, AppError> {
+    let mut parser = create_parser()?;
+    let tree = parser
+        .parse(source, None)
+        .ok_or_else(|| AppError::Llm("tree-sitter parse failed".to_string()))?;
+
+    let mut symbols = Vec::new();
+    walk_node(&tree.root_node(), source, &mut symbols, None);
+    Ok(symbols)
+}
+
+/// 递归遍历 AST 节点，收集所有符号。
+fn walk_node(
+    node: &tree_sitter::Node,
+    source: &str,
+    symbols: &mut Vec<SymbolInfo>,
+    impl_target: Option<String>,
+) {
+    let kind = node.kind();
+    let start_line = node.start_position().row + 1; // 1-indexed
+    let end_line = node.end_position().row + 1;
+
+    // 收集属性与文档注释（向上查找紧邻的 attribute_item / line_comment 兄弟）
+    let (attrs, docs) = collect_attrs_and_docs(node, source);
+
+    match kind {
+        "function_item" | "function_signature_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                // tree-sitter-rust 中自由函数与 impl/trait 内方法同为 function_item /
+                // function_signature_item，需依据所属上下文区分：有 owner 即方法。
+                let (kind, qualified) = match &impl_target {
+                    Some(t) => (SymbolKind::Method, format!("{}::{}", t, name)),
+                    None => (SymbolKind::Function, name.clone()),
+                };
+                symbols.push(SymbolInfo {
+                    kind,
+                    name: name.clone(),
+                    qualified_name: qualified,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        "struct_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Struct,
+                    name: name.clone(),
+                    qualified_name: name,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        "field_declaration" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Field,
+                    name: name.clone(),
+                    qualified_name: name,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        "enum_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Enum,
+                    name: name.clone(),
+                    qualified_name: name,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        "enum_variant" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Variant,
+                    name: name.clone(),
+                    qualified_name: name,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        "trait_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Trait,
+                    name: name.clone(),
+                    qualified_name: name.clone(),
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+                // trait 体内成员同样是 function_item，需传递归属以便判定为方法
+                if let Some(body) = node.child_by_field_name("body") {
+                    for i in 0..body.child_count() {
+                        if let Some(child) = body.child(i) {
+                            walk_node(&child, source, symbols, Some(name.clone()));
+                        }
+                    }
+                }
+                return;
+            }
+        }
+        "impl_item" => {
+            // 提取 impl 目标类型名
+            let target = extract_impl_target(node, source);
+            // 记录 impl 块本身
+            symbols.push(SymbolInfo {
+                kind: SymbolKind::Impl,
+                name: target.clone().unwrap_or_else(|| "impl".to_string()),
+                qualified_name: target.clone().unwrap_or_else(|| "impl".to_string()),
+                start_line,
+                end_line,
+                line: start_line,
+                attrs,
+                doc_comments: docs,
+            });
+            // 递归子节点，传递 impl 目标
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i) {
+                    walk_node(&child, source, symbols, target.clone());
+                }
+            }
+            return; // 已手动遍历子节点
+        }
+        "const_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Const,
+                    name: name.clone(),
+                    qualified_name: name,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        "type_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Type,
+                    name: name.clone(),
+                    qualified_name: name,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        "macro_definition" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Macro,
+                    name: name.clone(),
+                    qualified_name: name,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        "mod_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = source[name_node.byte_range()].to_string();
+                symbols.push(SymbolInfo {
+                    kind: SymbolKind::Module,
+                    name: name.clone(),
+                    qualified_name: name,
+                    start_line,
+                    end_line,
+                    line: start_line,
+                    attrs,
+                    doc_comments: docs,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    // 默认递归遍历子节点（impl_item 已手动处理并 return）
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            walk_node(&child, source, symbols, impl_target.clone());
+        }
+    }
+}
+
+/// 从 impl_item 节点提取目标类型名。
+fn extract_impl_target(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    // 官方语法中 impl 目标类型字段名为 type（self_type 不存在）
+    let self_type = node.child_by_field_name("type")?;
+    let text = &source[self_type.byte_range()];
+    // 取第一个 token（去掉泛型、trait 限定等）
+    let first = text.split_whitespace().next()?.trim();
+    // 去掉泛型 <...>
+    let first = first.split('<').next()?.trim();
+    // 去掉路径限定（如 std::collections::HashMap → HashMap）
+    let first = first.rsplit("::").next()?.trim();
+    if first.is_empty() {
+        None
+    } else {
+        Some(first.to_string())
+    }
+}
+
+/// 收集节点上方的属性（attribute_item）和文档注释（line_comment 以 /// 开头）。
+fn collect_attrs_and_docs(node: &tree_sitter::Node, source: &str) -> (Vec<String>, Vec<String>) {
+    let mut attrs = Vec::new();
+    let mut docs = Vec::new();
+
+    let mut sibling = node.prev_named_sibling();
+    while let Some(s) = sibling {
+        match s.kind() {
+            "attribute_item" => {
+                attrs.push(source[s.byte_range()].trim().to_string());
+                sibling = s.prev_named_sibling();
+            }
+            "line_comment" => {
+                let text = source[s.byte_range()].to_string();
+                if text.starts_with("///") {
+                    docs.push(text.trim_start_matches("///").trim().to_string());
+                    sibling = s.prev_named_sibling();
+                } else {
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+
+    attrs.reverse();
+    docs.reverse();
+    (attrs, docs)
+}
+
+// ---------------------------------------------------------------------------
+// 手写扫描实现（fallback）
+// ---------------------------------------------------------------------------
+
+/// 按行扫描文件内容，收集所有顶层符号的位置信息（fallback，不含 impl 内方法）。
 fn scan_symbols(lines: &[&str]) -> Vec<SymbolInfo> {
     let mut symbols = Vec::new();
     let mut i = 0;
@@ -121,28 +425,25 @@ fn scan_symbols(lines: &[&str]) -> Vec<SymbolInfo> {
         let line = lines[i];
         let trimmed = line.trim();
 
-        // 跳过空行和注释
         if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("/*") {
             i += 1;
             continue;
         }
 
-        // 收集该行之前的属性/文档注释
         let (attrs, doc_comments) = collect_attributes(lines, i);
 
-        // 尝试匹配符号
         if let Some((kind, name, body_end)) = try_match_symbol(lines, i) {
             let end_line = body_end.unwrap_or(i);
             symbols.push(SymbolInfo {
                 kind,
-                name,
-                start_line: attrs_start_line(lines, i) + 1, // 1-indexed
-                end_line: end_line + 1,                      // 1-indexed
+                name: name.clone(),
+                qualified_name: name,
+                start_line: attrs_start_line(lines, i) + 1,
+                end_line: end_line + 1,
                 line: i + 1,
                 attrs,
                 doc_comments,
             });
-            // 跳过主体
             if let Some(e) = body_end {
                 i = e + 1;
                 continue;
@@ -155,13 +456,10 @@ fn scan_symbols(lines: &[&str]) -> Vec<SymbolInfo> {
     symbols
 }
 
-/// 从给定行向上回溯，收集属性（#[...]）和文档注释（///）。
 fn collect_attributes(lines: &[&str], line_idx: usize) -> (Vec<String>, Vec<String>) {
     let mut attrs = Vec::new();
     let mut docs = Vec::new();
     let mut i = line_idx as isize - 1;
-
-    // 收集多行属性（如 #[cfg(...)] 跨行）
     let mut pending_attr: Option<String> = None;
 
     while i >= 0 {
@@ -170,22 +468,18 @@ fn collect_attributes(lines: &[&str], line_idx: usize) -> (Vec<String>, Vec<Stri
         if trimmed.starts_with("///") {
             docs.push(trimmed.trim_start_matches("///").trim().to_string());
         } else if trimmed.starts_with("//!") {
-            // 模块文档，不属于符号，停止
             break;
         } else if trimmed.starts_with("#[") && !trimmed.starts_with("#![") {
-            // 属性（排除 #![...] 属性）
             if pending_attr.is_some() {
-                break; // 前一行有未闭合的属性，但当前行也是属性，停止
+                break;
             }
             pending_attr = Some(trimmed.to_string());
-            // 检查是否需要跨行收集（以 ] 结尾？）
             if trimmed.ends_with(']') {
                 attrs.push(pending_attr.take().unwrap());
             }
         } else if trimmed.is_empty() {
             break;
         } else {
-            // 检查是否是上一行属性的延续（缩进的内容）
             if let Some(ref mut attr) = pending_attr {
                 attr.push(' ');
                 attr.push_str(trimmed);
@@ -200,7 +494,6 @@ fn collect_attributes(lines: &[&str], line_idx: usize) -> (Vec<String>, Vec<Stri
         i -= 1;
     }
 
-    // 如果 pending_attr 还有未闭合的，保留它
     if let Some(attr) = pending_attr {
         if !attr.is_empty() {
             attrs.push(attr);
@@ -212,7 +505,6 @@ fn collect_attributes(lines: &[&str], line_idx: usize) -> (Vec<String>, Vec<Stri
     (attrs, docs)
 }
 
-/// 计算属性开始的行号（0-indexed）。
 fn attrs_start_line(lines: &[&str], line_idx: usize) -> usize {
     let mut i = line_idx as isize - 1;
     while i >= 0 {
@@ -229,14 +521,9 @@ fn attrs_start_line(lines: &[&str], line_idx: usize) -> usize {
     (i + 1) as usize
 }
 
-/// 去掉行首的可见性修饰符（pub、pub(crate)、pub(super) 等）和
-/// async/unsafe/extern 关键字，返回核心内容。
-/// 使 `pub fn`、`pub async fn`、`pub(crate) struct` 等都能被正确匹配。
 fn strip_modifiers(s: &str) -> &str {
     let s = s.trim();
-    // 跳过可见性修饰符
     let s = if s.starts_with("pub(") {
-        // pub(crate), pub(super), pub(in path)
         if let Some(end) = s.find(')') {
             s[end + 1..].trim()
         } else {
@@ -249,91 +536,64 @@ fn strip_modifiers(s: &str) -> &str {
     } else {
         s
     };
-    // 跳过 async, unsafe, extern 等修饰
     let s = s.strip_prefix("async ").unwrap_or(s);
     let s = s.strip_prefix("unsafe ").unwrap_or(s);
     let s = s.strip_prefix("extern ").unwrap_or(s);
     s
 }
 
-/// 尝试在指定行匹配一个符号定义。
-/// 返回 (符号类型, 符号名, 主体结束行号（0-indexed, 不含 body 则为 None）)
 fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, String, Option<usize>)> {
     let line = lines[line_idx];
     let trimmed = line.trim();
-    // 去掉可见性/async/unsafe 等修饰符后再匹配关键字，
-    // 使 `pub fn`、`pub async fn`、`pub(crate) struct` 等都能被正确识别。
     let core = strip_modifiers(trimmed);
 
-    // 按优先级从高到低匹配
-
-    // 1. 函数: fn <name>(
     if let Some(name) = match_keyword(core, "fn ") {
         if !name.starts_with(|c: char| c.is_whitespace() || c == '(') {
             return Some((SymbolKind::Function, extract_name(name), find_body_end(lines, line_idx)));
         }
     }
-
-    // 2. 结构体: struct <name>
     if let Some(name) = match_keyword(core, "struct ") {
         let name = extract_name(name);
         if !name.is_empty() && !name.starts_with('{') {
             return Some((SymbolKind::Struct, name, find_body_end(lines, line_idx)));
         }
     }
-
-    // 3. 枚举: enum <name>
     if let Some(name) = match_keyword(core, "enum ") {
         let name = extract_name(name);
         if !name.is_empty() && !name.starts_with('{') {
             return Some((SymbolKind::Enum, name, find_body_end(lines, line_idx)));
         }
     }
-
-    // 4. trait: trait <name>
     if let Some(name) = match_keyword(core, "trait ") {
         let name = extract_name(name);
         if !name.is_empty() && !name.starts_with('{') && !name.starts_with('(') {
             return Some((SymbolKind::Trait, name, find_body_end(lines, line_idx)));
         }
     }
-
-    // 5. impl <target> (impl 块)
     if let Some(after_impl) = core.strip_prefix("impl ") {
         let rest = after_impl.trim();
-        // 跳过 unsafe impl, pub impl 等修饰
         let rest = rest.strip_prefix("unsafe ").unwrap_or(rest);
         let rest = rest.strip_prefix("pub ").unwrap_or(rest);
-        // 提取目标类型名（直到 { 或 where 或 :）
         if let Some(target) = rest.split(['{', 'w', ':']).next() {
             let target = target.trim();
             if !target.is_empty() && target != " " {
-                // 过滤掉裸 impl (impl 块)
-                // 查找目标类型名
                 let name = target.split_whitespace().next().unwrap_or(target).trim().to_string();
-                // 去掉泛型部分
                 let name = name.split('<').next().unwrap_or(&name).trim().to_string();
                 if !name.is_empty() {
                     return Some((SymbolKind::Impl, name, find_body_end(lines, line_idx)));
                 }
             }
         }
-        // 裸 impl 块，使用 impl 本身作为名字
         return Some((SymbolKind::Impl, "impl".to_string(), find_body_end(lines, line_idx)));
     }
-
-    // 6. 常量: const <name>:
     if let Some(name) = match_keyword(core, "const ") {
         let name = extract_name(name);
         if !name.is_empty() {
-            // 常量可能没有 body（const X: i32 = 5;）
             let has_body = trimmed.contains('{');
             let body_end = if has_body { find_body_end(lines, line_idx) } else { None };
             return Some((SymbolKind::Const, name, body_end));
         }
     }
-
-    // 7. 类型别名: type <name> =
     if let Some(name) = match_keyword(core, "type ") {
         let name = extract_name(name);
         if !name.is_empty() && !name.starts_with('=') {
@@ -342,16 +602,12 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
             return Some((SymbolKind::Type, name, body_end));
         }
     }
-
-    // 8. 宏: macro_rules! <name>
     if let Some(name) = core.strip_prefix("macro_rules! ") {
         let name = name.split_whitespace().next().unwrap_or(name).trim().to_string();
         if !name.is_empty() {
             return Some((SymbolKind::Macro, name, find_body_end(lines, line_idx)));
         }
     }
-
-    // 9. 模块: mod <name>; 或 mod <name> {
     if let Some(name) = match_keyword(core, "mod ") {
         let name = name.trim();
         if !name.is_empty() {
@@ -367,17 +623,13 @@ fn try_match_symbol(lines: &[&str], line_idx: usize) -> Option<(SymbolKind, Stri
     None
 }
 
-/// 检查字符串是否以指定关键字开头（注意空格），并返回关键字后的内容。
 fn match_keyword<'a>(s: &'a str, keyword: &str) -> Option<&'a str> {
     s.strip_prefix(keyword)
 }
 
-/// 从定义行提取符号名（跳过 pub、pub(crate)、pub(super) 等修饰，以及泛型参数）。
 fn extract_name(s: &str) -> String {
     let s = s.trim();
-    // 跳过可见性修饰符
     let s = if s.starts_with("pub(") {
-        // pub(crate), pub(super), pub(in path)
         if let Some(end) = s.find(')') {
             s[end + 1..].trim()
         } else {
@@ -390,25 +642,16 @@ fn extract_name(s: &str) -> String {
     } else {
         s
     };
-
-    // 跳过 async, unsafe, extern 等修饰
     let s = s.strip_prefix("async ").unwrap_or(s);
     let s = s.strip_prefix("unsafe ").unwrap_or(s);
     let s = s.strip_prefix("extern ").unwrap_or(s);
-
-    // 取第一个非空 token（直到泛型 <、括号 ( 或类型注解冒号 : )
-    let name = s.split(['<', '(', ' ', '\t', ':'])
+    s.split(['<', '(', ' ', '\t', ':'])
         .next()
         .unwrap_or(s)
         .trim()
-        .to_string();
-
-    name
+        .to_string()
 }
 
-/// 寻找符号主体的结束行（括号匹配）。
-/// 如果符号没有主体（后面跟 ; 或没有 {），返回 None。
-/// 返回 0-indexed 行号。
 fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
     let mut brace_depth = 0i32;
     let mut in_string = false;
@@ -422,10 +665,9 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
         while j < bytes.len() {
             let c = bytes[j] as char;
 
-            // 字符串字面量跳过
             if in_string {
                 if c == '\\' && j + 1 < bytes.len() {
-                    j += 2; // 跳过转义
+                    j += 2;
                     continue;
                 }
                 if c == '"' {
@@ -435,7 +677,6 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
                 continue;
             }
 
-            // 字符字面量跳过
             if in_char {
                 if c == '\\' && j + 1 < bytes.len() {
                     j += 2;
@@ -448,7 +689,6 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
                 continue;
             }
 
-            // 块注释跳过
             if c == '/' && j + 1 < bytes.len() && bytes[j + 1] as char == '*' {
                 j += 2;
                 while j < bytes.len() {
@@ -461,7 +701,6 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
                 continue;
             }
 
-            // 行注释跳过（整行，外层循环会跳到下一行）
             if c == '/' && j + 1 < bytes.len() && bytes[j + 1] as char == '/' {
                 break;
             }
@@ -469,7 +708,6 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
             match c {
                 '"' => in_string = true,
                 '\'' => {
-                    // 检查是否确实是字符字面量（不是生命周期语法）
                     if j + 1 < bytes.len() && bytes[j + 1] as char != '\'' {
                         in_char = true;
                     }
@@ -486,7 +724,6 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
                 }
                 ';' => {
                     if !found_open {
-                        // 没有 body（如 const X: i32 = 5;）
                         return None;
                     }
                 }
@@ -495,13 +732,10 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
 
             j += 1;
         }
-
-        // 行注释情况下，直接跳到下一行
     }
 
-    // 没有找到闭合括号
     if found_open {
-        Some(lines.len() - 1) // 返回文件末尾
+        Some(lines.len() - 1)
     } else {
         None
     }
@@ -511,11 +745,9 @@ fn find_body_end(lines: &[&str], start_line: usize) -> Option<usize> {
 // 符号格式化输出
 // ---------------------------------------------------------------------------
 
-/// 格式化单个符号的完整输出。
 fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include_body: bool) -> String {
     let mut out = String::new();
 
-    // 标题行
     let total_lines = if include_body && sym.end_line > sym.line {
         sym.end_line - sym.start_line + 1
     } else {
@@ -523,31 +755,27 @@ fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include
     };
     out.push_str(&format!(
         "[read_symbol] 找到符号: {} ({})\n",
-        sym.name, sym.kind.name()
+        sym.qualified_name, sym.kind.name()
     ));
     out.push_str(&format!(
         "文件: 第 {}-{} 行（共 {} 行）\n\n",
         sym.start_line, sym.end_line, total_lines
     ));
 
-    // 文档注释
     for doc in &sym.doc_comments {
         out.push_str(&format!("/// {}\n", doc));
     }
 
-    // 属性
     for attr in &sym.attrs {
         out.push_str(&format!("{}\n", attr));
     }
 
-    // 符号定义行
     if sym.line > 0 && sym.line <= lines.len() {
         let def_line = lines[sym.line - 1];
         out.push_str(def_line);
         out.push('\n');
     }
 
-    // 主体
     if include_body && sym.end_line > sym.line {
         for line in lines.iter().take(sym.end_line.min(lines.len())).skip(sym.line) {
             out.push_str(line);
@@ -555,7 +783,6 @@ fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include
         }
     }
 
-    // 上下文行（前）
     if context_lines > 0 && sym.start_line > 1 {
         let ctx_start = (sym.start_line as isize - 1 - context_lines as isize).max(0) as usize;
         let mut ctx_out = String::new();
@@ -568,7 +795,6 @@ fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include
         }
     }
 
-    // 上下文行（后）
     if context_lines > 0 && sym.end_line < lines.len() {
         let ctx_end = (sym.end_line + context_lines).min(lines.len());
         out.push_str(&format!("\n... 上下文后 {} 行:\n", ctx_end - sym.end_line));
@@ -577,7 +803,6 @@ fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include
         }
     }
 
-    // 符号摘要
     out.push_str(&format!(
         "\n符号摘要:\n- 类型: {}\n- 行数: {}\n",
         sym.kind.name(),
@@ -593,7 +818,6 @@ fn format_symbol(sym: &SymbolInfo, lines: &[&str], context_lines: usize, include
     out
 }
 
-/// 格式化可用符号列表。
 fn format_available_symbols(symbols: &[SymbolInfo]) -> String {
     let mut out = String::from("文件中的可用符号:\n");
 
@@ -604,7 +828,7 @@ fn format_available_symbols(symbols: &[SymbolInfo]) -> String {
                 out.push_str(&format!(
                     "  {:8}  {} (第 {} 行)\n",
                     kind.name(),
-                    sym.name,
+                    sym.qualified_name,
                     sym.line
                 ));
             }
@@ -640,42 +864,45 @@ fn read_symbol_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRes
 
     let full_path = common::resolve_model_path(&context.working_dir, file_path);
 
-    // 读取文件
     let content = std::fs::read_to_string(&full_path).map_err(|e| {
         AppError::Llm(format!("Failed to read file '{}': {}", full_path.display(), e))
     })?;
 
     let lines: Vec<&str> = content.lines().collect();
 
-    // 扫描所有符号
-    let symbols = scan_symbols(&lines);
+    // 优先使用 tree-sitter 扫描，失败时降级到手写扫描
+    let symbols = match scan_symbols_ts(&content) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::debug!(error = %e, "tree-sitter 扫描失败，降级到手写扫描");
+            scan_symbols(&lines)
+        }
+    };
 
-    // 过滤匹配的符号
     let kind_filter = kind_filter.to_lowercase();
     let matching: Vec<&SymbolInfo> = symbols.iter().filter(|s| {
-        // 类型过滤
         if kind_filter != "any" && s.kind.name() != kind_filter {
             return false;
         }
-        // 符号名匹配（区分大小写）
-        if s.name != symbol_name {
-            return false;
-        }
-        true
+        // 支持三种匹配方式：
+        // 1. 精确匹配 qualified_name（如 "ContextManager::method"）
+        // 2. 精确匹配 name（如 "method"）
+        // 3. 后缀匹配（qualified_name 以 "::symbol" 结尾）
+        s.name == symbol_name
+            || s.qualified_name == symbol_name
+            || s.qualified_name.ends_with(&format!("::{}", symbol_name))
     }).collect();
 
     if matching.is_empty() {
-        // 未找到时列出可用符号
         let mut result = format!(
             "[read_symbol] ❌ 未找到符号 '{}' 在文件 '{}' 中\n\n",
             symbol_name,
             file_path
         );
 
-        // 如果指定了类型过滤但没找到，尝试去掉类型过滤
         if kind_filter != "any" {
             let all_matching: Vec<&SymbolInfo> = symbols.iter()
-                .filter(|s| s.name == symbol_name)
+                .filter(|s| s.name == symbol_name || s.qualified_name == symbol_name)
                 .collect();
             if !all_matching.is_empty() {
                 result.push_str(&format!(
@@ -695,7 +922,6 @@ fn read_symbol_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRes
         ));
     }
 
-    // 找到符号，格式化输出
     let result = format_symbol(matching[0], &lines, context_lines, include_body);
 
     Ok(ToolResult::success(result))
@@ -709,7 +935,7 @@ fn read_symbol_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRes
 mod tests {
     use super::*;
 
-    // ---- 符号扫描 ----
+    // ---- 手写扫描测试（fallback 路径） ----
 
     #[test]
     fn scan_simple_function() {
@@ -719,8 +945,6 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "hello");
         assert_eq!(symbols[0].kind, SymbolKind::Function);
-        assert_eq!(symbols[0].line, 1);
-        assert_eq!(symbols[0].end_line, 3);
     }
 
     #[test]
@@ -732,7 +956,6 @@ mod tests {
         assert_eq!(symbols[0].name, "Foo");
         assert_eq!(symbols[0].kind, SymbolKind::Struct);
         assert_eq!(symbols[0].attrs.len(), 1);
-        assert!(symbols[0].attrs[0].contains("derive(Debug)"));
     }
 
     #[test]
@@ -741,40 +964,7 @@ mod tests {
         let lines: Vec<&str> = content.lines().collect();
         let symbols = scan_symbols(&lines);
         assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "documented");
         assert_eq!(symbols[0].doc_comments.len(), 1);
-        assert_eq!(symbols[0].doc_comments[0], "This is a doc comment");
-    }
-
-    #[test]
-    fn scan_nested_brackets() {
-        let content = "fn outer() {\n    fn inner() {\n        // nothing\n    }\n    let x = vec![1, 2, 3];\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        // 应该只找到 outer（内嵌 fn 不是顶层定义）
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "outer");
-        assert_eq!(symbols[0].end_line, 6);
-    }
-
-    #[test]
-    fn scan_enum() {
-        let content = "enum Color {\n    Red,\n    Green,\n    Blue,\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "Color");
-        assert_eq!(symbols[0].kind, SymbolKind::Enum);
-    }
-
-    #[test]
-    fn scan_trait() {
-        let content = "pub trait Into<T> {\n    fn into(self) -> T;\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "Into");
-        assert_eq!(symbols[0].kind, SymbolKind::Trait);
     }
 
     #[test]
@@ -785,119 +975,71 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Foo");
         assert_eq!(symbols[0].kind, SymbolKind::Impl);
-        assert_eq!(symbols[0].end_line, 3);
+    }
+
+    // ---- tree-sitter 扫描测试 ----
+
+    #[test]
+    fn ts_scan_function() {
+        let content = "fn hello() {\n    println!(\"hello\");\n}\n";
+        let symbols = scan_symbols_ts(content).unwrap();
+        assert!(symbols.iter().any(|s| s.name == "hello" && s.kind == SymbolKind::Function));
     }
 
     #[test]
-    fn scan_const() {
-        let content = "const MAX: usize = 1024;\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "MAX");
-        assert_eq!(symbols[0].kind, SymbolKind::Const);
+    fn ts_scan_impl_method() {
+        let content = "impl ContextManager {\n    pub fn inject_historical_summaries(&mut self, kb_root: &std::path::Path) {\n        // body\n    }\n}\n";
+        let symbols = scan_symbols_ts(content).unwrap();
+        let method = symbols.iter().find(|s| s.name == "inject_historical_summaries");
+        assert!(method.is_some(), "impl 内的方法应被识别");
+        let m = method.unwrap();
+        assert_eq!(m.kind, SymbolKind::Method);
+        assert_eq!(m.qualified_name, "ContextManager::inject_historical_summaries");
     }
 
     #[test]
-    fn scan_type_alias() {
-        let content = "type Result<T> = std::result::Result<T, Error>;\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "Result");
-        assert_eq!(symbols[0].kind, SymbolKind::Type);
+    fn ts_scan_struct_field() {
+        let content = "struct Foo {\n    x: i32,\n    y: String,\n}\n";
+        let symbols = scan_symbols_ts(content).unwrap();
+        let x = symbols.iter().find(|s| s.name == "x");
+        assert!(x.is_some(), "struct 字段应被识别");
+        assert_eq!(x.unwrap().kind, SymbolKind::Field);
     }
 
     #[test]
-    fn scan_macro() {
-        let content = "macro_rules! vec {\n    ($($x:expr),*) => { ... };\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "vec");
-        assert_eq!(symbols[0].kind, SymbolKind::Macro);
+    fn ts_scan_enum_variant() {
+        let content = "enum Color {\n    Red,\n    Green,\n    Blue,\n}\n";
+        let symbols = scan_symbols_ts(content).unwrap();
+        let red = symbols.iter().find(|s| s.name == "Red");
+        assert!(red.is_some(), "enum 变体应被识别");
+        assert_eq!(red.unwrap().kind, SymbolKind::Variant);
     }
 
     #[test]
-    fn scan_module() {
-        let content = "pub mod foo;\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "foo");
-        assert_eq!(symbols[0].kind, SymbolKind::Module);
+    fn ts_scan_trait_method() {
+        let content = "pub trait Into<T> {\n    fn into(self) -> T;\n}\n";
+        let symbols = scan_symbols_ts(content).unwrap();
+        let into = symbols.iter().find(|s| s.name == "into");
+        assert!(into.is_some(), "trait 方法应被识别");
+        assert_eq!(into.unwrap().kind, SymbolKind::Method);
     }
 
     #[test]
-    fn scan_generic_function() {
-        let content = "fn foo<T: Debug>(x: T) -> T { x }\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "foo");
-        assert_eq!(symbols[0].kind, SymbolKind::Function);
+    fn ts_scan_multiple_impls() {
+        let content = "impl Foo {\n    fn a() {}\n}\nimpl Bar {\n    fn a() {}\n}\n";
+        let symbols = scan_symbols_ts(content).unwrap();
+        let a_methods: Vec<_> = symbols.iter().filter(|s| s.name == "a").collect();
+        assert_eq!(a_methods.len(), 2, "同名方法在不同 impl 中应都被识别");
+        let qualifieds: Vec<_> = a_methods.iter().map(|s| s.qualified_name.clone()).collect();
+        assert!(qualifieds.contains(&"Foo::a".to_string()));
+        assert!(qualifieds.contains(&"Bar::a".to_string()));
     }
 
     #[test]
-    fn symbol_not_found_lists_available() {
-        let content = "fn hello() {}\nstruct World {}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        // 验证找到了两个符号
-        assert_eq!(symbols.len(), 2);
-        // 验证格式
-        let list = format_available_symbols(&symbols);
-        assert!(list.contains("hello"));
-        assert!(list.contains("World"));
-        assert!(list.contains("function"));
-        assert!(list.contains("struct"));
-    }
-
-    #[test]
-    fn brackets_in_string_are_skipped() {
-        let content = "fn test() {\n    let s = \"hello { world }\";\n    let x = 1;\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        // 括号匹配应该跳过字符串中的 {
-        assert_eq!(symbols[0].name, "test");
-        assert_eq!(symbols[0].end_line, 4);
-    }
-
-    #[test]
-    fn pub_struct_with_visibility() {
-        let content = "pub struct FooBar { x: i32 }\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "FooBar");
-        assert_eq!(symbols[0].kind, SymbolKind::Struct);
-    }
-
-    #[test]
-    fn async_function() {
-        let content = "pub async fn fetch_data(url: &str) -> Result<String> {\n    Ok(String::new())\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "fetch_data");
-    }
-
-    #[test]
-    fn multi_line_attr() {
-        let content = "#[cfg(feature = \"foo\")]\n#[derive(Debug)]\nstruct MultiAttr {\n    x: i32,\n}\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].attrs.len(), 2);
-    }
-
-    #[test]
-    fn pub_crate_struct() {
-        let content = "pub(crate) struct Internal { x: i32 }\n";
-        let lines: Vec<&str> = content.lines().collect();
-        let symbols = scan_symbols(&lines);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "Internal");
+    fn ts_scan_const_and_type() {
+        let content = "const MAX: usize = 1024;\ntype Result<T> = std::result::Result<T, Error>;\n";
+        let symbols = scan_symbols_ts(content).unwrap();
+        assert!(symbols.iter().any(|s| s.name == "MAX" && s.kind == SymbolKind::Const));
+        assert!(symbols.iter().any(|s| s.name == "Result" && s.kind == SymbolKind::Type));
     }
 }

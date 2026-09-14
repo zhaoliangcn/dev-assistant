@@ -82,9 +82,17 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
         }
         #[cfg(not(unix))]
         {
-            let mut c = Command::new("cmd");
-            c.arg("/C").arg(command);
-            c
+            // 默认 PowerShell（LLM 生成的管道/&&等现代命令兼容性更好）；
+            // 设 DA_SHELL=cmd 可回退旧行为。
+            if std::env::var("DA_SHELL").as_deref() == Ok("cmd") {
+                let mut c = Command::new("cmd");
+                c.arg("/C").arg(command);
+                c
+            } else {
+                let mut c = Command::new("powershell");
+                c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+                c
+            }
         }
     } else {
         let mut c = Command::new(command);
@@ -123,6 +131,10 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
     // successfully created so we know whether killpg() is safe to use.
     #[cfg(unix)]
     let pgid_created = unsafe { libc::setpgid(pid as i32, pid as i32) == 0 };
+
+    // Windows 无进程组概念；kill_process_tree 走 taskkill /T 杀进程树。
+    #[cfg(not(unix))]
+    let pgid_created = false;
 
     // Read stdout/stderr with a byte limit to prevent OOM from large output.
     // Uses separate threads to read pipes concurrently, avoiding deadlock.

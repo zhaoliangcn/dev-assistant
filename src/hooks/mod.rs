@@ -588,8 +588,8 @@ hooks:
   - name: guard
     event: pre-tool
     type: shell
-    command: echo
-    args: ["DENY 高危操作已被拦截"]
+    command: sh
+    args: ["-c", "printf 'DENY %s' '高危操作已被拦截'"]
 "#,
         );
         let mgr = HookManager::load(dir.path(), true);

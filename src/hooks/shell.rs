@@ -318,12 +318,13 @@ mod tests {
     #[test]
     fn truncation_respects_utf8_boundary() {
         // "你好世界" 为 12 字节，max_output_bytes=7 落在第 2 个字符中间
+        // 注：用 sh+printf 而非 echo——Windows 的 echo.exe 按 OEM 码页输出中文，会产生编码差异
         let config = HookConfig {
             name: "truncate-utf8".to_string(),
             event: HookEvent::SessionStart,
             type_: "shell".to_string(),
-            command: "echo".to_string(),
-            args: Some(vec!["你好世界".to_string()]),
+            command: "sh".to_string(),
+            args: Some(vec!["-c".to_string(), "printf %s 你好世界".to_string()]),
             timeout: Some(5),
             priority: None,
             max_output_bytes: Some(7),

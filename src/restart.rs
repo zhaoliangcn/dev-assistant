@@ -1,13 +1,18 @@
 //! restart 工具的执行流程：编译并重启进程。
 //!
-//! # 安全说明
+//! # 平台语义
 //!
-//! 调用 `exec()` 替换进程时，所有文件描述符默认保持打开状态。
-//! 因此 `SessionLogger` 和 `SessionStore` 在创建文件时都设置了
-//! `FD_CLOEXEC` 标志（通过 `libc::O_CLOEXEC`），确保 `exec()` 后
-//! 文件句柄自动关闭，避免资源泄漏。
+//! - **Unix**：调用 `exec()` 原地替换当前进程，PID 保持不变。
+//!   `SessionLogger`/`SessionStore` 创建文件时设置的 `FD_CLOEXEC`
+//!   （`libc::O_CLOEXEC`）保证 `exec()` 后旧 fd 自动关闭，避免资源泄漏。
+//! - **Windows**：无 exec 语义，采用 spawn-and-exit——`spawn` 新 exe
+//!   子进程（共享同一控制台），当前进程随即 `exit(0)` 让出终端。
+//!   PID 会变化；当前进程持有的文件句柄随进程退出释放。
 
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(not(unix))]
+use std::io::Write;
 use std::path::Path;
 use std::process;
 
@@ -58,37 +63,86 @@ pub fn perform_restart(
                 }
             };
 
-            emit(
-                MessageLevel::Success,
-                "构建成功，正在重启 (PID 保持不变)...".to_string(),
-            );
+            #[cfg(unix)]
+            let restart_msg = "构建成功，正在重启 (PID 保持不变)...";
+            #[cfg(not(unix))]
+            let restart_msg = "构建成功，正在重启 (新进程将接管终端)...";
+            emit(MessageLevel::Success, restart_msg.to_string());
 
             // exec() replaces the current process on success (same PID).
             // It only returns on error.
-            let exec_err = process::Command::new(&exe)
-                .args(cli_args)
-                .current_dir(working_dir)
-                .exec();
+            #[cfg(unix)]
+            {
+                let exec_err = process::Command::new(&exe)
+                    .args(cli_args)
+                    .current_dir(working_dir)
+                    .exec();
 
-            // If we reach here, exec() failed — show error and continue REPL
-            // (return true so user can fix the issue and retry)
-            emit(
-                MessageLevel::Error,
-                format!(
-                    "重启失败 (exec 返回错误): {}\n\
-                     可执行文件: {}\n\
-                     参数: {:?}\n\
-                     工作目录: {}\n\
-                     请手动运行: {} {}",
-                    exec_err,
-                    exe.display(),
-                    cli_args,
-                    working_dir.display(),
-                    exe.display(),
-                    cli_args.join(" ")
-                ),
-            );
-            true
+                // If we reach here, exec() failed — show error and continue REPL
+                // (return true so user can fix the issue and retry)
+                emit(
+                    MessageLevel::Error,
+                    format!(
+                        "重启失败 (exec 返回错误): {}\n\
+                         可执行文件: {}\n\
+                         参数: {:?}\n\
+                         工作目录: {}\n\
+                         请手动运行: {} {}",
+                        exec_err,
+                        exe.display(),
+                        cli_args,
+                        working_dir.display(),
+                        exe.display(),
+                        cli_args.join(" ")
+                    ),
+                );
+                true
+            }
+
+            // Windows: spawn-and-exit. Start the new binary as a child
+            // sharing this console, flush stdio, then exit so the child
+            // takes over the terminal. PID changes; there is no exec().
+            #[cfg(not(unix))]
+            {
+                match process::Command::new(&exe)
+                    .args(cli_args)
+                    .current_dir(working_dir)
+                    .spawn()
+                {
+                    Ok(child) => {
+                        emit(
+                            MessageLevel::Info,
+                            format!(
+                                "已启动新进程 (PID {})，当前进程退出。",
+                                child.id()
+                            ),
+                        );
+                        // 让残余输出先落屏，再交还终端给新进程。
+                        let _ = std::io::stdout().flush();
+                        let _ = std::io::stderr().flush();
+                        process::exit(0);
+                    }
+                    Err(e) => {
+                        emit(
+                            MessageLevel::Error,
+                            format!(
+                                "重启失败 (spawn 返回错误): {}\n\
+                                 可执行文件: {}\n\
+                                 参数: {:?}\n\
+                                 工作目录: {}\n\
+                                 请手动运行: {} {}",
+                                e,
+                                exe.display(),
+                                cli_args,
+                                working_dir.display(),
+                                exe.display(),
+                                cli_args.join(" ")
+                            ),
+                        );
+                        true
+                    }
+                }
+            }
         }
         Ok(status) => {
             let exit_code = status.code().unwrap_or(-1);

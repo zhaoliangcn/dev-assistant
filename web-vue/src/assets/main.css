@@ -1,0 +1,109 @@
+/* ===== CSS 变量（亮色主题） ===== */
+:root {
+  --color-bg: #fafafa;
+  --color-surface: #ffffff;
+  --color-hover: rgba(0, 0, 0, 0.04);
+  --color-active: rgba(0, 0, 0, 0.07);
+  --color-border: rgba(0, 0, 0, 0.08);
+  --color-input: #f0f0f0;
+  --color-code-bg: #f4f4f5;
+
+  --color-text-primary: #1a1a2e;
+  --color-text-secondary: #555;
+  --color-text-muted: #999;
+
+  --color-accent: #3b82f6;
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+
+  --color-code-text: #e74c3c;
+}
+
+/* ===== 暗色主题 ===== */
+.dark {
+  --color-bg: #0f0f1a;
+  --color-surface: #1a1a2e;
+  --color-hover: rgba(255, 255, 255, 0.05);
+  --color-active: rgba(255, 255, 255, 0.08);
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-input: #252540;
+  --color-code-bg: #1e1e30;
+
+  --color-text-primary: #e4e4f0;
+  --color-text-secondary: #a0a0b8;
+  --color-text-muted: #6b6b80;
+
+  --color-accent: #5b9bf5;
+  --color-success: #4ade80;
+  --color-danger: #f87171;
+
+  --color-code-text: #ff6b6b;
+}
+
+/* ===== 全局重置 ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'Noto Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+#app {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ===== 滚动条 ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ===== 选中 ===== */
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+/* ===== highlight.js 覆盖 ===== */
+.hljs {
+  background: transparent !important;
+}

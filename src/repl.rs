@@ -1168,7 +1168,10 @@ fn handle_skill_command(input: &str, working_dir: &Path) -> SlashOutcome {
                 })
             })
             .join()
-            .unwrap();
+            .unwrap_or_else(|e| {
+                // 线程 panic 时返回错误而非级联崩溃
+                Err(crate::AppError::Llm(format!("技能安装线程异常终止: {:?}", e)))
+            });
 
             match result {
                 Ok(ref skills) => {

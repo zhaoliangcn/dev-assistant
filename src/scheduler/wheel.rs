@@ -54,8 +54,9 @@ impl TimingWheel {
 
     /// 添加任务到时间轮。
     pub fn add_task(&self, task: &ScheduledTask) {
-        let epoch = task.next_run_at as u64;
-        let now = chrono::Utc::now().timestamp() as u64;
+        // 安全转换：负时间戳视为 0，避免 i64→u64 溢出
+        let epoch = task.next_run_at.max(0) as u64;
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
 
         // 使用 compare_exchange 避免多个线程同时初始化 cursor 导致竞态
         let _ = self.cursor.compare_exchange(0, now, Ordering::SeqCst, Ordering::SeqCst);

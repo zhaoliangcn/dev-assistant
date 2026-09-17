@@ -147,11 +147,23 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
     let remaining_clone = Arc::clone(&remaining);
     let stdout_reader = std::thread::spawn(move || {
         let mut buf = Vec::with_capacity(4096);
-        if let Some(reader) = stdout {
-            let limit = remaining_clone.load(Ordering::Acquire);
-            let mut limited = reader.take(limit as u64);
-            let _ = limited.read_to_end(&mut buf);
-            remaining_clone.fetch_sub(buf.len(), Ordering::Release);
+        if let Some(mut reader) = stdout {
+            loop {
+                let current = remaining_clone.load(Ordering::Acquire);
+                if current == 0 {
+                    break;
+                }
+                let take = current.min(64 * 1024); // 每次最多读 64KB
+                let mut chunk_buf = vec![0u8; take];
+                match std::io::Read::read(&mut reader, &mut chunk_buf) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        buf.extend_from_slice(&chunk_buf[..n]);
+                        remaining_clone.fetch_sub(n, Ordering::Release);
+                    }
+                    Err(_) => break,
+                }
+            }
         }
         buf
     });
@@ -159,11 +171,23 @@ fn exec_command_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolRe
     let remaining_clone = Arc::clone(&remaining);
     let stderr_reader = std::thread::spawn(move || {
         let mut buf = Vec::with_capacity(4096);
-        if let Some(reader) = stderr {
-            let limit = remaining_clone.load(Ordering::Acquire);
-            let mut limited = reader.take(limit as u64);
-            let _ = limited.read_to_end(&mut buf);
-            remaining_clone.fetch_sub(buf.len(), Ordering::Release);
+        if let Some(mut reader) = stderr {
+            loop {
+                let current = remaining_clone.load(Ordering::Acquire);
+                if current == 0 {
+                    break;
+                }
+                let take = current.min(64 * 1024);
+                let mut chunk_buf = vec![0u8; take];
+                match std::io::Read::read(&mut reader, &mut chunk_buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        buf.extend_from_slice(&chunk_buf[..n]);
+                        remaining_clone.fetch_sub(n, Ordering::Release);
+                    }
+                    Err(_) => break,
+                }
+            }
         }
         buf
     });

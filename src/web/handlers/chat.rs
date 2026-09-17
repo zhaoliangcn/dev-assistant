@@ -55,21 +55,21 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, override_project
 
     // 若前端传了 project_dir 覆盖，则校验并切换到对应目录，否则沿用 state.working_dir
     let target_dir = if let Some(dir) = &override_project_dir {
-        let raw = std::path::PathBuf::from(dir);
-        if raw.is_absolute() && !raw.starts_with(&state.working_dir) {
+        // 先拼接再规范化，统一处理相对路径和绝对路径
+        let joined = state.working_dir.join(dir);
+        let canonical = joined.canonicalize().unwrap_or_else(|_| joined.clone());
+        let work_canonical = state.working_dir.canonicalize().unwrap_or_else(|_| state.working_dir.clone());
+        // 规范化后必须在工作目录内
+        if !canonical.starts_with(&work_canonical) {
             let msg = format!(
                 "project_dir '{}' 超出工作目录范围（只允许 {} 及其子目录）",
                 dir,
                 state.working_dir.display()
             );
             warn!(dir=%dir, msg=%msg, "拒绝越界 project_dir");
-            // 不建连：直接 return，让调用方的 Upgrade 响应以 close 帧结束
             return;
         }
-        // 允许相对路径 / 子目录
-        state.working_dir.join(dir).canonicalize().unwrap_or_else(|_| {
-            state.working_dir.join(dir)
-        })
+        canonical
     } else {
         state.working_dir.clone()
     };

@@ -47,28 +47,28 @@ impl TaskManager {
     }
 
     pub fn pause(&self) {
-        *self.is_paused.lock().unwrap() = true;
+        *self.is_paused.lock().unwrap_or_else(|p| p.into_inner()) = true;
     }
 
     pub fn resume(&self) {
-        *self.is_paused.lock().unwrap() = false;
+        *self.is_paused.lock().unwrap_or_else(|p| p.into_inner()) = false;
     }
 
     pub fn cancel(&self) {
-        *self.is_cancelled.lock().unwrap() = true;
+        *self.is_cancelled.lock().unwrap_or_else(|p| p.into_inner()) = true;
     }
 
     #[allow(dead_code)]
     pub fn reset(&self) {
-        *self.is_paused.lock().unwrap() = false;
-        *self.is_cancelled.lock().unwrap() = false;
+        *self.is_paused.lock().unwrap_or_else(|p| p.into_inner()) = false;
+        *self.is_cancelled.lock().unwrap_or_else(|p| p.into_inner()) = false;
     }
 
     #[allow(dead_code)]
     /// 同步外部 DependencyGraph 到内部图。
     /// 用于 TaskOrchestrator 将其图状态暴露给全局 TaskManager。
     pub fn sync_graph(&self, other: &DependencyGraph) {
-        let mut graph = self.graph.lock().unwrap();
+        let mut graph = self.graph.lock().unwrap_or_else(|p| p.into_inner());
         *graph = other.clone();
     }
 }
@@ -226,14 +226,14 @@ static GLOBAL_TASK_MANAGER: Lazy<Mutex<Option<TaskManager>>> = Lazy::new(|| Mute
 
 #[allow(dead_code)]
 pub fn set_global_task_manager(manager: TaskManager) {
-    *GLOBAL_TASK_MANAGER.lock().unwrap() = Some(manager);
+    *GLOBAL_TASK_MANAGER.lock().unwrap_or_else(|p| p.into_inner()) = Some(manager);
 }
 
 pub fn get_global_task_manager() -> Option<TaskManager> {
-    GLOBAL_TASK_MANAGER.lock().unwrap().clone()
+    GLOBAL_TASK_MANAGER.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
 #[allow(dead_code)]
 pub fn clear_global_task_manager() {
-    *GLOBAL_TASK_MANAGER.lock().unwrap() = None;
+    *GLOBAL_TASK_MANAGER.lock().unwrap_or_else(|p| p.into_inner()) = None;
 }

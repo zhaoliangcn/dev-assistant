@@ -102,8 +102,14 @@ impl GitignoreFilter {
         let _ = builder.add_line(None, ".git/");
         
         let gitignore = builder.build().unwrap_or_else(|_| {
-            // 如果构建失败，返回空的 gitignore（不忽略任何东西）
-            ignore::gitignore::GitignoreBuilder::new(&git_root).build().unwrap()
+            // 如果构建失败，创建一个不忽略任何东西的空 gitignore
+            let mut fallback = ignore::gitignore::GitignoreBuilder::new(&git_root);
+            let _ = fallback.add_line(None, ".git/");
+            fallback.build().unwrap_or_else(|_| {
+                // 最终回退：构建一个最简单的空 gitignore
+                let (g, _) = ignore::gitignore::Gitignore::new(git_root.join(".dev-assistant-empty-gitignore"));
+                g
+            })
         });
         
         Self { gitignore, git_root }

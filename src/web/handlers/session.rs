@@ -103,7 +103,7 @@ fn session_path(working_dir: &Path, id: &str) -> PathBuf {
 /// 所有会话 handler 都基于它读写，确保「列表/详情/删除/改名/导出」
 /// 与当前 WS 会话所在项目一致，实现子目录级别的 store 隔离。
 async fn project_dir(state: &AppState) -> PathBuf {
-    state.current_project.read().await.clone()
+    state.current_project.borrow().clone()
 }
 
 /// 获取会话列表。
@@ -165,7 +165,8 @@ pub async fn get_session(
     let slice: &[SessionEvent] = if limit == 0 || limit >= total {
         &events
     } else {
-        &events[total - limit..]
+        let start = total.saturating_sub(limit);
+        &events[start..]
     };
 
     let events: Vec<serde_json::Value> = slice

@@ -57,15 +57,17 @@ impl TimingWheel {
         let epoch = task.next_run_at as u64;
         let now = chrono::Utc::now().timestamp() as u64;
 
-        let cursor = self.cursor.load(Ordering::Relaxed);
-        if cursor == 0 {
-            self.cursor.store(now, Ordering::Relaxed);
-        }
+        // 使用 compare_exchange 避免多个线程同时初始化 cursor 导致竞态
+        let _ = self.cursor.compare_exchange(0, now, Ordering::SeqCst, Ordering::SeqCst);
 
-        let cursor = self.cursor.load(Ordering::Relaxed);
+        let cursor = self.cursor.load(Ordering::SeqCst);
 
         // 如果 epoch 已经过去或超出时间轮范围，放入溢出队列
-        if epoch <= cursor || epoch > cursor + self.num_slots * self.slot_size {
+        // 使用 checked_mul/checked_add 防止整数溢出
+        let wheel_end = self.num_slots.checked_mul(self.slot_size)
+            .and_then(|span| cursor.checked_add(span))
+            .unwrap_or(u64::MAX);
+        if epoch <= cursor || epoch > wheel_end {
             let mut overflow = self.overflow.lock().unwrap();
             overflow.insert(task.id.clone(), SlotEntry {
                 task_id: task.id.clone(),
@@ -109,11 +111,14 @@ impl TimingWheel {
     #[allow(dead_code)]
     pub fn tick(&self) -> Vec<ScheduledTaskId> {
         let now = chrono::Utc::now().timestamp() as u64;
-        let cursor = self.cursor.load(Ordering::Relaxed);
+        let cursor = self.cursor.load(Ordering::SeqCst);
 
         if cursor == 0 {
-            self.cursor.store(now, Ordering::Relaxed);
-            return Vec::new();
+            let _ = self.cursor.compare_exchange(0, now, Ordering::SeqCst, Ordering::SeqCst);
+            let cursor = self.cursor.load(Ordering::SeqCst);
+            if cursor == 0 {
+                return Vec::new();
+            }
         }
 
         if now < cursor {
@@ -147,17 +152,20 @@ impl TimingWheel {
         }
 
         // 更新指针到当前时间
-        self.cursor.store(now, Ordering::Relaxed);
+        self.cursor.store(now, Ordering::SeqCst);
 
         // 检查溢出队列：将到期任务取出，将可放入时间轮的重新加入
         let mut overflow = self.overflow.lock().unwrap();
         let mut to_promote = Vec::new();
+        let wheel_end = self.num_slots.checked_mul(self.slot_size)
+            .and_then(|span| now.checked_add(span))
+            .unwrap_or(u64::MAX);
         overflow.retain(|task_id, entry| {
             if entry.epoch <= now {
                 // 到期
                 due_tasks.push(task_id.clone());
                 false
-            } else if entry.epoch <= now + self.num_slots * self.slot_size {
+            } else if entry.epoch <= wheel_end {
                 // 在时间轮范围内，提升到时间轮
                 to_promote.push(entry.clone());
                 false
@@ -188,7 +196,7 @@ impl TimingWheel {
         }
         let mut overflow = self.overflow.lock().unwrap();
         overflow.clear();
-        self.cursor.store(0, Ordering::Relaxed);
+        self.cursor.store(0, Ordering::SeqCst);
     }
 }
 

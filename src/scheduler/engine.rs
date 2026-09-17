@@ -340,11 +340,16 @@ impl Scheduler {
                 let now = chrono::Utc::now().timestamp();
                 if task.next_run_at <= now {
                     // 计算新的下次运行时间
-                    let next = task.compute_next_run();
-                    if let Some(next_at) = next {
-                        let mut updated_task = task.clone();
-                        updated_task.next_run_at = next_at;
-                        self.wheel.add_task(&updated_task);
+                    match task.compute_next_run() {
+                        Ok(Some(next_at)) => {
+                            let mut updated_task = task.clone();
+                            updated_task.next_run_at = next_at;
+                            self.wheel.add_task(&updated_task);
+                        }
+                        Ok(None) => {} // 一次性任务，不加入时间轮
+                        Err(e) => {
+                            warn!(task_id = %task.id, error = %e, "cron 表达式解析失败，跳过该任务");
+                        }
                     }
                 } else {
                     self.wheel.add_task(&task);

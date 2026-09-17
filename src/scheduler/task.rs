@@ -4,6 +4,7 @@
 //! `ScheduledTaskStatus` 等类型，供整个 scheduler 模块共享。
 
 use serde::{Deserialize, Serialize};
+use crate::AppError;
 
 /// 任务 ID 类型
 pub type ScheduledTaskId = String;
@@ -141,20 +142,24 @@ impl ScheduledTask {
 
     /// 计算下一次调度时间（基于当前时间和调度类型）。
     ///
-    /// 返回新的 next_run_at（Unix 时间戳，秒）。
-    pub fn compute_next_run(&self) -> Option<i64> {
+    /// 返回 `Ok(Some(next_run_at))` 表示有下次调度时间，`Ok(None)` 表示一次性任务。
+    /// 返回 `Err` 表示 cron 表达式解析失败等错误。
+    pub fn compute_next_run(&self) -> Result<Option<i64>, AppError> {
         match &self.schedule {
             ScheduleType::Cron(expr) => {
-                // 简单 cron 解析：仅支持标准 5 字段 cron
-                // 格式: "分 时 日 月 周"
-                // 这里使用 chrono 库进行简单计算
-                crate::scheduler::tools::parse_cron_next(expr, chrono::Utc::now().timestamp())
+                match crate::scheduler::tools::parse_cron_next(expr, chrono::Utc::now().timestamp()) {
+                    Some(next) => Ok(Some(next)),
+                    None => Err(AppError::Config(format!(
+                        "cron 表达式 '{}' 解析失败：格式无效或包含不支持的语法",
+                        expr
+                    ))),
+                }
             }
             ScheduleType::Interval(secs) => {
                 let now = chrono::Utc::now().timestamp();
-                Some(now + *secs as i64)
+                Ok(Some(now + *secs as i64))
             }
-            ScheduleType::Once(_) => None, // 一次性任务执行后不再调度
+            ScheduleType::Once(_) => Ok(None),
         }
     }
 }
@@ -298,7 +303,7 @@ mod tests {
             vec![],
             0,
         );
-        let next = task.compute_next_run();
+        let next = task.compute_next_run().unwrap();
         assert!(next.is_some());
         let now = chrono::Utc::now().timestamp();
         assert!(next.unwrap() >= now + 60 - 1);
@@ -317,7 +322,7 @@ mod tests {
             vec![],
             0,
         );
-        let next = task.compute_next_run();
+        let next = task.compute_next_run().unwrap();
         assert!(next.is_none()); // Once 任务执行后不再调度
     }
 

@@ -106,14 +106,19 @@ impl ConversationHistory {
 
         // 从后往前遍历，收集最近的 keep_rounds 轮
         for msg in self.messages.iter().rev() {
-            if msg.role == "user" && !current_round.is_empty() {
+            // 先将当前消息加入 current_round
+            current_round.push(msg.clone());
+
+            // 遇到 user 消息时，将 current_round 作为一个完整轮次保存
+            if msg.role == "user" && current_round.len() > 1 {
+                // current_round 包含这条 user 消息，完整保存
                 rounds.push(std::mem::take(&mut current_round));
                 if rounds.len() >= keep_rounds {
                     break;
                 }
             }
-            current_round.push(msg.clone());
         }
+        // 处理剩余的 current_round（最早的一轮）
         if !current_round.is_empty() && rounds.len() < keep_rounds {
             rounds.push(current_round);
         }

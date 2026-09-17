@@ -166,7 +166,7 @@ impl ScheduledTaskHandler for CommandTaskHandler {
 
 /// 执行一个 Shell 命令。
 ///
-/// 使用 tokio::process::Command 异步执行。
+/// 使用 tokio::process::Command 异步执行，超时后自动 kill 子进程。
 async fn execute_command(
     command: &str,
     working_dir: &PathBuf,
@@ -175,13 +175,21 @@ async fn execute_command(
     use tokio::process::Command;
     use tokio::time::timeout;
 
+    // 拒绝包含 shell 元字符的命令，防止注入
+    if command.contains(&[';', '|', '&', '$', '`', '>', '<', '\n', '\r'][..]) {
+        return Err(AppError::Config(format!(
+            "命令包含禁止的 shell 元字符: {}",
+            command.chars().take(80).collect::<String>()
+        )));
+    }
+
     let timeout_duration = if timeout_secs > 0 {
         std::time::Duration::from_secs(timeout_secs)
     } else {
-        std::time::Duration::from_secs(300) // 默认 5 分钟超时
+        std::time::Duration::from_secs(300)
     };
 
-    let child = Command::new("sh")
+    let mut child = Command::new("sh")
         .arg("-c")
         .arg(command)
         .current_dir(working_dir)
@@ -190,10 +198,16 @@ async fn execute_command(
         .spawn()
         .map_err(AppError::Io)?;
 
-    let result = timeout(timeout_duration, child.wait_with_output()).await;
+    let result = timeout(timeout_duration, child.wait()).await;
 
     match result {
-        Ok(Ok(output)) => {
+        Ok(Ok(status)) => {
+            // 等待 stdout/stderr 读取完成
+            let output = child
+                .wait_with_output()
+                .await
+                .map_err(AppError::Io)?;
+
             let mut content = String::new();
             if !output.stdout.is_empty() {
                 content.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -204,20 +218,25 @@ async fn execute_command(
                 }
                 content.push_str(&String::from_utf8_lossy(&output.stderr));
             }
-            if !output.status.success() {
+            if !status.success() {
                 return Err(AppError::Llm(format!(
                     "Command exited with code {}: {}",
-                    output.status.code().unwrap_or(-1),
+                    status.code().unwrap_or(-1),
                     content
                 )));
             }
             Ok(content.trim().to_string())
         }
         Ok(Err(e)) => Err(AppError::Io(e)),
-        Err(_) => Err(AppError::Llm(format!(
-            "Command timed out after {} seconds",
-            timeout_secs
-        ))),
+        Err(_) => {
+            // 超时后 kill 子进程，避免 zombie
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            Err(AppError::Llm(format!(
+                "Command timed out after {} seconds",
+                timeout_secs
+            )))
+        }
     }
 }
 

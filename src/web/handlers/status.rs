@@ -44,7 +44,7 @@ pub async fn get_status(
 
     Json(SystemStatus {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        project_dir: state.current_project.read().await.display().to_string(),
+        project_dir: state.current_project.borrow().display().to_string(),
         mode: "web".to_string(),
         active_model: state.llm.active_model().to_string(),
         online: true,

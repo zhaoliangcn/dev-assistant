@@ -88,17 +88,21 @@ impl ScheduledTaskExecutor {
     ) -> (ScheduledTaskStatus, Option<i64>, bool) {
         if record.success {
             // 执行成功
-            let next_run = task.compute_next_run();
-            match next_run {
-                Some(next_at) => {
+            match task.compute_next_run() {
+                Ok(Some(next_at)) => {
                     // 周期性任务：重新调度
                     info!("Task {} completed, next run at {}", task.id, next_at);
                     (ScheduledTaskStatus::Active, Some(next_at), true)
                 }
-                None => {
+                Ok(None) => {
                     // 一次性任务：标记为完成
                     info!("Task {} completed (once)", task.id);
                     (ScheduledTaskStatus::Completed, None, false)
+                }
+                Err(e) => {
+                    // cron 解析失败：标记为失败，不重试
+                    warn!(task_id = %task.id, error = %e, "cron 表达式解析失败，任务标记为失败");
+                    (ScheduledTaskStatus::Failed, None, false)
                 }
             }
         } else {

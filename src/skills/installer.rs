@@ -197,7 +197,32 @@ pub async fn install_skill(
 
         let dest_dir = target_dir.join(&skill.meta.name);
 
-        // 检查冲突
+        // 检查冲突：先复制到临时目录，再原子替换
+        let temp_dest = target_dir.join(format!(".skill_new_{}", skill.meta.name));
+
+        // 清理可能残留的临时目录
+        if temp_dest.exists() {
+            fs::remove_dir_all(&temp_dest).ok();
+        }
+
+        // 复制到临时目录
+        copy_dir_all(&src_dir, &temp_dest).map_err(|e| {
+            // 复制失败时清理临时目录
+            fs::remove_dir_all(&temp_dest).ok();
+            AppError::Config(format!("Failed to copy skill {}: {}", skill.meta.name, e))
+        })?;
+
+        // 写入元数据到临时目录
+        let meta = SkillMeta::new(source, &skill_source);
+        let meta_json = serde_json::to_string_pretty(&meta)
+            .map_err(|e| AppError::Config(format!("Failed to serialize skill meta: {}", e)))?;
+        let meta_path = temp_dest.join(".skill-meta.json");
+        fs::write(&meta_path, meta_json).map_err(|e| {
+            fs::remove_dir_all(&temp_dest).ok();
+            AppError::Config(format!("Failed to write skill metadata: {}", e))
+        })?;
+
+        // 原子替换：先删旧目录，再重命名临时目录
         if dest_dir.exists() {
             warn!(
                 name = %skill.meta.name,
@@ -205,22 +230,13 @@ pub async fn install_skill(
                 "Skill already exists, overwriting"
             );
             fs::remove_dir_all(&dest_dir).map_err(|e| {
+                fs::remove_dir_all(&temp_dest).ok();
                 AppError::Config(format!("Failed to remove existing skill {}: {}", skill.meta.name, e))
             })?;
         }
-
-        // 复制目录
-        copy_dir_all(&src_dir, &dest_dir).map_err(|e| {
-            AppError::Config(format!("Failed to copy skill {}: {}", skill.meta.name, e))
-        })?;
-
-        // 写入元数据
-        let meta = SkillMeta::new(source, &skill_source);
-        let meta_json = serde_json::to_string_pretty(&meta)
-            .map_err(|e| AppError::Config(format!("Failed to serialize skill meta: {}", e)))?;
-        let meta_path = dest_dir.join(".skill-meta.json");
-        fs::write(&meta_path, meta_json).map_err(|e| {
-            AppError::Config(format!("Failed to write skill metadata: {}", e))
+        fs::rename(&temp_dest, &dest_dir).map_err(|e| {
+            fs::remove_dir_all(&temp_dest).ok();
+            AppError::Config(format!("Failed to install skill {}: {}", skill.meta.name, e))
         })?;
 
         debug!(name = %skill.meta.name, scope = ?target_scope, "Installed skill");

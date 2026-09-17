@@ -81,7 +81,9 @@ impl ScheduledTaskStore {
         Ok(store)
     }
 
-    /// 保存任务（追加到 JSONL，更新缓存）。
+    /// 保存任务（更新缓存 + 全量重写文件）。
+    ///
+    /// 使用全量重写而非 append，避免 JSONL 文件中出现重复条目。
     pub fn save_task(&self, task: &ScheduledTask) -> Result<(), AppError> {
         // 更新缓存
         {
@@ -91,16 +93,8 @@ impl ScheduledTaskStore {
             cache.insert(task.id.clone(), task.clone());
         }
 
-        // 追加写入文件
-        let line = serde_json::to_string(task)
-            .map_err(AppError::Json)?;
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.tasks_path)
-            .map_err(AppError::Io)?;
-        writeln!(file, "{}", line)
-            .map_err(AppError::Io)?;
+        // 全量重写文件，确保一致性
+        self.rewrite_all()?;
 
         debug!("Task {} saved to store", task.id);
         Ok(())

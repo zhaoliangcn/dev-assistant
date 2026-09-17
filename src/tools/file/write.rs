@@ -103,16 +103,12 @@ fn normalize_newlines(s: &str) -> String {
 /// 2. Trimmed match (ignore leading/trailing whitespace differences)
 /// 3. Dedented match (remove common leading whitespace from all lines)
 ///
-/// Returns `Some((start, length))` of the matched substring in the normalized
-/// haystack, or `None` if no match is found. The returned length reflects the
-/// actual matched text, which may differ from `needle.len()` when fuzzy logic
-/// strips whitespace or indentation.
+/// Returns `Some((start, length))` of the matched substring in the original
+/// haystack, or `None` if no match is found. The returned indices and length
+/// refer to byte positions in the *original* haystack string.
 fn fuzzy_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
-    let haystack = normalize_newlines(haystack);
-    let needle = normalize_newlines(needle);
-
-    // Exact match
-    if let Some(pos) = haystack.find(&needle) {
+    // Exact match in original string
+    if let Some(pos) = haystack.find(needle) {
         return Some((pos, needle.len()));
     }
 
@@ -135,9 +131,17 @@ fn fuzzy_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(pos) = haystack.find(&needle_dedented) {
+                // Calculate actual match length in original string
+                // by counting bytes from pos to the end of the matched region
                 let haystack_from_pos = &haystack[pos..];
                 let leading_spaces = haystack_from_pos.chars().take_while(|c| *c == ' ' || *c == '\t').count();
-                let actual_match_len = leading_spaces + needle_dedented.len();
+                // Count actual bytes of matched text including leading spaces
+                let mut match_end = pos;
+                for _ in 0..leading_spaces {
+                    match_end += haystack[match_end..].chars().next().map_or(0, |c| c.len_utf8());
+                }
+                match_end += needle_dedented.len();
+                let actual_match_len = match_end - pos;
                 return Some((pos, actual_match_len));
             }
         }

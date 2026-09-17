@@ -207,14 +207,27 @@ impl Cli {
     fn to_restart_args(&self) -> Vec<String> {
         // 启动时 cwd 作为相对路径解析基准
         let startup_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        // 相对路径 → 绝对路径（绝对路径原样返回）
+        // 相对路径 → 绝对路径（绝对路径原样返回），并规范化路径（移除 . 和 .. 段）
         let absolutize = |p: &str| -> String {
             let pb = PathBuf::from(p);
-            if pb.is_absolute() {
-                p.to_string()
+            let abs_path = if pb.is_absolute() {
+                pb
             } else {
-                startup_cwd.join(pb).display().to_string()
+                startup_cwd.join(pb)
+            };
+            // 规范化路径：移除 . 和 .. 段
+            let mut components = Vec::new();
+            for comp in abs_path.components() {
+                match comp {
+                    std::path::Component::ParentDir => {
+                        components.pop();
+                    }
+                    std::path::Component::CurDir => {}
+                    other => components.push(other),
+                }
             }
+            let normalized: PathBuf = components.iter().collect();
+            normalized.display().to_string()
         };
 
         let mut args: Vec<String> = vec![

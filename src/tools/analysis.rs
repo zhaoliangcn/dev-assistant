@@ -567,10 +567,15 @@ fn find_files(working_dir: &Path, include_patterns: &[String], exclude_patterns:
 
     let mut files: Vec<String> = Vec::new();
     for entry in walkdir::WalkDir::new(working_dir)
+        .follow_links(false)  // 不跟随符号链接，防止路径穿越
         .into_iter()
         .filter_map(|e| e.ok())
     {
         let entry_path = entry.path();
+        // 跳过符号链接
+        if entry.file_type().is_symlink() {
+            continue;
+        }
         if entry_path.is_dir() {
             if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with('.') {
@@ -640,9 +645,21 @@ fn finish_analysis_handler(args: &ToolArgs, context: &ToolContext) -> Result<Too
     let report = generate_report(&records, report_type);
 
     if let Some(output_path) = output_file {
+        // 防止路径穿越：确保输出文件在工作目录内
         let full_path = context.working_dir.join(output_path);
-        fs::write(&full_path, &report).map_err(AppError::Io)?;
-        info!(path = %full_path.display(), "Analysis report saved");
+        let canonical = full_path.canonicalize().unwrap_or_else(|_| full_path.clone());
+        let work_dir_canonical = context.working_dir.canonicalize().unwrap_or_else(|_| context.working_dir.clone());
+        if !canonical.starts_with(&work_dir_canonical) {
+            return Ok(ToolResult {
+                success: false,
+                security_evaluation: None,
+                restart_requested: false,
+                error_category: None,
+                content: format!("[finish_analysis] ❌ 输出路径超出工作目录范围: {}", output_path),
+            });
+        }
+        fs::write(&canonical, &report).map_err(AppError::Io)?;
+        info!(path = %canonical.display(), "Analysis report saved");
     }
 
     Ok(ToolResult {

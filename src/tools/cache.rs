@@ -120,7 +120,7 @@ impl ReadCache {
             return None;
         }
         let path_buf = path.to_path_buf();
-        let cache = self.cache.read().unwrap();
+        let cache = self.cache.read().unwrap_or_else(|e| e.into_inner());
         let entry = cache.get(&path_buf)?;
         let now = now_timestamp();
         if (now - entry.created_at) > self.config.ttl_seconds {
@@ -144,7 +144,7 @@ impl ReadCache {
         let path_buf = path.to_path_buf();
         match current_mtime {
             Some(current) if current > cached_mtime => {
-                let mut cache = self.cache.write().unwrap();
+                let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
                 cache.remove(&path_buf);
                 self.misses.fetch_add(1, Ordering::Relaxed);
                 debug!(path = ?path, "Cache entry invalidated (file modified)");
@@ -162,7 +162,7 @@ impl ReadCache {
                 Some(content.as_ref().to_string())
             }
             None => {
-                let mut cache = self.cache.write().unwrap();
+                let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
                 cache.remove(&path_buf);
                 self.misses.fetch_add(1, Ordering::Relaxed);
                 debug!(path = ?path, "Cache entry invalidated (file unavailable)");
@@ -206,7 +206,7 @@ impl ReadCache {
         }
 
         let path_buf = path.to_path_buf();
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
 
         // 如果缓存已满，进行清理
         if cache.len() >= self.config.max_entries {
@@ -249,7 +249,7 @@ impl ReadCache {
 
     /// 移除指定路径的缓存
     pub fn invalidate(&self, path: &Path) {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
         if cache.remove(path).is_some() {
             debug!(path = ?path, "Cache invalidated");
         }
@@ -257,7 +257,7 @@ impl ReadCache {
 
     /// 清除所有缓存
     pub fn clear(&self) {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
         let count = cache.len();
         cache.clear();
         debug!(count, "Cache cleared");
@@ -266,7 +266,7 @@ impl ReadCache {
     /// 获取缓存统计信息
     pub fn stats(&self) -> CacheStats {
         CacheStats {
-            entries: self.cache.read().unwrap().len(),
+            entries: self.cache.read().unwrap_or_else(|e| e.into_inner()).len(),
             hits: self.hits.load(Ordering::Relaxed),
             misses: self.misses.load(Ordering::Relaxed),
             hit_rate: {

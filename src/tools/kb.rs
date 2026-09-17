@@ -343,8 +343,11 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         file_path.canonicalize().unwrap_or_else(|_| file_path.clone())
     } else if let Some(parent) = file_path.parent() {
         if parent.exists() {
-            parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf())
-                .join(file_path.file_name().unwrap())
+            let parent_canonical = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+            match file_path.file_name() {
+                Some(name) => parent_canonical.join(name),
+                None => file_path.clone(),
+            }
         } else {
             file_path.clone()
         }

@@ -52,7 +52,8 @@ impl BackoffConfig {
                 }
             }
         }
-        unreachable!("max_attempts should prevent reaching here")
+        // 理论上不可达：循环会在 attempt == max_attempts-1 时返回
+        unreachable!("BackoffConfig::retry: loop exited unexpectedly (max_attempts={})", self.max_attempts)
     }
     
     /// 带自定义重试条件的异步重试函数
@@ -75,7 +76,7 @@ impl BackoffConfig {
                 }
             }
         }
-        unreachable!("max_attempts should prevent reaching here")
+        unreachable!("BackoffConfig::retry_with: loop exited unexpectedly (max_attempts={})", self.max_attempts)
     }
     
     /// 同步重试函数（用于同步工具执行）
@@ -97,7 +98,7 @@ impl BackoffConfig {
                 }
             }
         }
-        unreachable!("max_attempts should prevent reaching here")
+        unreachable!("BackoffConfig::retry_sync: loop exited unexpectedly (max_attempts={})", self.max_attempts)
     }
     
     /// 带可重试判断的同步重试函数
@@ -119,7 +120,7 @@ impl BackoffConfig {
                 }
             }
         }
-        unreachable!("max_attempts should prevent reaching here")
+        unreachable!("BackoffConfig::retry_sync_with_condition: loop exited unexpectedly (max_attempts={})", self.max_attempts)
     }
 }
 

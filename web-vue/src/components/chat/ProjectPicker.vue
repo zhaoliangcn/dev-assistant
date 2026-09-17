@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useChatStore, useModelsStore } from '@/stores'
 import { useI18n } from '@/composables/useI18n'
 import { getStatus } from '@/api/models'
+import ModelSettingsPanel from '@/components/shared/ModelSettingsPanel.vue'
 
 const chat = useChatStore()
 const models = useModelsStore()
@@ -11,6 +12,7 @@ const { t } = useI18n()
 const inputDir = ref(chat.projectDir || '')
 const workingDir = ref('')
 const loading = ref(false)
+const showSettings = ref(false)
 
 onMounted(async () => {
   try {
@@ -21,6 +23,12 @@ onMounted(async () => {
     }
   } catch {
     // 后端未就绪时跳过
+  }
+  // 零配置首启：加载模型列表，为空时展示配置向导入口
+  try {
+    await models.loadModels()
+  } catch {
+    // 忽略
   }
 })
 
@@ -64,6 +72,17 @@ async function pickSubdir() {
     </div>
 
     <div class="project-picker-body">
+      <!-- 零配置首启向导：未配置任何模型时提示 -->
+      <div v-if="models.models.length === 0" class="first-run-banner">
+        <div class="banner-text">
+          <strong>👋 首次使用，先配置一个模型</strong>
+          <span>填写 API URL 和 Key 即可开始，保存后立即生效，无需重启。</span>
+        </div>
+        <button class="btn-primary" @click="showSettings = true">
+          ⚙️ 立即配置
+        </button>
+      </div>
+
       <div class="current-project-row">
         <span class="label">{{ t('current_project') }}:</span>
         <code class="path-display">{{ chat.projectDir || workingDir || '—' }}</code>
@@ -109,8 +128,14 @@ async function pickSubdir() {
       <div v-if="models.models.length > 0" class="current-model">
         <span class="label">{{ t('model') }}:</span>
         <strong>{{ models.activeModel }}</strong>
+        <button class="link-btn" @click="showSettings = true">{{ t('model_settings') }}</button>
       </div>
     </div>
+
+    <ModelSettingsPanel
+      v-if="showSettings"
+      @close="showSettings = false"
+    />
   </div>
 </template>
 
@@ -277,5 +302,41 @@ async function pickSubdir() {
   font-size: 12px;
   color: var(--color-text-secondary);
   margin-top: 4px;
+}
+
+.first-run-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border-radius: 10px;
+}
+
+.banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.banner-text strong {
+  color: var(--color-text-primary);
+}
+
+.banner-text span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 4px;
+  text-decoration: underline;
 }
 </style>

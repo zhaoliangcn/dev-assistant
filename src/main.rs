@@ -42,7 +42,7 @@ use crate::skills::installer::{
     install_skill, list_skills, read_skill_meta, remove_skill, update_skills, InstallScope,
 };
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 enum SkillCommand {
     /// 安装技能
     ///
@@ -156,9 +156,40 @@ struct Cli {
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
-    /// 技能管理子命令
+    /// 技能管理 / 配置向导子命令
     #[command(subcommand)]
-    skill: Option<SkillCommand>,
+    command: Option<Command>,
+}
+
+/// 顶层子命令：init（配置向导）与 skill（技能管理）。
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// 交互式配置模型（provider / API URL / API Key / 模型名）
+    Init {
+        /// provider 类型（openai / openai-compatible / anthropic / ollama）
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// API URL（如 https://api.openai.com/v1）
+        #[arg(long)]
+        api_url: Option<String>,
+
+        /// API Key（ollama 可留空）
+        #[arg(long)]
+        api_key: Option<String>,
+
+        /// 模型名（如 gpt-4o-mini）
+        #[arg(long)]
+        model: Option<String>,
+
+        /// 模型配置名称（默认与模型名相同）
+        #[arg(long)]
+        name: Option<String>,
+    },
+
+    /// 技能管理（add / list / remove / update）
+    #[command(subcommand)]
+    Skill(SkillCommand),
 }
 
 impl Cli {
@@ -239,6 +270,22 @@ fn main() -> Result<(), AppError> {
         ));
     }
 
+    // 子命令分发：init 完成后退出；skill 克隆解包（不移动 cli，供后续 to_restart_args 借用）
+    let skill_cmd = match &cli.command {
+        Some(Command::Init { provider, api_url, api_key, model, name }) => {
+            crate::config::init::run_init(crate::config::init::InitArgs {
+                provider: provider.clone(),
+                api_url: api_url.clone(),
+                api_key: api_key.clone(),
+                model: model.clone(),
+                name: name.clone(),
+            })?;
+            return Ok(());
+        }
+        Some(Command::Skill(cmd)) => Some(cmd.clone()),
+        None => None,
+    };
+
     // Initialize tracing subscriber — logs go to stderr so they don't
     // interfere with the split-pane UI rendered on stdout.
     //
@@ -310,7 +357,7 @@ fn main() -> Result<(), AppError> {
         .map_err(|e| AppError::Config(format!("Failed to build tokio runtime: {}", e)))?;
 
     // 如果传入了 skill 子命令，执行后直接退出
-    if let Some(cmd) = cli.skill {
+    if let Some(cmd) = skill_cmd {
         let scope = match cmd {
             SkillCommand::Add { global, .. } => global.then_some(InstallScope::Global),
             SkillCommand::List { global } => global.then_some(InstallScope::Global),

@@ -177,6 +177,10 @@ where
     }
 }
 
+/// 零配置空客户端发起聊天时的友好提示（所有 UI 共用）。
+const NO_MODEL_HINT: &str = "尚未配置任何模型。请点击界面右上角 ⚙️ 添加模型（保存后立即生效），\
+或编辑 .dev-assistant-models.toml 后重启，或运行 `dev-assistant init` 交互式配置。";
+
 /// 多 provider 容器，支持运行时切换模型。
 ///
 /// `active_idx` 使用 `AtomicUsize`，无锁且无中毒风险，
@@ -189,12 +193,25 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
-    /// 从 ProviderConfig 列表构建
+    /// 从 ProviderConfig 列表构建（至少需要 1 个模型）
     pub fn from_configs(configs: Vec<ProviderConfig>) -> Result<Self, AppError> {
         if configs.is_empty() {
             return Err(AppError::Config("No model providers configured".to_string()));
         }
+        Self::from_configs_inner(configs)
+    }
 
+    /// 构建零模型的空客户端（Web 零配置首启专用）。
+    ///
+    /// 允许服务在无任何模型配置时启动，用户随后通过 Web 界面添加模型
+    /// （add_or_update_config 运行时生效并持久化）。聊天请求会得到
+    /// 「尚未配置任何模型」的友好错误而非 panic。
+    pub fn empty() -> Result<Self, AppError> {
+        Self::from_configs_inner(Vec::new())
+    }
+
+    /// from_configs 的共享实现（空列表合法性由调用方语义决定）。
+    fn from_configs_inner(configs: Vec<ProviderConfig>) -> Result<Self, AppError> {
         // 总超时覆盖完整请求（含流式响应），保证慢服务最终不挂死。
         // 可用环境变量 LLM_TIMEOUT_SECS 调整：思考型/长输出模型可调大（如 300+），
         // 追求快速失败的环境可调小。0 视为未配置，回落默认 120s。
@@ -261,11 +278,18 @@ impl LlmClient {
         Ok(())
     }
 
-    /// 当前活跃模型名称
+    /// 当前活跃模型名称（空客户端返回占位符，不 panic）
     pub fn active_model(&self) -> String {
-        let idx = self.active_idx.load(Ordering::SeqCst);
         let configs = self.provider_configs.read().unwrap();
-        configs[idx].name.clone()
+        match configs.get(self.active_idx.load(Ordering::SeqCst)) {
+            Some(cfg) => cfg.name.clone(),
+            None => "(未配置)".to_string(),
+        }
+    }
+
+    /// 是否尚未配置任何模型（Web 前端据此展示首启向导）
+    pub fn is_empty(&self) -> bool {
+        self.providers.read().unwrap().is_empty()
     }
 
     /// 列出所有可用模型名称
@@ -389,6 +413,9 @@ impl LlmClient {
         messages: Vec<LlmMessage>,
         tools: Vec<ToolSchema>,
     ) -> Result<LlmResponse, AppError> {
+        if self.is_empty() {
+            return Err(AppError::Llm(NO_MODEL_HINT.to_string()));
+        }
         let start_idx = self.active_idx.load(Ordering::SeqCst);
         // 克隆快照后释放读锁，避免 RwLockReadGuard 跨 await（非 Send）；Arc 克隆仅增引用计数
         let providers = self.providers.read().unwrap().clone();
@@ -462,6 +489,9 @@ impl LlmClient {
         messages: Vec<LlmMessage>,
         tools: Vec<ToolSchema>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<LlmStreamEvent, AppError>> + Send>>, AppError> {
+        if self.is_empty() {
+            return Err(AppError::Llm(NO_MODEL_HINT.to_string()));
+        }
         let start_idx = self.active_idx.load(Ordering::SeqCst);
         // 克隆快照后释放读锁，避免 RwLockReadGuard 跨 await（非 Send）；Arc 克隆仅增引用计数
         let providers = self.providers.read().unwrap().clone();

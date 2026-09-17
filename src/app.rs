@@ -77,6 +77,20 @@ impl App {
         // 加载模型配置（--config 指定路径 → 可执行目录 TOML → 环境变量）
         let mut provider_configs = load_models(config.config.as_deref())?;
 
+        // CLI 模式零配置：提示用户可选的三种配置方式后退出
+        if provider_configs.is_empty() {
+            let template_path = crate::config::models_config_path(config.config.as_deref());
+            return Err(AppError::Config(format!(
+                "未检测到模型配置，已生成配置模板：{}\n\
+                 请任选其一完成配置：\n\
+                 1. 编辑模板填写 API URL 与 API Key\n\
+                 2. 运行 `dev-assistant init` 交互式配置\n\
+                 3. 设置环境变量 LLM_API_URL / LLM_API_KEY（可加 LLM_MODEL / LLM_PROVIDER）\n\
+                 4. 使用 Web 界面零配置启动：dev-assistant --web",
+                template_path.display()
+            )));
+        }
+
         // CLI 参数覆盖：--model 和 --provider
         if let Some(ref model) = config.model {
             if let Some(first) = provider_configs.first_mut() {

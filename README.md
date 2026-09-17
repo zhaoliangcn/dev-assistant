@@ -60,6 +60,29 @@ cp .dev-assistant-models_example.toml target/release/.dev-assistant-models.toml
 cargo run --release -- --config /path/to/.dev-assistant-models.toml
 ```
 
+#### 二进制发布 / 首次配置（无需手写任何文件）
+
+任选其一：
+
+```bash
+# 方式 A（推荐，零文件编辑）：Web 零配置启动，浏览器内完成配置
+dev-assistant --web
+# 打开 http://127.0.0.1:8080 → 欢迎页点「⚙️ 立即配置」→ 填 API URL/Key → 保存即生效
+
+# 方式 B：交互式向导生成配置
+dev-assistant init
+# 或脚本化一行完成：
+dev-assistant init --provider openai --api-url https://api.openai.com/v1 \
+  --api-key sk-xxx --model gpt-4o-mini
+
+# 方式 C：环境变量快速启动（单模型，不生成任何文件）
+LLM_API_URL=https://api.openai.com/v1 LLM_API_KEY=sk-xxx LLM_MODEL=gpt-4o-mini dev-assistant
+```
+
+说明：
+- 未检测到配置时，CLI 模式会自动在可执行文件目录生成带注释的 `.dev-assistant-models.toml` 模板，按提示填 API Key 即可；Web 模式则照常启动并在界面内引导配置。
+- API Key 也可写入 `.env`（配合配置文件中的 `${VAR}` 占位符），`.env` 启动时自动加载。
+
 ### 运行
 
 ```bash

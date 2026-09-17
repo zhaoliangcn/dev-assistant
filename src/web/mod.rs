@@ -157,7 +157,18 @@ pub async fn serve(config: WebConfig) -> Result<(), AppError> {
         }
     }
 
-    let llm = Arc::new(LlmClient::from_configs(provider_configs)?);
+    // 零配置首启：允许空模型启动，用户在 Web 界面内完成首次配置
+    // （add_or_update_config 运行时生效并持久化到 models_config_path）
+    let llm = if provider_configs.is_empty() {
+        eprintln!(
+            "⚠️  未检测到模型配置，已生成模板 {}。\
+             服务照常启动，请打开 Web 界面在「模型设置」中添加模型。",
+            models_config_path.display()
+        );
+        Arc::new(LlmClient::empty()?)
+    } else {
+        Arc::new(LlmClient::from_configs(provider_configs)?)
+    };
 
     // ── 安全策略与工具注册表 ──
     let security = Arc::new(SecurityPolicy::new(

@@ -45,7 +45,12 @@ impl OpenAIProvider {
         }
         if let Some(tools) = &request.tools {
             if !tools.is_empty() {
-                body["tools"] = serde_json::to_value(tools).unwrap_or(Value::Null);
+                // 序列化失败时省略 tools 字段，避免写入 null 触发 provider 400
+                if let Ok(value) = serde_json::to_value(tools) {
+                    body["tools"] = value;
+                } else {
+                    warn!("Failed to serialize tools, omitting 'tools' field");
+                }
             }
         }
         body
@@ -93,20 +98,9 @@ impl LlmProvider for OpenAIProvider {
         let status = response.status();
 
         if !status.is_success() {
-            let retry_after = response.headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok())
-                .map(std::time::Duration::from_secs);
+            let headers = response.headers().clone();
             let body_text = response.text().await.unwrap_or_default();
-            let msg = format!("LLM API returned error (status {}): {}", status, body_text);
-            return Err(if status.as_u16() == 429 {
-                AppError::RateLimited { message: msg, retry_after }
-            } else if status.as_u16() >= 500 {
-                AppError::ServerError(status.as_u16(), msg)
-            } else {
-                AppError::Llm(msg)
-            });
+            return Err(map_http_error(status, &headers, &body_text, "LLM API"));
         }
 
         let data: Value = response.json().await?;
@@ -127,20 +121,9 @@ impl LlmProvider for OpenAIProvider {
         let status = response.status();
 
         if !status.is_success() {
-            let retry_after = response.headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok())
-                .map(std::time::Duration::from_secs);
+            let headers = response.headers().clone();
             let body_text = response.text().await.unwrap_or_default();
-            let msg = format!("LLM API returned error (status {}): {}", status, body_text);
-            return Err(if status.as_u16() == 429 {
-                AppError::RateLimited { message: msg, retry_after }
-            } else if status.as_u16() >= 500 {
-                AppError::ServerError(status.as_u16(), msg)
-            } else {
-                AppError::Llm(msg)
-            });
+            return Err(map_http_error(status, &headers, &body_text, "LLM API"));
         }
 
         // SSE 流式解析
@@ -270,114 +253,158 @@ where
             }};
         }
 
-        while let Ok(Some(line_result)) = lines.next_line().await {
-            let line = line_result.trim();
+        let mut done_emitted = false;
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line_result)) => {
+                    let line = line_result.trim();
 
-            // 跳过空行
-            if line.is_empty() {
-                continue;
-            }
-
-            // SSE 格式: "data: {...}"
-            let Some(data_str) = line.strip_prefix("data: ") else {
-                continue;
-            };
-
-                // 处理结束信号
-                if data_str == "[DONE]" {
-                    // 在结束前先 flush 所有累积的工具调用
-                    flush_tool_calls!();
-                    yield LlmStreamEvent::Done;
-                    continue;
-                }
-
-                // 解析 JSON
-                let data: Value = match serde_json::from_str(data_str) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(error = %e, "Failed to parse SSE data line, skipping");
+                    // 跳过空行
+                    if line.is_empty() {
                         continue;
                     }
-                };
 
-                // 提取 token 用量（OpenAI 在最后一个带 usage 的 chunk 中返回）
-                // 即使 choices 为空，usage 也可能存在
-                if let Some(usage) = data.get("usage") {
-                    if !usage.is_null() {
-                        let prompt_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0) as usize;
-                        let completion_tokens = usage["completion_tokens"].as_u64().unwrap_or(0) as usize;
-                        let total_tokens = usage["total_tokens"].as_u64().unwrap_or(0) as usize;
-                        if total_tokens > 0 {
-                            yield LlmStreamEvent::Usage(TokenUsage {
-                                prompt_tokens,
-                                completion_tokens,
-                                total_tokens,
-                            });
+                    // SSE 格式: "data: {...}"（容忍 "data:" 后无空格或多余空格）
+                    let Some(rest) = line.strip_prefix("data:") else {
+                        continue;
+                    };
+                    let data_str = rest.trim_start();
+
+                    // 处理结束信号
+                    if data_str == "[DONE]" {
+                        // 在结束前先 flush 所有累积的工具调用
+                        flush_tool_calls!();
+                        yield LlmStreamEvent::Done;
+                        done_emitted = true;
+                        break;
+                    }
+
+                    // 解析 JSON
+                    let data: Value = match serde_json::from_str(data_str) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            warn!(error = %e, "Failed to parse SSE data line, skipping");
+                            continue;
                         }
-                    }
-                }
+                    };
 
-                // 提取 delta 内容
-                if let Some(delta) = data["choices"].as_array()
-                    .and_then(|arr| arr.first())
-                    .and_then(|c| c["delta"].as_object())
-                {
-                    // 处理思考模型推理增量：reasoning_content（OpenAI o系列/商汤/GLM/DeepSeek-flash 风格）
-                    // 与 thinking_content（DeepSeek-v4-pro/Kimi 风格）。仅用于 UI 展示，不进历史。
-                    let reasoning = delta
-                        .get("reasoning_content")
-                        .or_else(|| delta.get("thinking_content"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    if !reasoning.is_empty() {
-                        yield LlmStreamEvent::Reasoning(reasoning.to_string());
-                    }
-
-                    // 处理文本增量
-            if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
-                if !content.is_empty() {
-                    yield LlmStreamEvent::Chunk(content.to_string());
-                }
-            }
-
-            // 处理工具调用增量：按 index 累积
-            if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
-                for tc in tool_calls {
-                    let index = tc["index"].as_i64().unwrap_or(0) as usize;
-
-                    // 查找或创建该 index 的累积条目
-                    let pos = acc_tool_calls.iter().position(|(i, _)| *i == index);
-                    if let Some(pos) = pos {
-                        let acc = &mut acc_tool_calls[pos].1;
-                        // 合并增量
-                        if let Some(id) = tc["id"].as_str() {
-                            if !id.is_empty() {
-                                acc.id = id.to_string();
+                    // 提取 token 用量（OpenAI 在最后一个带 usage 的 chunk 中返回）
+                    // 即使 choices 为空，usage 也可能存在
+                    if let Some(usage) = data.get("usage") {
+                        if !usage.is_null() {
+                            let prompt_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0) as usize;
+                            let completion_tokens = usage["completion_tokens"].as_u64().unwrap_or(0) as usize;
+                            let total_tokens = usage["total_tokens"].as_u64().unwrap_or(0) as usize;
+                            if total_tokens > 0 {
+                                yield LlmStreamEvent::Usage(TokenUsage {
+                                    prompt_tokens,
+                                    completion_tokens,
+                                    total_tokens,
+                                });
                             }
                         }
-                        if let Some(func) = tc["function"].as_object() {
-                            if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
-                                if !name.is_empty() {
-                                    acc.name = name.to_string();
+                    }
+
+                    // 提取 delta 内容
+                    if let Some(delta) = data["choices"].as_array()
+                        .and_then(|arr| arr.first())
+                        .and_then(|c| c["delta"].as_object())
+                    {
+                        // 处理思考模型推理增量：reasoning_content（OpenAI o系列/商汤/GLM/DeepSeek-flash 风格）
+                        // 与 thinking_content（DeepSeek-v4-pro/Kimi 风格）。仅用于 UI 展示，不进历史。
+                        let reasoning = delta
+                            .get("reasoning_content")
+                            .or_else(|| delta.get("thinking_content"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if !reasoning.is_empty() {
+                            yield LlmStreamEvent::Reasoning(reasoning.to_string());
+                        }
+
+                        // 处理文本增量
+                        if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
+                            if !content.is_empty() {
+                                yield LlmStreamEvent::Chunk(content.to_string());
+                            }
+                        }
+
+                        // 处理工具调用增量：按 index 累积
+                        if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                            for tc in tool_calls {
+                                let index = tc["index"].as_i64().unwrap_or(0) as usize;
+
+                                // 查找或创建该 index 的累积条目
+                                let pos = acc_tool_calls.iter().position(|(i, _)| *i == index);
+                                if let Some(pos) = pos {
+                                    let acc = &mut acc_tool_calls[pos].1;
+                                    // 合并增量
+                                    if let Some(id) = tc["id"].as_str() {
+                                        if !id.is_empty() {
+                                            acc.id = id.to_string();
+                                        }
+                                    }
+                                    if let Some(func) = tc["function"].as_object() {
+                                        if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                                            if !name.is_empty() {
+                                                acc.name = name.to_string();
+                                            }
+                                        }
+                                        if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                                            acc.arguments.push_str(args);
+                                        }
+                                    }
+                                } else {
+                                    // 创建新的累积条目
+                                    let id = tc["id"].as_str().unwrap_or_default().to_string();
+                                    let func_obj = tc["function"].as_object().cloned().unwrap_or_default();
+                                    let name = func_obj.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                    let arguments = func_obj.get("arguments").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                    acc_tool_calls.push((index, AccToolCall { id, name, arguments }));
                                 }
                             }
-                            if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
-                                acc.arguments.push_str(args);
-                            }
                         }
-                    } else {
-                        // 创建新的累积条目
-                        let id = tc["id"].as_str().unwrap_or_default().to_string();
-                        let func_obj = tc["function"].as_object().cloned().unwrap_or_default();
-                        let name = func_obj.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                        let arguments = func_obj.get("arguments").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                        acc_tool_calls.push((index, AccToolCall { id, name, arguments }));
                     }
+                }
+                Ok(None) => {
+                    // EOF：provider 未发送 [DONE] 就关闭连接。flush 剩余 tool calls 并补发 Done。
+                    warn!("OpenAI SSE stream ended without [DONE] sentinel; flushing remaining tool calls");
+                    flush_tool_calls!();
+                    if !done_emitted {
+                        yield LlmStreamEvent::Done;
+                    }
+                    break;
+                }
+                Err(e) => {
+                    // 读取错误：向上传播，避免消费者拿到截断响应却无错误信号
+                    warn!(error = %e, "OpenAI SSE stream read error");
+                    yield Err(AppError::Llm(format!("OpenAI SSE stream read error: {}", e)))?;
+                    break;
                 }
             }
         }
-        }
     })
+}
+
+/// 将 HTTP 错误状态映射为 AppError，供 chat 与 chat_stream 共用。
+fn map_http_error(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    body_text: &str,
+    source: &str,
+) -> AppError {
+    let retry_after = headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(std::time::Duration::from_secs);
+    let msg = format!("{} API returned error (status {}): {}", source, status, body_text);
+    if status.as_u16() == 429 {
+        AppError::RateLimited { message: msg, retry_after }
+    } else if status.as_u16() >= 500 {
+        AppError::ServerError(status.as_u16(), msg)
+    } else {
+        AppError::Llm(msg)
+    }
 }
 
 #[cfg(test)]

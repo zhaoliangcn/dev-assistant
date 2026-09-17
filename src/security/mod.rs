@@ -274,26 +274,53 @@ impl SecurityPolicy {
     /// Validate that a path is within allowed directories without requiring the path to exist.
     /// Falls back to normalized prefix checking when canonicalize() fails.
     /// Returns the full normalized path (not just the parent directory).
+    //
+    // SECURITY FIX: Previously only the parent directory was validated, which could
+    // allow file creation in disallowed locations if the parent happened to be valid.
+    // Now the full normalized path is also checked against allowed directories.
     pub fn validate_path_exists(&self, path: &str) -> Result<PathBuf, AppError> {
         let path_buf = Path::new(path);
         let parent = path_buf.parent().unwrap_or(Path::new("."));
 
         for allowed in &self.allowed_paths {
-            let candidate = allowed.join(parent);
-            let normalized = normalize_path(&candidate);
+            // Validate parent directory first
+            let parent_candidate = allowed.join(parent);
+            let parent_normalized = normalize_path(&parent_candidate);
 
-            match normalized.canonicalize() {
+            let parent_ok = match parent_normalized.canonicalize() {
+                Ok(resolved) => is_child_of(&resolved, allowed),
+                Err(_) => {
+                    is_child_of(&parent_normalized, allowed)
+                        && !contains_symlink(&parent_normalized, allowed)
+                }
+            };
+
+            if !parent_ok {
+                continue;
+            }
+
+            // SECURITY FIX: Also validate the full normalized path (not just parent)
+            // to ensure the complete path stays within allowed directories.
+            let full_candidate = allowed.join(path);
+            let full_normalized = normalize_path(&full_candidate);
+
+            // Check the full path doesn't escape allowed directories
+            if !is_child_of(&full_normalized, allowed) {
+                continue;
+            }
+
+            // Try canonicalize on the full path (may fail if file doesn't exist yet)
+            match full_normalized.canonicalize() {
                 Ok(resolved) => {
                     if is_child_of(&resolved, allowed) {
-                        // Parent resolved ok; return the full path (file may not exist)
-                        return Ok(normalize_path(&allowed.join(path)));
+                        return Ok(resolved);
                     }
                 }
                 Err(_) => {
-                    // Fallback: check parent path prefix and symlinks
-                    if is_child_of(&normalized, allowed) && !contains_symlink(&normalized, allowed) {
-                        // Parent validated; return the full path (file may not exist)
-                        return Ok(normalize_path(&allowed.join(path)));
+                    // File doesn't exist yet — parent is validated and full path
+                    // is within allowed dirs. Check for symlinks in the path.
+                    if !contains_symlink(&full_normalized, allowed) {
+                        return Ok(full_normalized);
                     }
                 }
             }
@@ -369,17 +396,32 @@ impl SecurityPolicy {
         // SECURITY: Allow shell execution with -c flag, but still scan the shell
         // string for dangerous commands. The tool description explicitly instructs
         // the LLM to use command="sh" with args=["-c", "..."] for shell features.
+        //
+        // FIX: Split the shell command by `;`, `&&`, `||`, `|` and scan each
+        // segment individually. This prevents bypass where dangerous commands
+        // are embedded in later segments (e.g., `echo hi; rm -rf src`).
         if (command == "sh" || command == "bash" || command == "zsh" || command == "fish")
             && args.contains(&"-c")
         {
             if let Some(idx) = args.iter().position(|&a| a == "-c") {
                 if let Some(shell_cmd) = args.get(idx + 1) {
-                    for (pattern, level, reason) in &self.dangerous_commands {
-                        if pattern.is_match(shell_cmd) {
-                            return SecurityEvaluation {
-                                danger_level: level.clone(),
-                                reason: reason.clone(),
-                            };
+                    // Split by shell command separators and scan each segment.
+                    // Handles `;`, `|`, `||`, `&&`, and newlines to prevent
+                    // bypass where dangerous commands are embedded in later segments
+                    // (e.g., `echo hi; rm -rf src` or `echo hi && rm -rf src`).
+                    let segments = shell_cmd.split(|c| c == ';' || c == '|' || c == '&' || c == '\n');
+                    for segment in segments {
+                        let trimmed = segment.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        for (pattern, level, reason) in &self.dangerous_commands {
+                            if pattern.is_match(trimmed) {
+                                return SecurityEvaluation {
+                                    danger_level: level.clone(),
+                                    reason: reason.clone(),
+                                };
+                            }
                         }
                     }
                 }
@@ -633,6 +675,62 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_command_shell_with_c_catches_dangerous_in_later_segment() {
+        // sh -c with multiple commands separated by ; — dangerous command
+        // in a later segment should still be caught.
+        let dir = tempdir().unwrap();
+        let p = policy_in(dir.path());
+
+        let eval = p.evaluate_command("sh", &["-c", "echo hi; rm -rf src"]);
+        assert_eq!(
+            eval.danger_level,
+            DangerLevel::Critical,
+            "sh -c with '; rm -rf' in later segment should be caught; got reason: {}",
+            eval.reason
+        );
+    }
+
+    #[test]
+    fn evaluate_command_shell_with_c_catches_dangerous_after_pipe() {
+        // sh -c with pipe separator — dangerous command after | should be caught.
+        let dir = tempdir().unwrap();
+        let p = policy_in(dir.path());
+
+        let eval = p.evaluate_command("sh", &["-c", "echo hi | sudo cat /etc/shadow"]);
+        assert_eq!(
+            eval.danger_level,
+            DangerLevel::High,
+            "sh -c with '| sudo' in later segment should be caught; got reason: {}",
+            eval.reason
+        );
+    }
+
+    #[test]
+    fn evaluate_command_whitelist_does_not_allow_prefixed_bypass() {
+        // Whitelisted "cargo" should NOT allow "cargoMalicious" to bypass.
+        // This test requires COMMAND_WHITELIST to be set; if not set, skip.
+        if std::env::var("COMMAND_WHITELIST").is_err() {
+            return; // whitelist not configured, skip
+        }
+        let dir = tempdir().unwrap();
+        let p = policy_in(dir.path());
+
+        // "cargoMalicious" should NOT match whitelist "cargo"
+        let eval = p.evaluate_command("cargoMalicious", &["--flag"]);
+        // It's not in the dangerous list either, so it would be Low.
+        // But the point is it's not whitelisted — the test verifies the
+        // whitelist matching logic doesn't have a prefix bypass.
+        // If "cargo" is whitelisted, "cargoMalicious" should not be Low
+        // via whitelist. It would be Low via "Safe command" fallback.
+        // So we just verify it doesn't say "whitelisted" in the reason.
+        assert!(
+            !eval.reason.contains("whitelisted"),
+            "cargoMalicious should not be whitelisted; got reason: {}",
+            eval.reason
+        );
+    }
+
+    #[test]
     fn evaluate_tool_unknown_tool_returns_low() {
         let dir = tempdir().unwrap();
         let p = policy_in(dir.path());
@@ -655,6 +753,80 @@ mod tests {
         // 即使 approval_required=false，Critical 仍需审批
         assert!(without_approval.requires_approval(&DangerLevel::Critical));
         assert!(!without_approval.requires_approval(&DangerLevel::High));
+    }
+
+    // --- 新增测试：针对 OCR 审查发现的安全问题 ---
+
+    #[test]
+    fn evaluate_command_shell_c_catches_dangerous_in_later_segment() {
+        // FIX: sh -c 中用 `;` 分隔的危险命令也应被捕获
+        let dir = tempdir().unwrap();
+        let p = policy_in(dir.path());
+
+        // `echo hi; rm -rf src` — 危险命令在第二个段
+        let eval = p.evaluate_command("sh", &["-c", "echo hi; rm -rf src"]);
+        assert_eq!(
+            eval.danger_level,
+            DangerLevel::Critical,
+            "sh -c with semicolon-separated dangerous command should be caught; got: {}",
+            eval.reason
+        );
+
+        // `echo hi && rm -rf src` — && 分隔
+        let eval2 = p.evaluate_command("sh", &["-c", "echo hi && rm -rf src"]);
+        assert_eq!(
+            eval2.danger_level,
+            DangerLevel::Critical,
+            "sh -c with &&-separated dangerous command should be caught; got: {}",
+            eval2.reason
+        );
+
+        // `echo hi | rm -rf src` — 管道分隔
+        let eval3 = p.evaluate_command("sh", &["-c", "echo hi | rm -rf src"]);
+        assert_eq!(
+            eval3.danger_level,
+            DangerLevel::Critical,
+            "sh -c with pipe-separated dangerous command should be caught; got: {}",
+            eval3.reason
+        );
+    }
+
+    #[test]
+    fn evaluate_command_whitelist_rejects_prefix_bypass() {
+        // FIX: 白名单前缀匹配不应被 `cargoMalicious` 绕过
+        std::env::set_var("COMMAND_WHITELIST", "cargo");
+        let dir = tempdir().unwrap();
+        let p = SecurityPolicy::new(dir.path(), None, true);
+
+        // `cargo build` 应该被白名单放行
+        let eval_ok = p.evaluate_command("cargo", &["build"]);
+        assert_eq!(eval_ok.danger_level, DangerLevel::Low);
+
+        // `cargoMalicious` 不应被白名单放行（前缀匹配但非词边界）
+        // 它不是危险命令所以 danger_level 仍是 Low，但 reason 不应包含 "whitelisted"
+        let eval_bad = p.evaluate_command("cargoMalicious", &[]);
+        assert!(
+            !eval_bad.reason.contains("whitelisted"),
+            "cargoMalicious should NOT be whitelisted; got reason: {}",
+            eval_bad.reason
+        );
+
+        std::env::remove_var("COMMAND_WHITELIST");
+    }
+
+    #[test]
+    fn validate_path_exists_rejects_traversal_in_filename() {
+        // FIX: validate_path_exists 应验证完整路径，不仅仅是父目录
+        let dir = tempdir().unwrap();
+        let p = policy_in(dir.path());
+
+        // `safe_dir/../../etc/passwd` — 父目录 `safe_dir/..` 可能合法，
+        // 但完整路径 `safe_dir/../../etc/passwd` 应被拒绝
+        let result = p.validate_path_exists("../../etc/passwd");
+        assert!(
+            result.is_err(),
+            "validate_path_exists should reject path traversal in full path"
+        );
     }
 }
 

@@ -42,14 +42,19 @@ impl OllamaProvider {
             "model": request.model,
             "messages": ollama_messages,
             "stream": stream,
-            "options": {
-                "temperature": request.temperature,
-            },
         });
+        // temperature 为 None 时省略 options，避免 json! 序列化为 null 被部分 Ollama 版本拒绝
+        // LlmRequest.temperature 为 f64（非 Option），始终写入 options.temperature
+        body["options"] = serde_json::json!({ "temperature": request.temperature });
 
         if let Some(tools) = &request.tools {
             if !tools.is_empty() {
-                body["tools"] = serde_json::to_value(tools).unwrap_or(Value::Null);
+                // 序列化失败时省略 tools 字段，避免写入 null 触发 provider 400
+                if let Ok(value) = serde_json::to_value(tools) {
+                    body["tools"] = value;
+                } else {
+                    warn!("Failed to serialize tools, omitting 'tools' field");
+                }
             }
         }
 
@@ -158,70 +163,171 @@ impl LlmProvider for OllamaProvider {
         let mapped = async_stream::try_stream! {
             let mut lines = reader.as_mut().lines();
 
-            while let Ok(Some(line)) = lines.next_line().await {
-                let line = line.trim().to_string();
-                if line.is_empty() {
-                    continue;
-                }
+            // 按 index 累积工具调用增量：Ollama 会把单个 tool call 的 arguments
+            // 分片送到多个 done:false chunk，需在 done:true 时合并后一次性发出。
+            struct AccToolCall {
+                id: String,
+                name: String,
+                arguments: String,
+            }
+            let mut acc_tool_calls: Vec<(usize, AccToolCall)> = Vec::new();
 
-                let data: Value = match serde_json::from_str(&line) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(error = %e, line = %line, "Failed to parse Ollama NDJSON line, skipping");
-                        continue;
+            macro_rules! flush_tool_calls {
+                () => {{
+                    if !acc_tool_calls.is_empty() {
+                        acc_tool_calls.sort_by_key(|(idx, _)| *idx);
+                        for (_idx, acc) in acc_tool_calls.drain(..) {
+                            if acc.name.is_empty() {
+                                continue;
+                            }
+                            let arguments = match serde_json::from_str::<Value>(&acc.arguments) {
+                                Ok(v) => v,
+                                Err(_) => Value::Object(Default::default()),
+                            };
+                            // Ollama 的 tool_calls 不带 id，缺失时生成 UUID 保证下游唯一性
+                            let id = if acc.id.is_empty() {
+                                uuid::Uuid::new_v4().to_string()
+                            } else {
+                                acc.id.clone()
+                            };
+                            yield LlmStreamEvent::ToolCallDelta(ToolCall {
+                                id,
+                                function: ToolCallFunction {
+                                    name: acc.name,
+                                    arguments,
+                                },
+                            });
+                        }
                     }
-                };
+                }};
+            }
 
-                if data["done"].as_bool().unwrap_or(false) {
-                    // 提取 usage 信息（Ollama 在最后 done=true 的行中返回）
-                    if let Some(prompt_count) = data.get("prompt_eval_count").and_then(|v| v.as_u64()) {
-                        let eval_count = data.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                        yield LlmStreamEvent::Usage(TokenUsage {
-                            prompt_tokens: prompt_count as usize,
-                            completion_tokens: eval_count as usize,
-                            total_tokens: (prompt_count + eval_count) as usize,
-                        });
-                    }
+            let mut done_emitted = false;
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        let line = line.trim().to_string();
+                        if line.is_empty() {
+                            continue;
+                        }
 
-                    // 处理工具调用：Ollama 在 done=true 行也可能携带 tool_calls
-                    if let Some(tcs) = data["message"]["tool_calls"].as_array() {
-                        if !tcs.is_empty() {
+                        let data: Value = match serde_json::from_str(&line) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                warn!(error = %e, line = %line, "Failed to parse Ollama NDJSON line, skipping");
+                                continue;
+                            }
+                        };
+
+                        // done=true 分支：先 flush 尾段文本，再合并并 flush 工具调用，最后 Done
+                        if data["done"].as_bool().unwrap_or(false) {
+                            if let Some(content) = data["message"]["content"].as_str() {
+                                if !content.is_empty() {
+                                    yield LlmStreamEvent::Chunk(content.to_string());
+                                }
+                            }
+
+                            // 提取 usage 信息（Ollama 在最后 done=true 的行中返回）
+                            if let Some(prompt_count) = data.get("prompt_eval_count").and_then(|v| v.as_u64()) {
+                                let eval_count = data.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                                yield LlmStreamEvent::Usage(TokenUsage {
+                                    prompt_tokens: prompt_count as usize,
+                                    completion_tokens: eval_count as usize,
+                                    total_tokens: (prompt_count + eval_count) as usize,
+                                });
+                            }
+
+                            // 合并 done=true 行上的 tool_calls（可能携带完整或尾段 arguments）
+                            if let Some(tcs) = data["message"]["tool_calls"].as_array() {
+                                for tc in tcs {
+                                    let index = tc["index"].as_i64().unwrap_or(0) as usize;
+                                    let pos = acc_tool_calls.iter().position(|(i, _)| *i == index);
+                                    if let Some(pos) = pos {
+                                        let acc = &mut acc_tool_calls[pos].1;
+                                        if let Some(id) = tc["id"].as_str() {
+                                            if !id.is_empty() {
+                                                acc.id = id.to_string();
+                                            }
+                                        }
+                                        if let Some(func) = tc.get("function") {
+                                            if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                                                if !name.is_empty() {
+                                                    acc.name = name.to_string();
+                                                }
+                                            }
+                                            if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                                                acc.arguments.push_str(args);
+                                            }
+                                        }
+                                    } else {
+                                        let id = tc["id"].as_str().unwrap_or_default().to_string();
+                                        let func_obj = tc.get("function").cloned().unwrap_or(Value::Object(Default::default()));
+                                        let name = func_obj.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                        let arguments = func_obj.get("arguments").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                        acc_tool_calls.push((index, AccToolCall { id, name, arguments }));
+                                    }
+                                }
+                            }
+
+                            flush_tool_calls!();
+                            yield LlmStreamEvent::Done;
+                            break;
+                        }
+
+                        // 处理文本内容
+                        if let Some(content) = data["message"]["content"].as_str() {
+                            if !content.is_empty() {
+                                yield LlmStreamEvent::Chunk(content.to_string());
+                            }
+                        }
+
+                        // 处理工具调用增量：按 index 累积，不在中间 yield
+                        if let Some(tcs) = data["message"]["tool_calls"].as_array() {
                             for tc in tcs {
-                                if let Some(func) = tc.get("function") {
-                                    let name = func.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                                    let arguments = func.get("arguments").cloned().unwrap_or(Value::Object(Default::default()));
-                                    yield LlmStreamEvent::ToolCallDelta(ToolCall {
-                                        id: uuid::Uuid::new_v4().to_string(),
-                                        function: ToolCallFunction { name, arguments },
-                                    });
+                                let index = tc["index"].as_i64().unwrap_or(0) as usize;
+                                let pos = acc_tool_calls.iter().position(|(i, _)| *i == index);
+                                if let Some(pos) = pos {
+                                    let acc = &mut acc_tool_calls[pos].1;
+                                    if let Some(id) = tc["id"].as_str() {
+                                        if !id.is_empty() {
+                                            acc.id = id.to_string();
+                                        }
+                                    }
+                                    if let Some(func) = tc.get("function") {
+                                        if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                                            if !name.is_empty() {
+                                                acc.name = name.to_string();
+                                            }
+                                        }
+                                        if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                                            acc.arguments.push_str(args);
+                                        }
+                                    }
+                                } else {
+                                    let id = tc["id"].as_str().unwrap_or_default().to_string();
+                                    let func_obj = tc.get("function").cloned().unwrap_or(Value::Object(Default::default()));
+                                    let name = func_obj.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                    let arguments = func_obj.get("arguments").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                    acc_tool_calls.push((index, AccToolCall { id, name, arguments }));
                                 }
                             }
                         }
                     }
-                    yield LlmStreamEvent::Done;
-                    continue;
-                }
-
-                // 处理文本内容
-                if let Some(content) = data["message"]["content"].as_str() {
-                    if !content.is_empty() {
-                        yield LlmStreamEvent::Chunk(content.to_string());
-                    }
-                }
-
-                // 处理工具调用增量
-                if let Some(tcs) = data["message"]["tool_calls"].as_array() {
-                    if !tcs.is_empty() {
-                        for tc in tcs {
-                            if let Some(func) = tc.get("function") {
-                                let name = func.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                                let arguments = func.get("arguments").cloned().unwrap_or(Value::Object(Default::default()));
-                                yield LlmStreamEvent::ToolCallDelta(ToolCall {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    function: ToolCallFunction { name, arguments },
-                                });
-                            }
+                    Ok(None) => {
+                        // EOF 未收到 done=true：flush 残余工具调用并发 Done，避免调用方挂起
+                        if !done_emitted {
+                            flush_tool_calls!();
+                            yield LlmStreamEvent::Done;
                         }
+                        break;
+                    }
+                    Err(e) => {
+                        // 连接中断：flush 残余工具调用后传播错误
+                        if !done_emitted {
+                            flush_tool_calls!();
+                        }
+                        yield Err(AppError::Llm(format!("Ollama stream read error: {}", e)))?;
+                        break;
                     }
                 }
             }

@@ -5,4 +5,5 @@
 pub mod chat;
 pub mod files;
 pub mod session;
+pub mod skills;
 pub mod status;

@@ -44,7 +44,12 @@ pub fn build_router(state: AppState) -> Router {
         // 文件管理
         .route("/api/files", get(handlers::files::list_files))
         .route("/api/files/content", get(handlers::files::get_file_content))
-        .route("/api/files/save", post(handlers::files::save_file));
+        .route("/api/files/save", post(handlers::files::save_file))
+        // 技能管理
+        .route("/api/skills", get(handlers::skills::get_skills))
+        .route("/api/skills/install", post(handlers::skills::install))
+        .route("/api/skills/preview", post(handlers::skills::preview))
+        .route("/api/skills/{name}", delete(handlers::skills::remove));
 
     // ── WebSocket 路由 ──
     let ws_routes = Router::new()

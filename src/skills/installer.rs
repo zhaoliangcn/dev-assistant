@@ -264,6 +264,62 @@ pub async fn install_skill(
     Ok(installed)
 }
 
+/// 预览 source 中的可安装技能（克隆到临时目录后解析 SKILL.md，不安装）。
+///
+/// 供 Web 界面在安装前展示仓库里包含哪些技能。
+pub fn preview_skills(source: &str) -> Result<Vec<Skill>, AppError> {
+    let skill_source = parse_source(source);
+
+    match &skill_source {
+        SkillSource::Git { .. } => {
+            let temp = std::env::temp_dir()
+                .join(format!("dev-assistant-skill-preview-{}", uuid::Uuid::new_v4()));
+            fs::create_dir_all(&temp)
+                .map_err(|e| AppError::Config(format!("Failed to create temp dir: {}", e)))?;
+
+            let result = (|| -> Result<Vec<Skill>, AppError> {
+                let repo_path = git_utils::clone_repo(source, &temp)?;
+                let (_base, branch, subdir) = git_utils::parse_git_source(source);
+                let _ = git_utils::checkout_branch(&repo_path, branch.as_deref());
+
+                let mut skills = Vec::new();
+                for dir in git_utils::list_skill_dirs(&repo_path, subdir.as_deref()) {
+                    let skill_md = dir.join("SKILL.md");
+                    if !skill_md.exists() {
+                        continue;
+                    }
+                    if let Ok(skill) = parse_skill_file(&skill_md) {
+                        skills.push(skill);
+                    }
+                }
+                Ok(skills)
+            })();
+
+            git_utils::cleanup_temp_dir(&temp);
+            result
+        }
+        SkillSource::Local { path } => {
+            if !path.is_dir() {
+                return Err(AppError::Config(format!(
+                    "Local skill source is not a directory: {}",
+                    path.display()
+                )));
+            }
+            let mut skills = Vec::new();
+            for dir in git_utils::list_skill_dirs(path, None) {
+                let skill_md = dir.join("SKILL.md");
+                if !skill_md.exists() {
+                    continue;
+                }
+                if let Ok(skill) = parse_skill_file(&skill_md) {
+                    skills.push(skill);
+                }
+            }
+            Ok(skills)
+        }
+    }
+}
+
 /// 移除已安装的技能。
 pub fn remove_skill(name: &str, scope: InstallScope, working_dir: &Path) -> Result<(), AppError> {
     let dir = match scope {

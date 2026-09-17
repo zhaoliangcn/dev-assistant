@@ -60,8 +60,6 @@ impl AppError {
     pub fn is_server_error(&self) -> bool {
         match self {
             AppError::ServerError(code, _) => *code >= 500,
-            // 兼容旧 provider 直接返回 Llm 的兜底，保留但不依赖
-            AppError::Llm(msg) => msg.contains("status 5"),
             AppError::Http(e) => e.status().is_some_and(|s| s.as_u16() >= 500),
             _ => false,
         }
@@ -90,10 +88,11 @@ impl AppError {
     /// - RateLimited: 需要等待后重试
     /// - ServerError: 服务端瞬时故障
     /// - Io(Interrupted): 被中断，可以重试
-    /// - Http(timeout/connect): 网络超时/连接失败
-    /// - Llm: LLM 服务暂时不可用
+    /// - Http(connect): 网络连接失败（不包括超时，因为超时已耗尽等待时间）
     ///
     /// 不可重试的错误：
+    /// - Http(timeout): 已耗尽等待时间，重试通常无益
+    /// - Llm: 客户端错误（4xx）不应重试，除非是特定的瞬时错误
     /// - NotFound: 文件不存在
     /// - PermissionDenied: 权限拒绝
     /// - ToolNotFound: 工具不存在
@@ -104,8 +103,7 @@ impl AppError {
             AppError::RateLimited { .. } => true,
             AppError::ServerError { .. } => true,
             AppError::Io(e) => matches!(e.kind(), std::io::ErrorKind::Interrupted),
-            AppError::Http(e) => e.is_timeout() || e.is_connect(),
-            AppError::Llm(_) => true,
+            AppError::Http(e) => e.is_connect() && !e.is_timeout(),
             _ => false,
         }
     }

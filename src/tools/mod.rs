@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -266,12 +266,22 @@ impl ToolRegistry {
     pub fn schema_token_count(&self) -> usize {
         let current = self.schema_tokens.load(Ordering::Relaxed);
         if current == 0 {
-            let schemas = self.get_tool_schemas();
-            if let Ok(json) = serde_json::to_string(&schemas) {
-                let estimated = crate::agent::token_counter::TokenCounter::estimate(&json);
-                self.schema_tokens.store(estimated, Ordering::Relaxed);
-                return estimated;
+            // 使用 compare_exchange 避免多个线程同时计算
+            // 只有第一个线程会成功设置 computing 标志
+            static COMPUTING: AtomicBool = AtomicBool::new(false);
+            
+            if COMPUTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                let schemas = self.get_tool_schemas();
+                if let Ok(json) = serde_json::to_string(&schemas) {
+                    let estimated = crate::agent::token_counter::TokenCounter::estimate(&json);
+                    self.schema_tokens.store(estimated, Ordering::Relaxed);
+                    COMPUTING.store(false, Ordering::SeqCst);
+                    return estimated;
+                }
+                COMPUTING.store(false, Ordering::SeqCst);
             }
+            // 如果另一个线程正在计算，等待并返回当前值
+            // 当前线程可能看到 0，但下次调用会看到更新后的值
         }
         current
     }

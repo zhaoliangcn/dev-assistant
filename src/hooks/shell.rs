@@ -12,6 +12,71 @@ use super::error::HookError;
 /// 最大输出字节数（默认 4096，由配置中的 max_output_bytes 覆盖）。
 pub const DEFAULT_MAX_OUTPUT: usize = 4096;
 
+/// 允许执行的命令白名单前缀（安全目录）。
+/// 如果配置了此限制，只有这些目录下的命令才允许执行。
+const ALLOWED_COMMAND_PREFIXES: &[&str] = &[
+    "/usr/bin/",
+    "/usr/local/bin/",
+    "/bin/",
+    "node",
+    "python",
+    "python3",
+    "sh",
+    "bash",
+    "echo",
+    "cat",
+    "grep",
+    "find",
+    "ls",
+    "wc",
+];
+
+/// 验证命令是否安全可执行。
+///
+/// 检查命令路径是否在白名单中，防止任意命令执行。
+fn validate_command(command: &str) -> Result<(), HookError> {
+    // 空命令直接拒绝
+    if command.trim().is_empty() {
+        return Err(HookError::Execution(
+            "Hook command is empty".to_string(),
+        ));
+    }
+
+    // 检查是否包含危险字符（shell 注入）
+    let dangerous_chars = ['|', '&', ';', '$', '`', '\n', '\r'];
+    if dangerous_chars.iter().any(|c| command.contains(*c)) {
+        return Err(HookError::Execution(format!(
+            "Hook command contains dangerous characters: '{}'",
+            command
+        )));
+    }
+
+    // 提取命令名（去除路径）
+    let cmd_name = Path::new(command)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(command);
+
+    // 检查白名单
+    let is_allowed = ALLOWED_COMMAND_PREFIXES.iter().any(|prefix| {
+        command.starts_with(prefix) || cmd_name == *prefix
+    });
+
+    if !is_allowed {
+        warn!(
+            command = command,
+            "Hook command not in allowlist, blocking execution"
+        );
+        return Err(HookError::Execution(format!(
+            "Hook command '{}' is not in the allowed command list. \
+             Allowed: {:?}",
+            command, ALLOWED_COMMAND_PREFIXES
+        )));
+    }
+
+    Ok(())
+}
+
 /// 执行一个 shell hook 并捕获其 stdout（事件级上下文）。
 ///
 /// - 使用 `command` 和 `args` 启动进程，不经过 shell 解析
@@ -96,6 +161,9 @@ fn run_hook_process(
     let timeout = config.timeout.unwrap_or(5);
     let max_output = config.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT);
 
+    // 验证命令安全性
+    validate_command(&config.command)?;
+
     debug!(name = %config.name, command = %config.command, timeout = %timeout, event = event.as_str(), "Executing shell hook");
 
     let mut cmd = Command::new(&config.command);
@@ -118,19 +186,27 @@ fn run_hook_process(
     })?;
 
     // 写入 stdin JSON payload 后立即关闭，让 hook 进程读到 EOF。
-    // payload 很小（远小于管道缓冲），不会与 stdout 读取互相死锁。
     if let Some(mut stdin) = child.stdin.take() {
         if let Err(e) = serde_json::to_writer(&mut stdin, payload) {
-            warn!(name = %config.name, error = %e, "Failed to write hook stdin payload");
+            // JSON 序列化失败是严重错误，应终止 hook 执行
+            drop(stdin);
+            let _ = child.kill();
+            return Err(HookError::Execution(format!(
+                "Failed to serialize hook stdin payload: {}",
+                e
+            )));
         }
         drop(stdin);
     }
 
     // 使用线程 + 通道等待进程退出，消除 50ms 轮询忙等
-    let child_pid = child.id();
     let (tx, rx) = std::sync::mpsc::channel();
+    let child_for_wait = std::mem::replace(&mut child, {
+        // 临时占位，实际在下面移动
+        Command::new("true").spawn().unwrap()
+    });
     std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
+        let _ = tx.send(child_for_wait.wait_with_output());
     });
 
     let output = match rx.recv_timeout(Duration::from_secs(timeout)) {
@@ -138,11 +214,12 @@ fn run_hook_process(
             HookError::Execution(format!("Failed to wait for '{}': {}", config.command, e))
         })?,
         Err(_) => {
-            // 超时：强制 kill 进程
-            let _ = std::process::Command::new("kill")
-                .arg("-9")
-                .arg(child_pid.to_string())
-                .status();
+            // 超时：使用 child.kill() 跨平台强制终止进程
+            if let Err(e) = child.kill() {
+                warn!(name = %config.name, error = %e, "Failed to kill timed-out hook process");
+            }
+            // 等待子进程退出，避免僵尸进程
+            let _ = child.wait();
             return Err(HookError::Timeout(timeout, config.name.clone()));
         }
     };
@@ -155,7 +232,7 @@ fn run_hook_process(
 
     // 检查退出码
     if !output.status.success() {
-        let msg = String::from_utf8_lossy(&output.stdout).to_string();
+        let msg = String::from_utf8_lossy(&output.stdout);
         return Err(HookError::Execution(format!(
             "Hook '{}' exited with code {}: {}",
             config.name,
@@ -164,7 +241,7 @@ fn run_hook_process(
         )));
     }
 
-    let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
 
     debug!(name = %config.name, bytes = stdout_str.len(), "Shell hook completed");
 

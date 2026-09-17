@@ -386,13 +386,17 @@ impl LlmClient {
         configs.remove(idx);
         providers.remove(idx);
 
-        // 修正活跃索引：删除项之前的活跃项左移；删除的恰为末项时回退到第一项
+        // 修正活跃索引：先处理删除项在活跃项之前的情况（左移），
+        // 再检查活跃项是否超出新长度（回退到第一项）
         let active = self.active_idx.load(Ordering::SeqCst);
-        if active >= configs.len() {
-            self.active_idx.store(0, Ordering::SeqCst);
-        } else if active > idx {
+        if active > idx {
+            // 删除的项在活跃项之前，活跃项左移
             self.active_idx.store(active - 1, Ordering::SeqCst);
+        } else if active >= configs.len() {
+            // 删除的项是活跃项或在之后，且活跃项超出新长度
+            self.active_idx.store(0, Ordering::SeqCst);
         }
+        // 如果 active == idx（删除的就是活跃项），索引不变，指向下一个元素
         Ok(())
     }
 
@@ -416,11 +420,12 @@ impl LlmClient {
         if self.is_empty() {
             return Err(AppError::Llm(NO_MODEL_HINT.to_string()));
         }
-        let start_idx = self.active_idx.load(Ordering::SeqCst);
         // 克隆快照后释放读锁，避免 RwLockReadGuard 跨 await（非 Send）；Arc 克隆仅增引用计数
         let providers = self.providers.read().unwrap().clone();
         let configs = self.provider_configs.read().unwrap().clone();
         let total_providers = providers.len();
+        // 在拿到快照后 clamp 活跃索引，防止并发修改导致越界
+        let start_idx = self.active_idx.load(Ordering::SeqCst) % total_providers;
         let mut last_error: Option<AppError> = None;
 
         // 从当前活跃 provider 开始尝试，逐个故障转移
@@ -492,11 +497,12 @@ impl LlmClient {
         if self.is_empty() {
             return Err(AppError::Llm(NO_MODEL_HINT.to_string()));
         }
-        let start_idx = self.active_idx.load(Ordering::SeqCst);
         // 克隆快照后释放读锁，避免 RwLockReadGuard 跨 await（非 Send）；Arc 克隆仅增引用计数
         let providers = self.providers.read().unwrap().clone();
         let configs = self.provider_configs.read().unwrap().clone();
         let total_providers = providers.len();
+        // 在拿到快照后 clamp 活跃索引，防止并发修改导致越界
+        let start_idx = self.active_idx.load(Ordering::SeqCst) % total_providers;
         let mut last_error: Option<AppError> = None;
 
         // 从当前活跃 provider 开始尝试，逐个故障转移

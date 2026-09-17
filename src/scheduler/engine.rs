@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use super::executor::ScheduledTaskExecutor;
@@ -60,6 +61,8 @@ pub struct Scheduler {
     config: SchedulerConfig,
     /// 任务缓存（用于快速查找）
     task_cache: Arc<RwLock<Vec<ScheduledTask>>>,
+    /// 后台 tick 循环的 JoinHandle
+    tick_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
 impl Scheduler {
@@ -81,6 +84,7 @@ impl Scheduler {
             running: Arc::new(AtomicBool::new(false)),
             paused: Arc::new(AtomicBool::new(false)),
             task_cache: Arc::new(RwLock::new(Vec::new())),
+            tick_handle: Arc::new(RwLock::new(None)),
             config,
         };
 
@@ -106,17 +110,19 @@ impl Scheduler {
         let tick_interval = self.config.tick_interval_secs;
 
         // 启动后台 tick 循环
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(
                 tokio::time::Duration::from_secs(tick_interval),
             );
 
             while running.load(Ordering::SeqCst) {
-                interval.tick().await;
-
+                // 先检查暂停标志，再等待下一个 tick
                 if paused.load(Ordering::SeqCst) {
+                    interval.tick().await;
                     continue;
                 }
+
+                interval.tick().await;
 
                 // Tick 时间轮，获取到期任务
                 let due_tasks = wheel.tick();
@@ -172,6 +178,9 @@ impl Scheduler {
 
             info!("Scheduler tick loop stopped");
         });
+
+        // 存储 JoinHandle 以便在 shutdown 时等待
+        *self.tick_handle.write().await = Some(handle);
     }
 
     /// 调度一个新任务。
@@ -265,8 +274,27 @@ impl Scheduler {
     pub async fn shutdown(&self) {
         self.running.store(false, Ordering::SeqCst);
         info!("Scheduler shutdown requested");
-        // 等待 tick 循环自然结束
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // 获取 JoinHandle 并等待 tick 循环结束
+        let handle = self.tick_handle.write().await.take();
+        if let Some(handle) = handle {
+            // 等待 tick 循环自然结束，最多等待 5 秒
+            match tokio::time::timeout(
+                tokio::time::Duration::from_secs(5),
+                handle,
+            ).await {
+                Ok(Ok(())) => {
+                    info!("Scheduler tick loop stopped gracefully");
+                }
+                Ok(Err(e)) => {
+                    warn!("Scheduler tick loop panicked: {}", e);
+                }
+                Err(_) => {
+                    warn!("Scheduler tick loop did not stop within timeout, forcing shutdown");
+                }
+            }
+        }
+
         info!("Scheduler shutdown complete");
     }
 

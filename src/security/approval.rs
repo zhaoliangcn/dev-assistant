@@ -11,7 +11,7 @@ type Timestamp = u64;
 fn now_timestamp() -> Timestamp {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("SystemTime::now() returned a time before UNIX_EPOCH")
         .as_secs()
 }
 
@@ -131,8 +131,11 @@ impl PermissionEntry {
             return true; // 永久有效
         }
         let now = now_timestamp();
-        // 使用 saturating_sub 防止 approved_at 来自未来时间时的 u64 下溢
-        now.saturating_sub(self.approved_at) < self.validity_seconds
+        // 拒绝未来时间戳的审批（防止时钟偏移或恶意输入）
+        if self.approved_at > now {
+            return false;
+        }
+        (now - self.approved_at) < self.validity_seconds
     }
 }
 
@@ -379,13 +382,36 @@ impl ApprovalManager {
 
     #[allow(dead_code)] // reserved for future interactive approval workflow
     fn extract_scope_id(&self, request: &ApprovalRequest) -> String {
-        // 尝试从参数中提取具体作用域（路径、命令等），失败时回退到工具名。
-        if let Ok(args) = serde_json::from_str::<serde_json::Value>(&request.arguments) {
-            extract_approval_scope(&request.tool_name, &args)
-        } else {
-            request.tool_name.clone()
+        // 尝试从参数中提取具体作用域（路径、命令等），失败时使用显式回退标记。
+        // 不应直接使用 tool_name 作为回退，否则会授予整个工具的权限。
+        match serde_json::from_str::<serde_json::Value>(&request.arguments) {
+            Ok(args) => extract_approval_scope(&request.tool_name, &args),
+            Err(_) => {
+                // JSON 解析失败时，使用带前缀的 scope 以避免权限过宽
+                tracing::warn!(
+                    tool = request.tool_name,
+                    "Failed to parse arguments JSON, using restricted scope"
+                );
+                format!("__unparsed__:{}", request.tool_name)
+            }
         }
     }
+}
+
+/// 对 shell 参数进行转义，防止命令注入。
+///
+/// 使用单引号包裹参数，并转义内部的单引号。
+/// 这是防止参数拼接导致命令注入的基本防护。
+fn shell_quote_arg(arg: &str) -> String {
+    // 如果参数只包含安全字符，无需转义
+    if arg
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/' || c == ':')
+    {
+        return arg.to_string();
+    }
+    // 否则使用单引号包裹，内部单引号用 '\'' 转义
+    format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
 /// 从工具参数中提取审批作用域标识符。
@@ -409,10 +435,10 @@ pub fn extract_approval_scope(tool_name: &str, arguments: &serde_json::Value) ->
             .get("files")
             .and_then(|v| v.as_array())
             .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
+                // 对于批量操作，使用排序后的文件数量作为 scope，而非拼接所有路径
+                // 这样可以避免 scope 过长且更稳定
+                let count = a.len();
+                format!("batch:{}:{}", count, tool_name)
             })
             .unwrap_or_else(|| tool_name.to_string()),
         "exec_command" => {
@@ -423,6 +449,7 @@ pub fn extract_approval_scope(tool_name: &str, arguments: &serde_json::Value) ->
                 .map(|a| {
                     a.iter()
                         .filter_map(|v| v.as_str())
+                        .map(|s| shell_quote_arg(s))
                         .collect::<Vec<_>>()
                         .join(" ")
                 })

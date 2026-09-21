@@ -212,16 +212,9 @@ impl LlmClient {
 
     /// from_configs 的共享实现（空列表合法性由调用方语义决定）。
     fn from_configs_inner(configs: Vec<ProviderConfig>) -> Result<Self, AppError> {
-        // 总超时覆盖完整请求（含流式响应），保证慢服务最终不挂死。
-        // 可用环境变量 LLM_TIMEOUT_SECS 调整：思考型/长输出模型可调大（如 300+），
-        // 追求快速失败的环境可调小。0 视为未配置，回落默认 120s。
-        let total_timeout = std::env::var("LLM_TIMEOUT_SECS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .filter(|n| *n > 0)
-            .unwrap_or(120);
-        // 连接阶段单独限速：连接被拒/DNS 失败快速判定，使短重试与故障转移
-        // 不被卡在总超时窗口里（对不可达 provider 最多 ~10s 即转移）。
+        // 注意：总超时不能设在 client 级——它覆盖整个响应体读取，会把长对话的
+        // 流式输出在 LLM_TIMEOUT_SECS 处以 "error decoding response body" 截断。
+        // 因此 client 只保留连接超时，总超时由各 provider 的非流式请求单独设置。
         let connect_timeout = std::env::var("LLM_CONNECT_TIMEOUT_SECS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
@@ -229,7 +222,6 @@ impl LlmClient {
             .unwrap_or(10);
 
         let http_client = Client::builder()
-            .timeout(Duration::from_secs(total_timeout))
             .connect_timeout(Duration::from_secs(connect_timeout))
             .build()
             .map_err(|e| AppError::Config(format!("Failed to create HTTP client: {}", e)))?;

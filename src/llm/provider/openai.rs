@@ -69,6 +69,7 @@ impl OpenAIProvider {
         &self,
         http_client: &'a Client,
         body: &'a Value,
+        stream: bool,
     ) -> reqwest::RequestBuilder {
         let mut req = http_client
             .post(self.api_url())
@@ -77,6 +78,13 @@ impl OpenAIProvider {
 
         if let Some(ref key) = self.config.api_key {
             req = req.header("Authorization", format!("Bearer {}", key));
+        }
+
+        // 非流式请求设总超时兜底；流式请求不设总超时，由 EOF/[DONE]/读错误
+        // 自然终止——总超时会覆盖整个响应体读取，长对话流式输出会被
+        // reqwest 以 "error decoding response body" 中止。
+        if !stream {
+            req = req.timeout(super::common::non_stream_timeout());
         }
 
         req
@@ -94,7 +102,7 @@ impl LlmProvider for OpenAIProvider {
 
         debug!(url = %self.api_url(), model = %request.model, "OpenAI chat request");
 
-        let response = self.build_request(http_client, &body).send().await?;
+        let response = self.build_request(http_client, &body, false).send().await?;
         let status = response.status();
 
         if !status.is_success() {
@@ -117,7 +125,7 @@ impl LlmProvider for OpenAIProvider {
 
         debug!(url = %self.api_url(), model = %request.model, "OpenAI chat stream request");
 
-        let response = self.build_request(http_client, &body).send().await?;
+        let response = self.build_request(http_client, &body, true).send().await?;
         let status = response.status();
 
         if !status.is_success() {

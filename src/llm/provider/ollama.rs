@@ -87,6 +87,7 @@ impl LlmProvider for OllamaProvider {
             .post(&url)
             .header("Content-Type", "application/json")
             .json(&body)
+            .timeout(super::common::non_stream_timeout())
             .send()
             .await?;
 
@@ -127,6 +128,7 @@ impl LlmProvider for OllamaProvider {
             .post(&url)
             .header("Content-Type", "application/json")
             .json(&body)
+            // 流式不设总超时，由 EOF/读错误自然终止（见 non_stream_timeout 文档）。
             .send()
             .await?;
 

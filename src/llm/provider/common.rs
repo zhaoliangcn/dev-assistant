@@ -7,6 +7,20 @@ use tracing::debug;
 
 use crate::utils::error::AppError;
 
+/// 非流式请求的总超时（秒）。
+///
+/// 覆盖完整请求（含响应体读取），保证慢服务最终不挂死。仅用于非流式请求：
+/// 流式请求不能设总超时——它会覆盖整个响应体读取，长对话流式输出会在超时点
+/// 被 reqwest 以 "error decoding response body" 中止。0 视为未配置，回落 120s。
+pub(crate) fn non_stream_timeout() -> std::time::Duration {
+    let secs = std::env::var("LLM_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(120);
+    std::time::Duration::from_secs(secs)
+}
+
 /// 解析工具调用参数（通用版本，适用于所有 provider）。
 ///
 /// LLM 经常生成格式不规范的 JSON（未转义换行符、markdown fence、trailing comma 等），

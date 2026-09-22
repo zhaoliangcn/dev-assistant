@@ -146,8 +146,9 @@ impl App {
         // 发现全局 + 项目技能
         let discovered_skills = discover_all_skills(&config.working_dir).unwrap_or_default();
 
-        // 构建 system prompt
-        let system_prompt = build_system_prompt(&discovered_skills);
+        // 构建 system prompt（含运行环境信息）
+        let env_info = crate::env_info::EnvInfo::detect();
+        let system_prompt = build_system_prompt(&discovered_skills, &env_info);
 
         // 初始化 HookManager 并执行 session-start hooks
         // Arc 共享：App 与 Agent 都要用（session-end / pre/post-tool）

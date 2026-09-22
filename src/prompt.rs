@@ -1,17 +1,19 @@
 //! 系统提示词构建。
 
 use crate::agent::{AgentIdentity, MAX_SUBAGENT_DEPTH};
+use crate::env_info::EnvInfo;
 use crate::skills::Skill;
 
 /// 构建 Agent 的系统提示词。
 ///
-/// 提示词由两部分组成：
-/// 1. 技能说明（从项目 `skills/` 目录发现的技能）
-/// 2. 固定的行为规则与工作流程
+/// 提示词由三部分组成：
+/// 1. 运行环境（OS / Shell 信息及命令语法指引）
+/// 2. 技能说明（从项目 `skills/` 目录发现的技能）
+/// 3. 固定的行为规则与工作流程
 ///
 /// 工具 schema 通过 API `tools` 参数传递，不在此重复注入；
 /// 此处仅列出工具的特殊限制（见"特殊工具说明"）。
-pub fn build_system_prompt(skills: &[Skill]) -> String {
+pub fn build_system_prompt(skills: &[Skill], env: &EnvInfo) -> String {
     let skills_prompt = crate::skills::format_skills_for_prompt(skills);
     let agent_types = AgentIdentity::all()
         .iter()
@@ -31,6 +33,7 @@ pub fn build_system_prompt(skills: &[Skill]) -> String {
     format!(
         r#"你是 Dev-Assistant，一个 Rust 原生的 AI 编程助手。使用可用工具完成用户任务。
 
+{env_section}
 ## 核心原则
 
 ### 安全策略
@@ -88,6 +91,7 @@ pub fn build_system_prompt(skills: &[Skill]) -> String {
 - 总结简洁（3-10 行），详细日志写入文件。
 "#,
         skills_section = skills_section,
+        env_section = env.render_for_prompt(),
         agent_types = agent_types,
         max_depth = MAX_SUBAGENT_DEPTH
     )
@@ -99,6 +103,15 @@ mod tests {
     use crate::skills::{Skill, SkillMetadata};
     use std::collections::HashMap;
     use std::path::PathBuf;
+
+    fn env_stub() -> EnvInfo {
+        EnvInfo {
+            os: "windows",
+            arch: "x86_64",
+            shell: "bash".to_string(),
+            shell_guidance: "使用 POSIX 语法".to_string(),
+        }
+    }
 
     fn skill_named(name: &str) -> Skill {
         let meta = SkillMetadata {
@@ -120,7 +133,7 @@ mod tests {
 
     #[test]
     fn build_prompt_includes_core_rules() {
-        let prompt = build_system_prompt(&[]);
+        let prompt = build_system_prompt(&[], &env_stub());
 
         // 固定行为规则不应漏
         assert!(prompt.contains("finish"), "missing finish rule");
@@ -138,7 +151,7 @@ mod tests {
     #[test]
     fn build_prompt_with_no_skills_still_valid() {
         // 空技能列表不应 panic，且仍含规则段
-        let prompt = build_system_prompt(&[]);
+        let prompt = build_system_prompt(&[], &env_stub());
         assert!(prompt.contains("核心原则"), "missing core rules section");
         assert!(prompt.contains("Dev-Assistant"));
     }
@@ -146,7 +159,7 @@ mod tests {
     #[test]
     fn build_prompt_includes_skills_section() {
         let skills = vec![skill_named("code-review")];
-        let prompt = build_system_prompt(&skills);
+        let prompt = build_system_prompt(&skills, &env_stub());
 
         assert!(prompt.contains("code-review"), "missing skill name in prompt");
         assert!(prompt.contains("可用技能"), "missing skills section header");
@@ -154,14 +167,14 @@ mod tests {
 
     #[test]
     fn build_prompt_no_skills_section_when_empty() {
-        let prompt = build_system_prompt(&[]);
+        let prompt = build_system_prompt(&[], &env_stub());
 
         assert!(!prompt.contains("可用技能"), "empty skills should not show section header");
     }
 
     #[test]
     fn build_prompt_injects_agent_types_and_max_depth() {
-        let prompt = build_system_prompt(&[]);
+        let prompt = build_system_prompt(&[], &env_stub());
 
         // agent_type 列表应从 AgentIdentity 枚举动态生成，含中文标签
         assert!(prompt.contains("architect（架构师）"), "missing architect label");
@@ -176,7 +189,7 @@ mod tests {
     #[test]
     fn build_prompt_does_not_duplicate_tool_list() {
         // 工具 schema 已通过 API tools 参数传递，提示词中不应重复注入工具清单
-        let prompt = build_system_prompt(&[]);
+        let prompt = build_system_prompt(&[], &env_stub());
         assert!(
             !prompt.contains("- read_file:"),
             "tool list should not be duplicated in prompt"
@@ -185,7 +198,7 @@ mod tests {
 
     #[test]
     fn build_prompt_includes_finish_decision_tree() {
-        let prompt = build_system_prompt(&[]);
+        let prompt = build_system_prompt(&[], &env_stub());
 
         assert!(prompt.contains("何时调用 `finish`"), "missing finish decision tree");
         assert!(prompt.contains("执行任务"), "missing task criteria");
@@ -194,7 +207,7 @@ mod tests {
 
     #[test]
     fn build_prompt_finish_tree_has_analysis_branch() {
-        let prompt = build_system_prompt(&[]);
+        let prompt = build_system_prompt(&[], &env_stub());
 
         // 分析/研究类任务分支
         assert!(prompt.contains("分析/研究"), "missing analysis/research branch");
@@ -202,7 +215,7 @@ mod tests {
 
     #[test]
     fn build_prompt_finish_tree_has_multistep_guidance() {
-        let prompt = build_system_prompt(&[]);
+        let prompt = build_system_prompt(&[], &env_stub());
 
         // 多步骤任务指导
         assert!(prompt.contains("多步骤任务"), "missing multistep task guidance");

@@ -15,6 +15,7 @@ mod agent;
 mod app;
 mod config;
 mod dream;
+mod env_info;
 mod hooks;
 mod llm;
 mod orchestrator;

@@ -229,6 +229,11 @@ where
         // 使用 Vec 保持插入顺序（按 index 升序）
         let mut acc_tool_calls: Vec<(usize, AccToolCall)> = Vec::new();
 
+        let mut done_emitted = false;
+        // 计数已产出的有效内容事件（文本/思考/工具调用）。
+        // 不计 Usage 帧：仅带 token 统计的空响应同样属于失败，不能算作有效输出。
+        let mut event_count: usize = 0;
+
         /// 将累积的工具调用逐个 yield 出去，然后清空缓冲区。
         /// 返回的 Vec 保留已 yield 的 index，用于去重。
         macro_rules! flush_tool_calls {
@@ -240,6 +245,7 @@ where
                     if !acc.name.is_empty() {
                         match parse_arguments(serde_json::Value::String(acc.arguments.clone())) {
                             Ok(parsed_args) => {
+                                event_count += 1;
                                 yield LlmStreamEvent::ToolCallDelta(ToolCall {
                                     id: acc.id.clone(),
                                     function: ToolCallFunction {
@@ -261,7 +267,6 @@ where
             }};
         }
 
-        let mut done_emitted = false;
         loop {
             match lines.next_line().await {
                 Ok(Some(line_result)) => {
@@ -296,6 +301,16 @@ where
                         }
                     };
 
+                    // 流内错误帧：OpenRouter 等网关在已返回 HTTP 200 后，
+                    // 会以单条 `data: {"error":{...}}` 帧上报上游故障/限流，
+                    // 此时 choices 为空且不会有后续 [DONE]。
+                    // 必须上抛为错误，否则会被当成"无内容的正常结束"，
+                    // 上层误判为"LLM 返回空响应"而反复重试同一请求。
+                    if let Some(err) = data.get("error").filter(|e| !e.is_null()) {
+                        yield Err(stream_error_to_app_error(err))?;
+                        break;
+                    }
+
                     // 提取 token 用量（OpenAI 在最后一个带 usage 的 chunk 中返回）
                     // 即使 choices 为空，usage 也可能存在
                     if let Some(usage) = data.get("usage") {
@@ -326,12 +341,14 @@ where
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
                         if !reasoning.is_empty() {
+                            event_count += 1;
                             yield LlmStreamEvent::Reasoning(reasoning.to_string());
                         }
 
                         // 处理文本增量
                         if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
                             if !content.is_empty() {
+                                event_count += 1;
                                 yield LlmStreamEvent::Chunk(content.to_string());
                             }
                         }
@@ -374,7 +391,18 @@ where
                     }
                 }
                 Ok(None) => {
-                    // EOF：provider 未发送 [DONE] 就关闭连接。flush 剩余 tool calls 并补发 Done。
+                    // EOF：连接在 [DONE] 之前关闭。
+                    // 若整条流一个事件都没产出，说明这次请求实际上失败了
+                    // （网关空响应、连接被重置等），必须上抛错误让上层重试/故障转移，
+                    // 否则会被当作"LLM 返回空响应"，白等 2s+4s 后以同一方式失败。
+                    if event_count == 0 {
+                        yield Err(AppError::Llm(
+                            "OpenAI SSE stream closed without any event".to_string(),
+                        ))?;
+                        break;
+                    }
+                    // 已有内容但缺 [DONE]：属于可容忍的收尾异常（如上游截断前发完最后一块），
+                    // flush 剩余 tool calls 并补发 Done，保证已产出的内容不丢失。
                     warn!("OpenAI SSE stream ended without [DONE] sentinel; flushing remaining tool calls");
                     flush_tool_calls!();
                     if !done_emitted {
@@ -391,6 +419,34 @@ where
             }
         }
     })
+}
+
+/// 将 SSE 流内 `error` 帧映射为 AppError。
+///
+/// 网关（OpenRouter 等）在已发出 HTTP 200 之后，用单条
+/// `data: {"error":{"code":...,"message":...}}` 帧上报失败。
+/// 映射规则与 [`map_http_error`] 对齐：429 → RateLimited（走退避重试并读 Retry-After），
+/// 5xx → ServerError（走退避重试），其余 → Llm（立即故障转移）。
+/// 这样上层 `retry_class` 能正确识别流内瞬时故障，而不是当成空响应原地重试。
+fn stream_error_to_app_error(err: &Value) -> AppError {
+    let code = err.get("code").and_then(|c| c.as_u64()).unwrap_or(0) as u16;
+    let message = err
+        .get("message")
+        .and_then(|m| m.as_str())
+        .unwrap_or("upstream stream error");
+    let detail = match err.pointer("/metadata/error_type").and_then(|v| v.as_str()) {
+        Some(t) => format!("{} (error_type={})", message, t),
+        None => message.to_string(),
+    };
+    let msg = format!("LLM stream error: {}", detail);
+
+    if code == 429 {
+        AppError::RateLimited { message: msg, retry_after: None }
+    } else if code >= 500 {
+        AppError::ServerError(code, msg)
+    } else {
+        AppError::Llm(msg)
+    }
 }
 
 /// 将 HTTP 错误状态映射为 AppError，供 chat 与 chat_stream 共用。
@@ -418,6 +474,135 @@ fn map_http_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::stream;
+
+    /// 把若干原始 SSE 行喂给解析器，收集全部事件。
+    fn collect_sse_events(lines: &[&str]) -> Vec<Result<LlmStreamEvent, AppError>> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let body: String = lines.iter().map(|l| format!("{}\n", l)).collect();
+        let bytes: Vec<Result<tokio_util::bytes::Bytes, std::io::Error>> =
+            vec![Ok(tokio_util::bytes::Bytes::from(body))];
+        let mut parsed = parse_openai_sse_stream(stream::iter(bytes));
+        runtime.block_on(async {
+            let mut out = Vec::new();
+            while let Some(ev) = parsed.next().await {
+                out.push(ev);
+            }
+            out
+        })
+    }
+
+    /// 核心回归：网关在 HTTP 200 之后用单条 `error` 帧上报 502。
+    /// 修复前该帧被静默忽略 → 落到 EOF 分支 → 上层误判"LLM 返回空响应"并原地重试 3 次。
+    #[test]
+    fn sse_error_frame_is_surfaced_as_error_not_silence() {
+        let events = collect_sse_events(&[
+            r#"data: {"id":"gen-1","object":"chat.completion.chunk","choices":[],"error":{"code":502,"message":"JSON error injected into SSE stream","metadata":{"error_type":"provider_unavailable"}}}"#,
+        ]);
+
+        assert_eq!(events.len(), 1, "error frame should terminate the stream");
+        let err = events[0].as_ref().expect_err("error frame must not be Ok");
+        // 5xx 映射为 ServerError，才能被 retry_class 识别为可重试
+        assert!(
+            matches!(err, AppError::ServerError(502, _)),
+            "expected ServerError(502), got {:?}",
+            err
+        );
+        assert!(err.to_string().contains("provider_unavailable"));
+        // 绝不能出现 Done——否则会被当成"正常收尾但无内容"
+        assert!(
+            !events.iter().any(|e| matches!(e, Ok(LlmStreamEvent::Done))),
+            "must not emit Done for an error frame"
+        );
+    }
+
+    #[test]
+    fn sse_error_frame_code_429_maps_to_rate_limited() {
+        let events = collect_sse_events(&[
+            r#"data: {"choices":[],"error":{"code":429,"message":"rate limited"}}"#,
+        ]);
+        let err = events[0].as_ref().expect_err("should be Err");
+        assert!(matches!(err, AppError::RateLimited { .. }), "got {:?}", err);
+        assert!(err.is_rate_limited());
+    }
+
+    /// 回归：连接建立后一个事件都没产出就 EOF（网关空响应）。
+    /// 修复前补发 Done → 上层判"空响应"并重试；修复后直接上抛错误。
+    #[test]
+    fn sse_empty_stream_surfaces_error_instead_of_done() {
+        let events = collect_sse_events(&[]);
+        assert_eq!(events.len(), 1);
+        let err = events[0].as_ref().expect_err("empty stream must be Err");
+        assert!(err.to_string().contains("without any event"), "got {}", err);
+    }
+
+    /// 仅带 usage 的空响应同样算失败（无任何内容产出）。
+    #[test]
+    fn sse_usage_only_stream_is_treated_as_empty() {
+        let events = collect_sse_events(&[
+            r#"data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":0,"total_tokens":10}}"#,
+        ]);
+        assert_eq!(events.len(), 2, "expect Usage then Err");
+        assert!(matches!(events[0], Ok(LlmStreamEvent::Usage(_))));
+        assert!(events[1].is_err(), "usage-only stream must end with Err");
+    }
+
+    /// 保留行为：已有内容但缺 [DONE] 时仍补发 Done，不丢已产出内容。
+    #[test]
+    fn sse_content_without_done_sentinel_still_completes() {
+        let events = collect_sse_events(&[
+            r#"data: {"choices":[{"delta":{"content":"部分内容"}}]}"#,
+        ]);
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                Ok(LlmStreamEvent::Chunk(t)) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "部分内容", "content before EOF must be preserved");
+        assert!(
+            events.iter().any(|e| matches!(e, Ok(LlmStreamEvent::Done))),
+            "should still emit Done after flushing content"
+        );
+        assert!(events.iter().all(|e| e.is_ok()), "no error expected");
+    }
+
+    /// 正常路径回归：[DONE] 收尾的流不应产生任何错误。
+    #[test]
+    fn sse_normal_done_stream_has_no_error() {
+        let events = collect_sse_events(&[
+            r#"data: {"choices":[{"delta":{"content":"你好"}}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            r#"data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}"#,
+            "data: [DONE]",
+        ]);
+        assert!(events.iter().all(|e| e.is_ok()), "unexpected error: {:?}", events);
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                Ok(LlmStreamEvent::Chunk(t)) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "你好");
+        assert!(matches!(events.last().unwrap(), Ok(LlmStreamEvent::Done)));
+    }
+
+    /// error 帧前若已有内容，error 仍须上抛（不能被已产出的内容掩盖）。
+    #[test]
+    fn sse_error_frame_after_content_still_errors() {
+        let events = collect_sse_events(&[
+            r#"data: {"choices":[{"delta":{"content":"开头"}}]}"#,
+            r#"data: {"choices":[],"error":{"code":503,"message":"upstream gone"}}"#,
+        ]);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], Ok(LlmStreamEvent::Chunk(_))));
+        assert!(matches!(events[1], Err(AppError::ServerError(503, _))));
+    }
 
     #[test]
     fn parse_arguments_parses_valid_json_object() {

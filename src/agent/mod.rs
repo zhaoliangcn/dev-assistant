@@ -391,6 +391,11 @@ impl Agent {
 
         const MAX_EMPTY_RETRIES: u32 = 3;
         let mut empty_attempt = 0u32;
+        // 流内瞬时故障（网关 5xx / 429）的重试上限。
+        // provider 层已把 SSE 流内 error 帧映射为 ServerError/RateLimited 上抛，
+        // 若不在此重试，一次上游抖动就会让整个对话直接失败。
+        const MAX_STREAM_ERROR_RETRIES: u32 = 3;
+        let mut stream_error_attempt = 0u32;
 
         loop {
             // 使用流式响应
@@ -401,6 +406,8 @@ impl Agent {
             let mut assistant_content = String::new();
             let mut reasoning_content = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
+            // 本轮是否因瞬时流错误而放弃、重发请求
+            let mut retry_stream = false;
 
             // 循环读取流式事件
             while let Some(event_result) = stream.next().await {
@@ -441,11 +448,39 @@ impl Agent {
                         break;
                     }
                     Err(e) => {
+                        // 瞬时故障（上游 5xx / 限流）在此退避重试：
+                        // 这类错误多由网关侧的短暂抖动引起，重发同一请求即可恢复。
+                        // 4xx / 配置 / 解析类错误重发无意义，直接上抛。
+                        let transient = e.is_server_error() || e.is_rate_limited();
+                        if transient && stream_error_attempt < MAX_STREAM_ERROR_RETRIES {
+                            stream_error_attempt += 1;
+                            let delay = Duration::from_secs(2u64.pow(stream_error_attempt));
+                            output.warning(&format!(
+                                "LLM 流式错误（{}），{}/{} 次重试，{}s 后重试...",
+                                e,
+                                stream_error_attempt,
+                                MAX_STREAM_ERROR_RETRIES,
+                                delay.as_secs()
+                            ));
+                            tokio::time::sleep(delay).await;
+                            // 跳出消费循环并重发本次请求：此时 tool_calls / assistant_content 皆空，
+                            // 不能落入下方「工具调用 / 空响应」分支做无谓的判定。
+                            retry_stream = true;
+                            break;
+                        }
                         output.error(&format!("LLM 流式错误: {}", e));
                         return Err(e);
                     }
                 }
             }
+
+            // 因瞬时流错误放弃本次响应，直接重发请求
+            if retry_stream {
+                continue;
+            }
+            // 本轮成功收到完整响应，重置重试计数
+            stream_error_attempt = 0;
+            empty_attempt = 0;
 
             // 根据是否包含工具调用来处理响应
             if !tool_calls.is_empty() {

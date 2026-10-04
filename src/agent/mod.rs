@@ -187,7 +187,8 @@ impl Agent {
     /// 参数：`depth` 子代理深度, `name` 任务名, `agent_type` 代理类型, `running` 是否仍在运行。
     #[allow(dead_code)]
     pub fn register_subagent(&mut self, depth: usize, name: &str, agent_type: &str, running: bool) {
-        self.subagent_statuses.push((depth, name.to_string(), agent_type.to_string(), running));
+        self.subagent_statuses
+            .push((depth, name.to_string(), agent_type.to_string(), running));
     }
 
     /// 获取当前子代理状态列表，供 UI 渲染子代理树使用。
@@ -197,7 +198,10 @@ impl Agent {
 
     /// 获取正在运行的子代理数量。
     pub fn running_subagents(&self) -> usize {
-        self.subagent_statuses.iter().filter(|(_, _, _, running)| *running).count()
+        self.subagent_statuses
+            .iter()
+            .filter(|(_, _, _, running)| *running)
+            .count()
     }
 
     /// 获取所有工具的 schemas（同步工具 + 异步工具）
@@ -478,9 +482,9 @@ impl Agent {
             if retry_stream {
                 continue;
             }
-            // 本轮成功收到完整响应，重置重试计数
-            stream_error_attempt = 0;
-            empty_attempt = 0;
+            // 两个计数器不能在此重置：循环内唯一会再次迭代的路径是下方
+            // 「空响应重试」（成功路径全部 return），若重置，empty_attempt
+            // 每轮都被清零，MAX_EMPTY_RETRIES 上限失效，退化为无限重试。
 
             // 根据是否包含工具调用来处理响应
             if !tool_calls.is_empty() {
@@ -1038,8 +1042,7 @@ impl Agent {
                     // 路径需再写入 stage_ctx 的状态/错误并保存——所有对 stage_ctx
                     // 的使用在此块内结束，之后才不可变借用 pipeline_ctx 写检查点。
                     let validation_err =
-                        validate_stage_artifacts(&pipeline_store, stage_idx, stage_ctx)
-                            .err();
+                        validate_stage_artifacts(&pipeline_store, stage_idx, stage_ctx).err();
                     if let Some(reason) = validation_err {
                         stage_ctx.status = StageStatus::Failed;
                         stage_ctx.error = Some(reason.clone());
@@ -1154,9 +1157,7 @@ impl Agent {
             // 5xx 服务端错误：瞬时性为主，可重试
             AppError::ServerError(_, _) => ErrorCategory::Transient,
             AppError::Llm(_) => ErrorCategory::Llm,
-            AppError::Http(e) if e.is_timeout() || e.is_connect() => {
-                ErrorCategory::Transient
-            }
+            AppError::Http(e) if e.is_timeout() || e.is_connect() => ErrorCategory::Transient,
             // 其他 HTTP 错误（4xx 鉴权/参数等）：重试无益
             AppError::Http(_) => ErrorCategory::Permanent,
             AppError::Io(e) if e.kind() == std::io::ErrorKind::Interrupted => {
@@ -1221,10 +1222,8 @@ impl Agent {
             // 状态跨越 .await，无法满足 spawn 的 Send + 'static 约束。改用
             // futures::join_all 在同一任务上交错推进各子代理——对 I/O 密集的
             // LLM 调用而言，仍能在 .await 点交替执行，获得真实的并发收益。
-            let job_results = futures::future::join_all(
-                jobs.into_iter().map(execute_subagent_job),
-            )
-            .await;
+            let job_results =
+                futures::future::join_all(jobs.into_iter().map(execute_subagent_job)).await;
             for (id, result) in job_results {
                 if result.success {
                     output.success("子代理任务完成");
@@ -1263,19 +1262,17 @@ impl Agent {
 
             // ── 拦截 spawn_subagent 工具调用（结果已在上方并行执行）──
             if tool_call.function.name == "spawn_subagent" {
-                let result = subagent_results
-                    .remove(&tool_call.id)
-                    .unwrap_or_else(|| {
-                        // 正常不可达：准备阶段已为每个 spawn 调用产出结果或任务；
-                        // 仅当子代理线程 panic 且结果缺失时兜底。
-                        ToolResult::failure(
-                            format!(
-                                "[spawn_subagent] ❌ 执行结果缺失 (tool_call_id: {})",
-                                tool_call.id
-                            ),
-                            crate::tools::ErrorCategory::Permanent,
-                        )
-                    });
+                let result = subagent_results.remove(&tool_call.id).unwrap_or_else(|| {
+                    // 正常不可达：准备阶段已为每个 spawn 调用产出结果或任务；
+                    // 仅当子代理线程 panic 且结果缺失时兜底。
+                    ToolResult::failure(
+                        format!(
+                            "[spawn_subagent] ❌ 执行结果缺失 (tool_call_id: {})",
+                            tool_call.id
+                        ),
+                        crate::tools::ErrorCategory::Permanent,
+                    )
+                });
                 results.push(result);
                 continue;
             }
@@ -1541,20 +1538,27 @@ impl Agent {
                 if let Ok(content) = std::fs::read_to_string(&index_path) {
                     if let Ok(index) = serde_json::from_str::<crate::tools::kb::KbIndex>(&content) {
                         let project_root = self.working_dir();
-                        let (stale, total) = index.entries.values().fold(
-                            (0usize, 0usize),
-                            |(s, t), entry| {
-                                let has_refs = !entry.source_refs.is_empty();
-                                let st = crate::tools::kb::count_stale_refs(entry, &project_root);
-                                (s + st, t + if has_refs { 1 } else { 0 })
-                            },
-                        );
+                        // 口径统一按「条目」计：分子是有 ≥1 个过期 source_ref
+                        // 的条目数，分母是带 source_refs 的条目总数。
+                        let (stale, total) =
+                            index
+                                .entries
+                                .values()
+                                .fold((0usize, 0usize), |(s, t), entry| {
+                                    if entry.source_refs.is_empty() {
+                                        return (s, t);
+                                    }
+                                    let stale_here =
+                                        crate::tools::kb::count_stale_refs(entry, &project_root);
+                                    (s + usize::from(stale_here > 0), t + 1)
+                                });
                         report.kb_stale_entries = stale;
                         report.kb_total_injected = total;
                     }
                 }
 
-                let json = serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string());
+                let json =
+                    serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string());
                 let mut msg = format!("当前上下文预算使用情况：\n{}", json);
                 if report.kb_stale_entries > 0 {
                     msg.push_str(&format!(
@@ -1714,7 +1718,10 @@ impl Agent {
             msg.push_str(&format!("\n已聚合为阶段摘要 phase-{}", p));
         }
         if let Some(p) = final_aggregated {
-            msg.push_str(&format!("\n已滚动更新会话摘要 final.md（聚合至 phase-{}）", p));
+            msg.push_str(&format!(
+                "\n已滚动更新会话摘要 final.md（聚合至 phase-{}）",
+                p
+            ));
         }
         Ok(msg)
     }
@@ -2162,7 +2169,9 @@ mod tests {
     // ── validate_stage_artifacts 测试 ──
 
     /// 辅助：在临时目录中构造一个 PipelineContextStore + StageContext。
-    fn make_store_and_stage(summary: &str) -> (tempfile::TempDir, PipelineContextStore, StageContext) {
+    fn make_store_and_stage(
+        summary: &str,
+    ) -> (tempfile::TempDir, PipelineContextStore, StageContext) {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = PipelineContextStore::new(dir.path()).expect("store");
         let stage = StageContext {
@@ -2187,7 +2196,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_missing_llm_artifact() {
-        let (dir, store, mut stage) = make_store_and_stage("工作完成");
+        let (dir, store, stage) = make_store_and_stage("工作完成");
         // 仅写入 summary.json（模拟运行时自动保存），无 LLM 产物文件
         let stage_dir = store.stage_dir(0);
         std::fs::create_dir_all(&stage_dir).unwrap();
@@ -2232,5 +2241,76 @@ mod tests {
         // 池完全耗尽：预算退化为 1 轮，避免阶段以 0 轮直接失败
         assert_eq!(elastic_budget(9, 0, 120, 120), 1);
         assert_eq!(elastic_budget(9, 5, 120, 120), 1);
+    }
+
+    /// 回归：LLM 持续返回「合法但零内容」的流（空 choices + [DONE]）时，
+    /// step() 必须在 MAX_EMPTY_RETRIES 内报错退出，而不是无限重发请求。
+    /// 曾因循环内错误重置 empty_attempt 导致上限失效（无限重试）。
+    #[tokio::test]
+    async fn step_empty_response_retries_are_capped() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::AsyncWriteExt;
+
+        // mock SSE 服务器：每个连接应答一个合法但零内容的流。
+        // Connection: close —— 每个请求对应一条新连接，用连接数统计请求数。
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_server = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                hits_server.fetch_add(1, Ordering::SeqCst);
+                let body = "data: {\"choices\":[]}\n\ndata: [DONE]\n\n";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+
+        let config = crate::llm::ProviderConfig {
+            name: "mock".to_string(),
+            provider: "openai".to_string(),
+            api_url: format!("http://{addr}/v1"),
+            api_key: Some("test-key".to_string()),
+            model: "test-model".to_string(),
+            temperature: Some(0.0),
+            max_output_tokens: Some(100),
+            reasoning_effort: None,
+        };
+        let llm = Arc::new(LlmClient::from_configs(vec![config]).unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let policy = Arc::new(SecurityPolicy::new(dir.path(), None, true));
+        let tools = ToolRegistry::new(dir.path().to_path_buf(), policy);
+        let mut agent = Agent::new(
+            ContextManager::new("test".to_string(), 100_000),
+            tools,
+            None,
+            llm,
+            AgentConfig { max_iterations: 5 },
+            vec![],
+            None,
+        );
+        let mut out = crate::ui::output_impls::SilentMessageOutput;
+
+        // 正常路径 ~6s（2s+4s 退避）；若上限失效会无限重试，30s 超时兜底
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(30), agent.step(&mut out)).await;
+        assert!(
+            result.is_ok(),
+            "step() 未在超时内结束：空响应重试上限失效（无限重试）"
+        );
+        let err = match result.unwrap() {
+            Err(e) => e,
+            Ok(_) => panic!("持续空响应最终必须返回错误，实际返回了 Ok(AgentStep)"),
+        };
+        assert!(
+            err.to_string().contains("empty response"),
+            "expected empty-response error, got: {err}"
+        );
+        // 1 次初始请求 + (MAX_EMPTY_RETRIES - 1) = 2 次重试 = 3 次
+        assert_eq!(hits.load(Ordering::SeqCst), 3, "请求次数应为 3（重试封顶）");
     }
 }

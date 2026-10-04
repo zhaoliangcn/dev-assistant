@@ -84,9 +84,8 @@ pub fn run_forget(kb_root: &Path, dry_run: bool) -> Result<ForgetResult, AppErro
         return Ok(ForgetResult::default());
     }
 
-    let content = std::fs::read_to_string(&index_path).map_err(|e| {
-        AppError::Io(std::io::Error::other(format!("读取 KB 索引失败: {}", e)))
-    })?;
+    let content = std::fs::read_to_string(&index_path)
+        .map_err(|e| AppError::Io(std::io::Error::other(format!("读取 KB 索引失败: {}", e))))?;
     let mut index: crate::tools::kb::KbIndex = serde_json::from_str(&content)
         .map_err(|e| AppError::Config(format!("解析 KB 索引失败: {}", e)))?;
 
@@ -142,9 +141,8 @@ pub fn run_forget(kb_root: &Path, dry_run: bool) -> Result<ForgetResult, AppErro
 
     index.updated = now.to_rfc3339();
     let index_json = serde_json::to_string_pretty(&index).map_err(AppError::Json)?;
-    std::fs::write(&index_path, index_json).map_err(|e| {
-        AppError::Io(std::io::Error::other(format!("写入 KB 索引失败: {}", e)))
-    })?;
+    std::fs::write(&index_path, index_json)
+        .map_err(|e| AppError::Io(std::io::Error::other(format!("写入 KB 索引失败: {}", e))))?;
 
     Ok(ForgetResult { archived: actions })
 }
@@ -229,7 +227,7 @@ mod tests {
             updated: Some(updated),
             query_count: 0,
             last_query_at: None,
-                source_refs: Vec::new(),
+            source_refs: Vec::new(),
         }
     }
 
@@ -237,14 +235,22 @@ mod tests {
     fn recent_accepted_decision_has_high_health() {
         let e = entry("decision", "accepted", 1);
         let health = compute_health(&e, Utc::now());
-        assert!(health >= 1.0, "近期已接受的决策健康分应很高，got {}", health);
+        assert!(
+            health >= 1.0,
+            "近期已接受的决策健康分应很高，got {}",
+            health
+        );
     }
 
     #[test]
     fn old_draft_entry_has_low_health() {
         let e = entry("issue", "draft", 400);
         let health = compute_health(&e, Utc::now());
-        assert!(health < ARCHIVE_THRESHOLD, "400 天前的草稿应低于归档阈值，got {}", health);
+        assert!(
+            health < ARCHIVE_THRESHOLD,
+            "400 天前的草稿应低于归档阈值，got {}",
+            health
+        );
     }
 
     #[test]

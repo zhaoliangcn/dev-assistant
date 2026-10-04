@@ -74,7 +74,29 @@ impl DedupResult {
 fn normalize_title(title: &str) -> String {
     title
         .chars()
-        .filter(|c| !c.is_whitespace() && !matches!(c, ':' | '/' | '\\' | '-' | '_' | '(' | ')' | '[' | ']' | '{' | '}' | '.' | ',' | '，' | '。' | '：' | '（' | '）'))
+        .filter(|c| {
+            !c.is_whitespace()
+                && !matches!(
+                    c,
+                    ':' | '/'
+                        | '\\'
+                        | '-'
+                        | '_'
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '.'
+                        | ','
+                        | '，'
+                        | '。'
+                        | '：'
+                        | '（'
+                        | '）'
+                )
+        })
         .flat_map(|c| c.to_lowercase())
         .collect()
 }
@@ -147,11 +169,8 @@ pub fn title_similarity(a: &str, b: &str) -> f64 {
 /// 跳过已归档条目与相同 ID。返回按相似度降序排列的候选对。
 pub fn find_candidate_pairs(index: &KbIndex, threshold: f64) -> Vec<CandidatePair> {
     // ① 收集活跃条目，预计算归一化标题与 bigram 集合
-    let entries: Vec<(&String, &KbIndexEntry)> = index
-        .entries
-        .iter()
-        .filter(|(_, e)| !e.archived)
-        .collect();
+    let entries: Vec<(&String, &KbIndexEntry)> =
+        index.entries.iter().filter(|(_, e)| !e.archived).collect();
     if entries.len() < 2 {
         return Vec::new();
     }
@@ -207,7 +226,11 @@ pub fn find_candidate_pairs(index: &KbIndex, threshold: f64) -> Vec<CandidatePai
         }
     }
 
-    pairs.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|a, b| {
+        b.similarity
+            .partial_cmp(&a.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     pairs
 }
 
@@ -228,7 +251,9 @@ pub async fn confirm_with_llm(
     // 只送模糊区间内的候选对
     let to_confirm: Vec<&CandidatePair> = pairs
         .iter()
-        .filter(|p| p.similarity >= LLM_CONFIRM_MIN_SIMILARITY && p.similarity < AUTO_MERGE_THRESHOLD)
+        .filter(|p| {
+            p.similarity >= LLM_CONFIRM_MIN_SIMILARITY && p.similarity < AUTO_MERGE_THRESHOLD
+        })
         .collect();
     if to_confirm.is_empty() {
         return Vec::new();
@@ -256,18 +281,20 @@ pub async fn confirm_with_llm(
 
     let response = llm
         .call(
-            vec![LlmMessage {
-                role: "system".to_string(),
-                content: Some("你是一个严谨的知识库去重审核助手，只做重复判定。".to_string()),
-                tool_calls: None,
-                tool_call_id: None,
-            },
-            LlmMessage {
-                role: "user".to_string(),
-                content: Some(prompt),
-                tool_calls: None,
-                tool_call_id: None,
-            }],
+            vec![
+                LlmMessage {
+                    role: "system".to_string(),
+                    content: Some("你是一个严谨的知识库去重审核助手，只做重复判定。".to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                },
+                LlmMessage {
+                    role: "user".to_string(),
+                    content: Some(prompt),
+                    tool_calls: None,
+                    tool_call_id: None,
+                },
+            ],
             Vec::new(),
         )
         .await;
@@ -347,10 +374,7 @@ pub fn merge_duplicates(
         }
 
         // 记录 merged_from
-        let mut merged_from = keep
-            .relates_to
-            .clone()
-            .unwrap_or_default();
+        let mut merged_from = keep.relates_to.clone().unwrap_or_default();
         merged_from.push(merged_id.clone());
 
         if let Some(k) = index.entries.get_mut(&keep_id) {
@@ -366,9 +390,8 @@ pub fn merge_duplicates(
     if !dry_run && !pairs.is_empty() {
         let index_path = kb_root.join("index.json");
         let index_json = serde_json::to_string_pretty(index).map_err(AppError::Json)?;
-        std::fs::write(&index_path, index_json).map_err(|e| {
-            AppError::Io(std::io::Error::other(format!("写入 KB 索引失败: {}", e)))
-        })?;
+        std::fs::write(&index_path, index_json)
+            .map_err(|e| AppError::Io(std::io::Error::other(format!("写入 KB 索引失败: {}", e))))?;
     }
 
     Ok(result)
@@ -425,7 +448,10 @@ mod tests {
 
     #[test]
     fn identical_titles_have_similarity_one() {
-        assert_eq!(title_similarity("同步工具添加缓存支持", "同步工具添加缓存支持"), 1.0);
+        assert_eq!(
+            title_similarity("同步工具添加缓存支持", "同步工具添加缓存支持"),
+            1.0
+        );
     }
 
     #[test]
@@ -443,8 +469,14 @@ mod tests {
     #[test]
     fn find_pairs_filters_by_threshold_and_archived() {
         let mut index = KbIndex::default();
-        index.entries.insert("A-1".into(), entry("A-1", "缓存同步优化方案", "2026-08-01T00:00:00Z").1);
-        index.entries.insert("A-2".into(), entry("A-2", "缓存同步优化方案", "2026-08-02T00:00:00Z").1);
+        index.entries.insert(
+            "A-1".into(),
+            entry("A-1", "缓存同步优化方案", "2026-08-01T00:00:00Z").1,
+        );
+        index.entries.insert(
+            "A-2".into(),
+            entry("A-2", "缓存同步优化方案", "2026-08-02T00:00:00Z").1,
+        );
         let mut archived = entry("A-3", "缓存同步优化方案", "2026-08-03T00:00:00Z").1;
         archived.archived = true;
         index.entries.insert("A-3".into(), archived);
@@ -461,13 +493,20 @@ mod tests {
         std::fs::create_dir_all(&kb_root).unwrap();
 
         let mut index = KbIndex::default();
+        index.entries.insert(
+            "OLD".into(),
+            entry("OLD", "缓存优化", "2026-07-01T00:00:00Z").1,
+        );
+        index.entries.insert(
+            "NEW".into(),
+            entry("NEW", "缓存优化", "2026-08-01T00:00:00Z").1,
+        );
         index
             .entries
-            .insert("OLD".into(), entry("OLD", "缓存优化", "2026-07-01T00:00:00Z").1);
-        index
-            .entries
-            .insert("NEW".into(), entry("NEW", "缓存优化", "2026-08-01T00:00:00Z").1);
-        index.entries.get_mut("NEW").unwrap().tags.push("performance".into());
+            .get_mut("NEW")
+            .unwrap()
+            .tags
+            .push("performance".into());
 
         let pairs = vec![DuplicatePair {
             keep_id: "OLD".into(),
@@ -482,7 +521,9 @@ mod tests {
         assert!(!index.entries["NEW"].archived);
         assert!(index.entries["OLD"].archived);
         // NEW 合并了标签
-        assert!(index.entries["NEW"].tags.contains(&"performance".to_string()));
+        assert!(index.entries["NEW"]
+            .tags
+            .contains(&"performance".to_string()));
         // NEW 记录了 merged_from
         let mf = index.entries["NEW"].relates_to.as_ref().unwrap();
         assert!(mf.contains(&"OLD".to_string()));
@@ -494,11 +535,8 @@ mod tests {
 
     /// 暴力参考实现：全量两两比较，用于验证倒排索引实现的保真性。
     fn find_candidate_pairs_bruteforce(index: &KbIndex, threshold: f64) -> Vec<CandidatePair> {
-        let entries: Vec<(&String, &KbIndexEntry)> = index
-            .entries
-            .iter()
-            .filter(|(_, e)| !e.archived)
-            .collect();
+        let entries: Vec<(&String, &KbIndexEntry)> =
+            index.entries.iter().filter(|(_, e)| !e.archived).collect();
 
         let mut pairs = Vec::new();
         for (i, (id_a, ea)) in entries.iter().enumerate() {
@@ -516,7 +554,11 @@ mod tests {
                 }
             }
         }
-        pairs.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         pairs
     }
 
@@ -535,11 +577,7 @@ mod tests {
     }
 
     /// 随机生成一个含 N 条条目的 KB 索引，可选比例设置重复标题。
-    fn random_kb(
-        count: usize,
-        duplicate_ratio: f64,
-        rng: &mut impl rand::Rng,
-    ) -> KbIndex {
+    fn random_kb(count: usize, duplicate_ratio: f64, rng: &mut impl rand::Rng) -> KbIndex {
         let mut index = KbIndex::default();
         let base_titles = [
             "缓存同步优化方案",
@@ -598,7 +636,7 @@ mod tests {
                     updated: Some(updated),
                     query_count: 0,
                     last_query_at: None,
-                source_refs: Vec::new(),
+                    source_refs: Vec::new(),
                 },
             );
         }
@@ -631,8 +669,8 @@ mod tests {
     #[test]
     fn inverted_index_faithfulness_edge_cases() {
         // 边界情况：单条目、空索引、全归档
-let mut rng = rand::rng();
-    
+        let mut rng = rand::rng();
+
         // 单条目
         let single = random_kb(1, 0.0, &mut rand::rng());
         assert!(find_candidate_pairs(&single, PREFILTER_THRESHOLD).is_empty());
@@ -662,11 +700,7 @@ let mut rng = rand::rng();
             let new_set = pair_set(&new_result);
             let ref_set = pair_set(&ref_result);
 
-            assert_eq!(
-                new_set, ref_set,
-                "结果不一致 (threshold={})",
-                threshold
-            );
+            assert_eq!(new_set, ref_set, "结果不一致 (threshold={})", threshold);
         }
     }
 
@@ -680,10 +714,7 @@ let mut rng = rand::rng();
         // 验证返回的候选对都是有效的（id 不同、相似度 >= 阈值）
         for pair in &result {
             assert_ne!(pair.id_a, pair.id_b, "候选对不应包含相同 ID");
-            assert!(
-                pair.similarity >= PREFILTER_THRESHOLD,
-                "相似度应 >= 阈值"
-            );
+            assert!(pair.similarity >= PREFILTER_THRESHOLD, "相似度应 >= 阈值");
             assert!(pair.similarity <= 1.0, "相似度不应超过 1.0");
         }
 
@@ -707,8 +738,12 @@ let mut rng = rand::rng();
         // 验证完全不共享 bigram 的标题不会被生成候选
         let mut index = KbIndex::default();
         // "a" 的 bigram 是 ["a"]，"bc" 的 bigram 是 ["bc"]，无交集
-        index.entries.insert("A".into(), entry("A", "a", "2026-08-01T00:00:00Z").1);
-        index.entries.insert("B".into(), entry("B", "bc", "2026-08-01T00:00:00Z").1);
+        index
+            .entries
+            .insert("A".into(), entry("A", "a", "2026-08-01T00:00:00Z").1);
+        index
+            .entries
+            .insert("B".into(), entry("B", "bc", "2026-08-01T00:00:00Z").1);
 
         let pairs = find_candidate_pairs(&index, 0.0);
         assert!(pairs.is_empty(), "无共享 bigram 的标题不应产生候选对");
@@ -719,12 +754,19 @@ let mut rng = rand::rng();
         // 验证共享 bigram 的标题能被正确找到
         let mut index = KbIndex::default();
         // "ab" 的 bigram 是 ["ab"]，"abc" 的 bigram 是 ["ab","bc"]，共享 "ab"
-        index.entries.insert("X".into(), entry("X", "ab", "2026-08-01T00:00:00Z").1);
-        index.entries.insert("Y".into(), entry("Y", "abc", "2026-08-01T00:00:00Z").1);
+        index
+            .entries
+            .insert("X".into(), entry("X", "ab", "2026-08-01T00:00:00Z").1);
+        index
+            .entries
+            .insert("Y".into(), entry("Y", "abc", "2026-08-01T00:00:00Z").1);
 
         let pairs = find_candidate_pairs(&index, 0.0);
         assert_eq!(pairs.len(), 1, "共享 bigram 的标题应产生候选对");
-        assert_eq!(pairs[0].similarity, 0.5, "Jaccard(['ab'], ['ab','bc']) = 1/2 = 0.5");
+        assert_eq!(
+            pairs[0].similarity, 0.5,
+            "Jaccard(['ab'], ['ab','bc']) = 1/2 = 0.5"
+        );
     }
 
     #[test]
@@ -733,9 +775,15 @@ let mut rng = rand::rng();
         // 会在 postings 桶内把同一索引压两次，生成 (A,A) 自配对，且与 "测试A" 的
         // 多重集 Jaccard 被放大为 2/3。去重后应为真实集合 Jaccard 1/3，且无自配对。
         let mut index = KbIndex::default();
-        index.entries.insert("A".into(), entry("A", "测试测试", "2026-08-01T00:00:00Z").1);
-        index.entries.insert("B".into(), entry("B", "测试A", "2026-08-01T00:00:00Z").1);
-        index.entries.insert("C".into(), entry("C", "完全不同", "2026-08-01T00:00:00Z").1);
+        index
+            .entries
+            .insert("A".into(), entry("A", "测试测试", "2026-08-01T00:00:00Z").1);
+        index
+            .entries
+            .insert("B".into(), entry("B", "测试A", "2026-08-01T00:00:00Z").1);
+        index
+            .entries
+            .insert("C".into(), entry("C", "完全不同", "2026-08-01T00:00:00Z").1);
 
         let pairs = find_candidate_pairs(&index, 0.0);
         // 无自配对

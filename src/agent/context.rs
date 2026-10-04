@@ -82,7 +82,7 @@ pub struct ContextBudget {
     /// 可能基于已修改的源文件，应重新验证或运行验证命令确认。
     #[serde(default)]
     pub kb_stale_entries: usize,
-    /// 本次注入的 KB 记忆条目总数（用来与 kb_stale_entries 对比）。
+    /// 索引中带 source_refs 的 KB 条目总数（kb_stale_entries 的分母）。
     #[serde(default)]
     pub kb_total_injected: usize,
 }
@@ -108,8 +108,12 @@ pub struct ContextBudgetManager {
     pub critical_threshold: f64,
 }
 
-fn default_warning_threshold() -> f64 { 0.60 }
-fn default_critical_threshold() -> f64 { 0.80 }
+fn default_warning_threshold() -> f64 {
+    0.60
+}
+fn default_critical_threshold() -> f64 {
+    0.80
+}
 
 impl Default for ContextBudgetManager {
     fn default() -> Self {
@@ -141,7 +145,7 @@ impl ContextBudgetManager {
     pub fn report(&self, history: &ConversationHistory) -> ContextBudget {
         let total = history.used_tokens;
         let history_tokens = total.saturating_sub(
-            self.system_prompt_tokens + self.memory_tokens + self.tool_schema_tokens
+            self.system_prompt_tokens + self.memory_tokens + self.tool_schema_tokens,
         );
         let utilization = if self.max_tokens > 0 {
             total as f64 / self.max_tokens as f64
@@ -179,7 +183,8 @@ impl ContextBudgetManager {
     #[allow(dead_code)] // reserved for automatic compression triggering
     pub fn should_compress(&self, history: &ConversationHistory) -> bool {
         let report = self.report(history);
-        matches!(report.pressure,
+        matches!(
+            report.pressure,
             ContextPressure::Critical | ContextPressure::Exhausted
         )
     }
@@ -233,7 +238,8 @@ fn default_session_id() -> String {
 
 impl ContextManager {
     pub fn new(system_prompt: String, max_tokens: usize) -> Self {
-        let system_prompt_tokens = crate::agent::token_counter::TokenCounter::estimate(&system_prompt);
+        let system_prompt_tokens =
+            crate::agent::token_counter::TokenCounter::estimate(&system_prompt);
         Self {
             history: ConversationHistory::new(system_prompt),
             max_tokens,
@@ -291,8 +297,7 @@ impl ContextManager {
                 return;
             }
             let text = crate::agent::memory::render_entries(&entries);
-            let tokens =
-                crate::agent::token_counter::TokenCounter::estimate(&text);
+            let tokens = crate::agent::token_counter::TokenCounter::estimate(&text);
             self.history.messages.push(LlmMessage {
                 role: "system".to_string(),
                 content: Some(text),
@@ -359,12 +364,6 @@ impl ContextManager {
     fn memory_budget(&self) -> usize {
         let cap = self.max_tokens.saturating_mul(MEMORY_BUDGET_PERCENT) / 100;
         cap.max(1024).min(self.max_tokens)
-    }
-
-    /// 将当前上下文预算报告格式化为 JSON 字符串（用于工具返回）。
-    pub fn budget_report_json(&self) -> String {
-        serde_json::to_string_pretty(&self.get_budget_report())
-            .unwrap_or_else(|_| "{}".to_string())
     }
 
     /// 添加一条纯展示消息，用于在 UI 中显示。此消息不会发送给 LLM。
@@ -441,7 +440,8 @@ impl ContextManager {
         tool_calls: Option<Vec<ToolCall>>,
         tool_call_id: Option<String>,
     ) {
-        self.history.add_message(role, content, tool_calls, tool_call_id);
+        self.history
+            .add_message(role, content, tool_calls, tool_call_id);
     }
 
     pub fn add_tool_result(&mut self, tool_call: &ToolCall, result: &str) {

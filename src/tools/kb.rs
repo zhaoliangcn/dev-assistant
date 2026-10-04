@@ -113,7 +113,10 @@ pub struct KbIndexEntry {
     /// `.kb/query-stats.json`（见 [`load_query_stats`]）。index.json 中的该值
     /// 不再被 `kb_query`/`kb_store` 维护，仅作历史字段保留；遗忘阶段会从
     /// sidecar 注水后再用于 `compute_health`。
-    #[deprecated(since = "0.2.0", note = "查询统计已迁移至 .kb/query-stats.json sidecar，此字段仅保留以兼容旧 index.json 反序列化")]
+    #[deprecated(
+        since = "0.2.0",
+        note = "查询统计已迁移至 .kb/query-stats.json sidecar，此字段仅保留以兼容旧 index.json 反序列化"
+    )]
     #[serde(default)]
     pub query_count: u64,
     /// 最近一次被 kb_query 命中的时间
@@ -165,22 +168,29 @@ pub(crate) fn load_query_stats(kb_root: &Path, baseline: &KbIndex) -> HashMap<St
         Ok(content) if !content.trim().is_empty() => {
             match serde_json::from_str::<HashMap<String, QueryStats>>(&content) {
                 Ok(stats) => return stats,
-                Err(e) => debug!(path = %path.display(), error = %e, "query-stats sidecar 解析失败，从索引迁移重建"),
+                Err(e) => {
+                    debug!(path = %path.display(), error = %e, "query-stats sidecar 解析失败，从索引迁移重建")
+                }
             }
         }
         Ok(_) => debug!(path = %path.display(), "query-stats sidecar 为空，从索引迁移重建"),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => debug!(path = %path.display(), error = %e, "读取 query-stats sidecar 失败，从索引迁移重建"),
+        Err(e) => {
+            debug!(path = %path.display(), error = %e, "读取 query-stats sidecar 失败，从索引迁移重建")
+        }
     }
 
     // 迁移：从 baseline 拷贝非零统计（避免无意义写入空映射）
     let mut stats: HashMap<String, QueryStats> = HashMap::new();
     for (id, e) in &baseline.entries {
         if e.query_count > 0 || e.last_query_at.is_some() {
-            stats.insert(id.clone(), QueryStats {
-                query_count: e.query_count,
-                last_query_at: e.last_query_at.clone(),
-            });
+            stats.insert(
+                id.clone(),
+                QueryStats {
+                    query_count: e.query_count,
+                    last_query_at: e.last_query_at.clone(),
+                },
+            );
         }
     }
     if let Err(e) = save_query_stats(kb_root, &stats) {
@@ -197,7 +207,10 @@ pub(crate) fn save_query_stats(
     let path = query_stats_path(kb_root);
     let json = serde_json::to_string_pretty(stats).map_err(AppError::Json)?;
     fs::write(&path, json).map_err(|e| {
-        AppError::Io(std::io::Error::other(format!("写入 query-stats sidecar 失败: {}", e)))
+        AppError::Io(std::io::Error::other(format!(
+            "写入 query-stats sidecar 失败: {}",
+            e
+        )))
     })
 }
 
@@ -264,7 +277,9 @@ pub fn kb_store_tool() -> ToolDefinition {
 pub fn kb_query_tool() -> ToolDefinition {
     ToolDefinition {
         name: "kb_query".to_string(),
-        description: "Search KnowledgeBase entries. Supports filtering by keywords, type, and tags.".to_string(),
+        description:
+            "Search KnowledgeBase entries. Supports filtering by keywords, type, and tags."
+                .to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
@@ -326,45 +341,49 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
     // SECURITY: 验证路径不包含 `..` 遍历
     if path.contains("..") {
         return Err(AppError::Security(format!(
-            "Path traversal detected in KB path: '{}'", path
+            "Path traversal detected in KB path: '{}'",
+            path
         )));
     }
 
     // SECURITY: 验证路径以 `.md` 结尾
     if !path.ends_with(".md") {
         return Err(AppError::Llm(format!(
-            "kb_store: path must end with '.md', got: '{}'", path
+            "kb_store: path must end with '.md', got: '{}'",
+            path
         )));
     }
 
     // 规范化路径：去除开头的 ".kb/" 或 ".kb\\" 前缀，防止 `kb_root.join(path)`
     // 把路径重复拼成 `.kb/.kb/...`。LLM 有时会传入完整路径 ".kb/decisions/foo.md"
     // 而非相对路径 "decisions/foo.md"，必须统一为相对路径。
-    let path = path
-        .trim_start_matches(".kb/")
-        .trim_start_matches(".kb\\");
+    let path = path.trim_start_matches(".kb/").trim_start_matches(".kb\\");
 
     let content = args.arguments["content"]
         .as_str()
         .ok_or_else(|| AppError::Llm("kb_store: 'content' is required".to_string()))?;
 
-    let update_index = args.arguments["update_index"]
-        .as_bool()
-        .unwrap_or(true);
+    let update_index = args.arguments["update_index"].as_bool().unwrap_or(true);
 
     // SECURITY: 确保解析后的路径仍在 kb_root 目录下
     // 先解析工作目录的真实路径（处理 /var → /private/var 等 symlink 情况）
-    let working_dir_canonical = context.working_dir.canonicalize()
+    let working_dir_canonical = context
+        .working_dir
+        .canonicalize()
         .unwrap_or_else(|_| context.working_dir.clone());
     let kb_root = working_dir_canonical.join(".kb");
     let file_path = kb_root.join(path);
 
     // 检查 file_path 是否在 kb_root 内
     let check_path = if file_path.exists() {
-        file_path.canonicalize().unwrap_or_else(|_| file_path.clone())
+        file_path
+            .canonicalize()
+            .unwrap_or_else(|_| file_path.clone())
     } else if let Some(parent) = file_path.parent() {
         if parent.exists() {
-            let parent_canonical = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+            let parent_canonical = parent
+                .canonicalize()
+                .unwrap_or_else(|_| parent.to_path_buf());
             match file_path.file_name() {
                 Some(name) => parent_canonical.join(name),
                 None => file_path.clone(),
@@ -388,17 +407,21 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
     // 确保父目录存在
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
-            AppError::Io(std::io::Error::other(
-                format!("Failed to create KB directory '{}': {}", parent.display(), e),
-            ))
+            AppError::Io(std::io::Error::other(format!(
+                "Failed to create KB directory '{}': {}",
+                parent.display(),
+                e
+            )))
         })?;
     }
 
     // 写入文件
     fs::write(&file_path, content).map_err(|e| {
-        AppError::Io(std::io::Error::other(
-            format!("Failed to write KB entry '{}': {}", file_path.display(), e),
-        ))
+        AppError::Io(std::io::Error::other(format!(
+            "Failed to write KB entry '{}': {}",
+            file_path.display(),
+            e
+        )))
     })?;
 
     debug!(path = %file_path.display(), "KB entry written");
@@ -413,7 +436,7 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         success: true,
         security_evaluation: None,
         restart_requested: false,
-                error_category: None,
+        error_category: None,
         content: format!(
             "[kb_store] ✅ 条目已保存: {}\n路径: {}",
             path,
@@ -428,14 +451,9 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
 /// 2. 根据查询参数搜索条目
 /// 3. 如果 `include_content` 为 true，也加载正文内容
 fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult, AppError> {
-    let query = args.arguments["query"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    let query = args.arguments["query"].as_str().unwrap_or("").to_string();
 
-    let type_filter = args.arguments["type"]
-        .as_str()
-        .map(|s| s.to_string());
+    let type_filter = args.arguments["type"].as_str().map(|s| s.to_string());
 
     let tag_filter: Option<Vec<String>> = args.arguments["tags"]
         .as_array()
@@ -451,9 +469,7 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         .map(|n| n as usize)
         .unwrap_or(5);
 
-    let include_content = args.arguments["include_content"]
-        .as_bool()
-        .unwrap_or(false);
+    let include_content = args.arguments["include_content"].as_bool().unwrap_or(false);
 
     let include_archived = args.arguments["include_archived"]
         .as_bool()
@@ -468,21 +484,23 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
             success: true,
             security_evaluation: None,
             restart_requested: false,
-                error_category: None,
-            content: "KnowledgeBase 为空（.kb/index.json 不存在）。请先使用 kb_store 创建条目。".to_string(),
+            error_category: None,
+            content: "KnowledgeBase 为空（.kb/index.json 不存在）。请先使用 kb_store 创建条目。"
+                .to_string(),
         });
     }
 
     // 加载索引
     let index_content = fs::read_to_string(&index_path).map_err(|e| {
-        AppError::Io(std::io::Error::other(
-            format!("Failed to read KB index '{}': {}", index_path.display(), e),
-        ))
+        AppError::Io(std::io::Error::other(format!(
+            "Failed to read KB index '{}': {}",
+            index_path.display(),
+            e
+        )))
     })?;
 
-    let index: KbIndex = serde_json::from_str(&index_content).map_err(|e| {
-        AppError::Config(format!("Failed to parse KB index: {}", e))
-    })?;
+    let index: KbIndex = serde_json::from_str(&index_content)
+        .map_err(|e| AppError::Config(format!("Failed to parse KB index: {}", e)))?;
 
     // 搜索
     let results = search_entries(
@@ -537,7 +555,7 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
         success: true,
         security_evaluation: None,
         restart_requested: false,
-                error_category: None,
+        error_category: None,
         content: output,
     })
 }
@@ -561,9 +579,10 @@ pub(crate) fn update_index_entry(
     // 加载现有索引，或创建新索引
     let mut index: KbIndex = if index_path.exists() {
         let content = fs::read_to_string(&index_path).map_err(|e| {
-            AppError::Io(std::io::Error::other(
-                format!("Failed to read KB index: {}", e),
-            ))
+            AppError::Io(std::io::Error::other(format!(
+                "Failed to read KB index: {}",
+                e
+            )))
         })?;
         serde_json::from_str(&content).unwrap_or_default()
     } else {
@@ -580,17 +599,14 @@ pub(crate) fn update_index_entry(
     };
 
     // 从 frontmatter 或路径中提取 ID
-    let id = fm
-        .get("id")
-        .cloned()
-        .unwrap_or_else(|| {
-            // 从文件名中提取 ID（不含扩展名）
-            Path::new(entry_path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(entry_path)
-                .to_string()
-        });
+    let id = fm.get("id").cloned().unwrap_or_else(|| {
+        // 从文件名中提取 ID（不含扩展名）
+        Path::new(entry_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(entry_path)
+            .to_string()
+    });
 
     // 从 frontmatter 中提取标签
     let tags: Vec<String> = fm
@@ -604,34 +620,49 @@ pub(crate) fn update_index_entry(
         .unwrap_or_default();
 
     // 解析 relates_to 字段（逗号分隔）
-    let relates_to: Option<Vec<String>> = fm.get("relates_to").map(|r| {
-        r.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    }).filter(|v: &Vec<String>| !v.is_empty());
+    let relates_to: Option<Vec<String>> = fm
+        .get("relates_to")
+        .map(|r| {
+            r.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .filter(|v: &Vec<String>| !v.is_empty());
 
     // 解析 depends_on 字段
-    let depends_on: Option<Vec<String>> = fm.get("depends_on").map(|r| {
-        r.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    }).filter(|v: &Vec<String>| !v.is_empty());
+    let depends_on: Option<Vec<String>> = fm
+        .get("depends_on")
+        .map(|r| {
+            r.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .filter(|v: &Vec<String>| !v.is_empty());
 
     // 解析 supersedes 字段
-    let supersedes: Option<Vec<String>> = fm.get("supersedes").map(|r| {
-        r.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    }).filter(|v: &Vec<String>| !v.is_empty());
+    let supersedes: Option<Vec<String>> = fm
+        .get("supersedes")
+        .map(|r| {
+            r.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .filter(|v: &Vec<String>| !v.is_empty());
 
     let now = Utc::now().to_rfc3339();
 
     // 从 frontmatter 解析 `source_paths`（逗号分隔的相对项目根路径），
     // 为每个路径计算当前磁盘内容的 sha256，生成 source_refs 列表。
-    // 解析失败或文件不存在时跳过那条路径（warn），不阻塞整个条目写入。
+    // 越界/不存在的路径跳过（warn），不阻塞整个条目写入。
+    //
+    // 路径由 LLM 提供，必须先校验 containment：绝对路径会被 join 整体替换、
+    // `..` 不受 join 约束，canonicalize（同时解析符号链接）后再比对项目根。
+    let canonical_root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
     let source_refs: Vec<SourceRef> = fm
         .get("source_paths")
         .map(|s| {
@@ -639,14 +670,31 @@ pub(crate) fn update_index_entry(
                 .map(|p| p.trim().to_string())
                 .filter(|p| !p.is_empty())
                 .filter_map(|p| {
-                    let full = project_root.join(&p);
-                    match compute_file_sha256(&full) {
-                        Ok(sha) => Some(SourceRef { path: p, sha256: sha }),
+                    let full = match project_root.join(&p).canonicalize() {
+                        Ok(c) if c.starts_with(&canonical_root) => c,
+                        Ok(_) => {
+                            tracing::warn!(path = %p, "source_paths 越出项目根，拒绝引用");
+                            return None;
+                        }
                         Err(e) => {
                             tracing::warn!(
                                 path = %p,
                                 error = %e,
                                 "source_paths 中的文件不存在或不可读，跳过"
+                            );
+                            return None;
+                        }
+                    };
+                    match compute_file_sha256(&full) {
+                        Ok(sha) => Some(SourceRef {
+                            path: p,
+                            sha256: sha,
+                        }),
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %p,
+                                error = %e,
+                                "source_paths 读取失败，跳过"
                             );
                             None
                         }
@@ -657,16 +705,25 @@ pub(crate) fn update_index_entry(
         .unwrap_or_default();
 
     // 解析 archived 字段（frontmatter 可写 archived: true，默认 false）
-    let archived = fm.get("archived").map(|s| s.trim().eq_ignore_ascii_case("true")).unwrap_or(false);
+    let archived = fm
+        .get("archived")
+        .map(|s| s.trim().eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
 
     // `query_count` 已弃用（真相源为 sidecar），此处仅设默认值以满足结构体初始化。
     #[allow(deprecated)]
     let entry = KbIndexEntry {
         path: entry_path.to_string(),
-        entry_type: fm.get("type").cloned().unwrap_or_else(|| "unknown".to_string()),
+        entry_type: fm
+            .get("type")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string()),
         title: fm.get("title").cloned().unwrap_or_else(|| id.clone()),
         tags,
-        status: fm.get("status").cloned().unwrap_or_else(|| "draft".to_string()),
+        status: fm
+            .get("status")
+            .cloned()
+            .unwrap_or_else(|| "draft".to_string()),
         archived,
         relates_to,
         depends_on,
@@ -706,14 +763,13 @@ pub(crate) fn update_index_entry(
     index.updated = now;
 
     // 写入索引文件
-    let index_json = serde_json::to_string_pretty(&index).map_err(|e| {
-        AppError::Json(e)
-    })?;
+    let index_json = serde_json::to_string_pretty(&index).map_err(|e| AppError::Json(e))?;
 
     fs::write(&index_path, &index_json).map_err(|e| {
-        AppError::Io(std::io::Error::other(
-            format!("Failed to write KB index: {}", e),
-        ))
+        AppError::Io(std::io::Error::other(format!(
+            "Failed to write KB index: {}",
+            e
+        )))
     })?;
 
     debug!(path = %index_path.display(), entries = %index.entries.len(), "KB index updated");
@@ -854,6 +910,7 @@ fn field_score(query_tokens: &[String], field_tokens: &[String], exact: i32, pre
 /// - 中英文分词（英文按单词+驼峰拆分，中文按单字）
 /// - 标题/ID/路径/标签字段加权打分（标题+5、ID+3、路径+2、标签+2）
 /// - 前缀匹配支持部分关键词（如 "arch" 命中 "architecture"）
+///
 /// 返回按分数降序排列的结果。
 fn search_entries(
     index: &KbIndex,
@@ -894,11 +951,7 @@ fn search_entries(
             let title_tokens = tokenize(&entry.title);
             let id_tokens = tokenize(id);
             let path_tokens = tokenize(&entry.path);
-            let tag_tokens: Vec<String> = entry
-                .tags
-                .iter()
-                .flat_map(|t| tokenize(t))
-                .collect();
+            let tag_tokens: Vec<String> = entry.tags.iter().flat_map(|t| tokenize(t)).collect();
 
             score += field_score(&query_tokens, &title_tokens, 5, 3); // 标题命中
             score += field_score(&query_tokens, &id_tokens, 3, 2); // ID 命中
@@ -969,9 +1022,11 @@ fn format_query_results(results: &[KbQueryResult], include_content: bool) -> Str
                 // 截断过长内容
                 let truncated = if content.len() > MAX_CONTENT_CHARS {
                     let safe_boundary = content.floor_char_boundary(MAX_CONTENT_CHARS);
-                    format!("{}...\n   [内容已截断，共 {} 字符]",
+                    format!(
+                        "{}...\n   [内容已截断，共 {} 字符]",
                         &content[..safe_boundary],
-                        content.len())
+                        content.len()
+                    )
                 } else {
                     content.clone()
                 };
@@ -1006,9 +1061,7 @@ mod tests {
     }
 
     fn make_args(map: serde_json::Value) -> ToolArgs {
-        ToolArgs {
-            arguments: map,
-        }
+        ToolArgs { arguments: map }
     }
 
     #[test]
@@ -1063,7 +1116,10 @@ mod tests {
 
         // 验证索引未创建
         let index_path = dir.path().join(".kb/index.json");
-        assert!(!index_path.exists(), "Index should not be created when update_index=false");
+        assert!(
+            !index_path.exists(),
+            "Index should not be created when update_index=false"
+        );
     }
 
     #[test]
@@ -1182,9 +1238,30 @@ mod tests {
         let ctx = kb_test_context(dir.path());
 
         // 先创建一些条目
-        store_test_entry(&ctx, "decisions/ADR-001.md", "ADR-001", "decision", "Use ECS Architecture", &["architecture", "ecs"]);
-        store_test_entry(&ctx, "decisions/ADR-002.md", "ADR-002", "decision", "Choose wgpu", &["rendering", "graphics"]);
-        store_test_entry(&ctx, "interfaces/renderer-api.md", "interface-renderer", "interface", "Renderer API", &["rendering", "api"]);
+        store_test_entry(
+            &ctx,
+            "decisions/ADR-001.md",
+            "ADR-001",
+            "decision",
+            "Use ECS Architecture",
+            &["architecture", "ecs"],
+        );
+        store_test_entry(
+            &ctx,
+            "decisions/ADR-002.md",
+            "ADR-002",
+            "decision",
+            "Choose wgpu",
+            &["rendering", "graphics"],
+        );
+        store_test_entry(
+            &ctx,
+            "interfaces/renderer-api.md",
+            "interface-renderer",
+            "interface",
+            "Renderer API",
+            &["rendering", "api"],
+        );
 
         // 查询 "ECS"
         let args = make_args(serde_json::json!({
@@ -1194,8 +1271,14 @@ mod tests {
 
         let result = kb_query_handler(&args, &ctx).unwrap();
         assert!(result.success);
-        assert!(result.content.contains("ADR-001"), "Should find ECS decision");
-        assert!(result.content.contains("Use ECS Architecture"), "Should contain title");
+        assert!(
+            result.content.contains("ADR-001"),
+            "Should find ECS decision"
+        );
+        assert!(
+            result.content.contains("Use ECS Architecture"),
+            "Should contain title"
+        );
     }
 
     #[test]
@@ -1203,8 +1286,22 @@ mod tests {
         let dir = tempdir().unwrap();
         let ctx = kb_test_context(dir.path());
 
-        store_test_entry(&ctx, "decisions/ADR-001.md", "ADR-001", "decision", "Decision 1", &["test"]);
-        store_test_entry(&ctx, "interfaces/api.md", "api-1", "interface", "Interface 1", &["test"]);
+        store_test_entry(
+            &ctx,
+            "decisions/ADR-001.md",
+            "ADR-001",
+            "decision",
+            "Decision 1",
+            &["test"],
+        );
+        store_test_entry(
+            &ctx,
+            "interfaces/api.md",
+            "api-1",
+            "interface",
+            "Interface 1",
+            &["test"],
+        );
 
         // 只查 decision 类型
         let args = make_args(serde_json::json!({
@@ -1214,7 +1311,10 @@ mod tests {
 
         let result = kb_query_handler(&args, &ctx).unwrap();
         assert!(result.content.contains("ADR-001"), "Should find decision");
-        assert!(!result.content.contains("api-1"), "Should not find interface");
+        assert!(
+            !result.content.contains("api-1"),
+            "Should not find interface"
+        );
     }
 
     #[test]
@@ -1222,8 +1322,22 @@ mod tests {
         let dir = tempdir().unwrap();
         let ctx = kb_test_context(dir.path());
 
-        store_test_entry(&ctx, "decisions/ADR-001.md", "ADR-001", "decision", "ECS Decision", &["architecture", "ecs"]);
-        store_test_entry(&ctx, "decisions/ADR-002.md", "ADR-002", "decision", "Rendering Decision", &["rendering", "graphics"]);
+        store_test_entry(
+            &ctx,
+            "decisions/ADR-001.md",
+            "ADR-001",
+            "decision",
+            "ECS Decision",
+            &["architecture", "ecs"],
+        );
+        store_test_entry(
+            &ctx,
+            "decisions/ADR-002.md",
+            "ADR-002",
+            "decision",
+            "Rendering Decision",
+            &["rendering", "graphics"],
+        );
 
         // 按标签 "rendering" 过滤
         let args = make_args(serde_json::json!({
@@ -1232,8 +1346,14 @@ mod tests {
         }));
 
         let result = kb_query_handler(&args, &ctx).unwrap();
-        assert!(result.content.contains("ADR-002"), "Should find rendering entry");
-        assert!(!result.content.contains("ADR-001"), "Should not find architecture entry");
+        assert!(
+            result.content.contains("ADR-002"),
+            "Should find rendering entry"
+        );
+        assert!(
+            !result.content.contains("ADR-001"),
+            "Should not find architecture entry"
+        );
     }
 
     #[test]
@@ -1241,7 +1361,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let ctx = kb_test_context(dir.path());
 
-        store_test_entry(&ctx, "decisions/ADR-001.md", "ADR-001", "decision", "Test Decision", &["test"]);
+        store_test_entry(
+            &ctx,
+            "decisions/ADR-001.md",
+            "ADR-001",
+            "decision",
+            "Test Decision",
+            &["test"],
+        );
 
         let args = make_args(serde_json::json!({
             "query": "Test",
@@ -1250,7 +1377,10 @@ mod tests {
         }));
 
         let result = kb_query_handler(&args, &ctx).unwrap();
-        assert!(result.content.contains("Test Decision Body"), "Should include body content");
+        assert!(
+            result.content.contains("Test Decision Body"),
+            "Should include body content"
+        );
     }
 
     #[test]
@@ -1260,7 +1390,14 @@ mod tests {
 
         for i in 1..=10 {
             let id = format!("ENTRY-{:03}", i);
-            store_test_entry(&ctx, &format!("decisions/{}.md", &id), &id, "decision", &format!("Entry {}", i), &["test"]);
+            store_test_entry(
+                &ctx,
+                &format!("decisions/{}.md", &id),
+                &id,
+                "decision",
+                &format!("Entry {}", i),
+                &["test"],
+            );
         }
 
         let args = make_args(serde_json::json!({
@@ -1268,7 +1405,10 @@ mod tests {
         }));
 
         let result = kb_query_handler(&args, &ctx).unwrap();
-        assert!(result.content.contains("找到 3 个匹配条目"), "Should limit to 3 results");
+        assert!(
+            result.content.contains("找到 3 个匹配条目"),
+            "Should limit to 3 results"
+        );
     }
 
     #[test]
@@ -1277,7 +1417,14 @@ mod tests {
         let ctx = kb_test_context(dir.path());
 
         // 正常条目
-        store_test_entry(&ctx, "decisions/ADR-200.md", "ADR-200", "decision", "Active Decision", &["test"]);
+        store_test_entry(
+            &ctx,
+            "decisions/ADR-200.md",
+            "ADR-200",
+            "decision",
+            "Active Decision",
+            &["test"],
+        );
 
         // 归档条目：content 中带 archived: true frontmatter
         let archived_content = "---\nid: ADR-201\ntype: decision\ntitle: Archived Decision\ntags: [test]\nstatus: completed\narchived: true\n---\n# Archived\n\nBody.";
@@ -1294,7 +1441,10 @@ mod tests {
             "max_results": 10
         }));
         let result = kb_query_handler(&args, &ctx).unwrap();
-        assert!(result.content.contains("Active Decision"), "Should find active entry");
+        assert!(
+            result.content.contains("Active Decision"),
+            "Should find active entry"
+        );
         assert!(
             !result.content.contains("Archived Decision"),
             "Archived entry should be excluded by default"
@@ -1314,8 +1464,19 @@ mod tests {
     }
 
     // 辅助函数：创建测试条目
-    fn store_test_entry(ctx: &ToolContext, path: &str, id: &str, entry_type: &str, title: &str, tags: &[&str]) {
-        let tags_str = tags.iter().map(|t| format!("\"{}\"", t)).collect::<Vec<_>>().join(", ");
+    fn store_test_entry(
+        ctx: &ToolContext,
+        path: &str,
+        id: &str,
+        entry_type: &str,
+        title: &str,
+        tags: &[&str],
+    ) {
+        let tags_str = tags
+            .iter()
+            .map(|t| format!("\"{}\"", t))
+            .collect::<Vec<_>>()
+            .join(", ");
         let content = format!(
             "---\nid: {}\ntype: {}\ntitle: {}\ntags: [{}]\nstatus: accepted\n---\n# {}\n\n{} Body.",
             id, entry_type, title, tags_str, title, title
@@ -1411,7 +1572,10 @@ mod tests {
             #[allow(deprecated)]
             query_count: 0,
             last_query_at: None,
-            source_refs: vec![SourceRef { path: "src/foo.rs".into(), sha256: sha }],
+            source_refs: vec![SourceRef {
+                path: "src/foo.rs".into(),
+                sha256: sha,
+            }],
         };
 
         // 文件未改 → 0 stale
@@ -1424,5 +1588,38 @@ mod tests {
         // 文件被删除 → 也算 stale
         std::fs::remove_file(&src_path).unwrap();
         assert_eq!(count_stale_refs(&entry, dir.path()), 1);
+    }
+
+    /// 回归：source_paths 是 LLM 提供的字段，越出项目根的路径（绝对路径、
+    /// `..` 上跳）必须被 containment 校验拒绝，只保留根内引用。
+    #[test]
+    fn kb_store_source_paths_rejects_paths_outside_project_root() {
+        let dir = tempdir().unwrap();
+        let project_root = dir.path().join("project");
+        std::fs::create_dir_all(project_root.join("src")).unwrap();
+        std::fs::write(project_root.join("src/ok.rs"), b"fn main() {}").unwrap();
+        // 真实存在、但位于项目根之外的文件：必须被 containment 校验拒绝
+        // （区别于「文件不存在被跳过」的分支）
+        std::fs::write(dir.path().join("outside.rs"), b"secret").unwrap();
+
+        let content = "---\ntitle: T\nsource_paths: src/ok.rs, src/../../outside.rs\n---\nbody";
+        let kb_root = dir.path().join(".kb");
+        std::fs::create_dir_all(&kb_root).unwrap();
+        update_index_entry(&kb_root, &project_root, "decisions/T.md", content).unwrap();
+
+        let index: KbIndex =
+            serde_json::from_str(&fs::read_to_string(kb_root.join("index.json")).unwrap()).unwrap();
+        let entry = index.entries.get("T").expect("entry should be indexed");
+        assert_eq!(
+            entry.source_refs.len(),
+            1,
+            "越界路径必须被拒绝，只保留项目根内的引用: {:?}",
+            entry.source_refs
+        );
+        assert_eq!(entry.source_refs[0].path, "src/ok.rs");
+        assert_eq!(
+            entry.source_refs[0].sha256,
+            compute_bytes_sha256(b"fn main() {}")
+        );
     }
 }

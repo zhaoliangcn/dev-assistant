@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::debug;
 
 use super::{ToolArgs, ToolContext, ToolDefinition, ToolResult};
@@ -54,6 +55,18 @@ impl Default for KbIndex {
             entries: HashMap::new(),
         }
     }
+}
+
+/// KB 条目关联的源文件引用。
+///
+/// 用来判断条目是否过期：条目创建时记录所基于的源文件路径 + 当时内容的 sha256；
+/// 后续对比磁盘上的当前内容，sha256 不匹配即为过期。
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct SourceRef {
+    /// 相对项目根的路径，如 "src/llm/provider/openai.rs"
+    pub path: String,
+    /// 条目创建时该文件内容的 sha256 hex（小写）
+    pub sha256: String,
 }
 
 /// 索引中的单个条目。
@@ -106,6 +119,14 @@ pub struct KbIndexEntry {
     /// 最近一次被 kb_query 命中的时间
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_query_at: Option<String>,
+    /// 条目关联的源文件引用列表（可选）。
+    ///
+    /// agent 在调用 kb_store 时可传 `source_paths` 参数，指定这条 KB 条目
+    /// 基于哪些源文件。每个引用记录当时文件内容的 sha256，后续可用来
+    /// 判断条目是否已过期——源文件修改后 sha256 不匹配即为 stale。
+    /// 空列表表示这条条目不直接绑定源文件（如跨项目决策、通用知识等）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_refs: Vec<SourceRef>,
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +405,8 @@ fn kb_store_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
 
     // 更新索引
     if update_index {
-        update_index_entry(&kb_root, path, content)?;
+        let project_root = working_dir_canonical.clone();
+        update_index_entry(&kb_root, &project_root, path, content)?;
     }
 
     Ok(ToolResult {
@@ -528,7 +550,12 @@ fn kb_query_handler(args: &ToolArgs, context: &ToolContext) -> Result<ToolResult
 ///
 /// 从条目的 frontmatter 中提取元数据，更新或添加到 index.json。
 /// `pub(crate)`：供 dream 模块（consolidate 阶段写入新条目后纳入索引）复用。
-pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str) -> Result<(), AppError> {
+pub(crate) fn update_index_entry(
+    kb_root: &Path,
+    project_root: &Path,
+    entry_path: &str,
+    content: &str,
+) -> Result<(), AppError> {
     let index_path = kb_root.join("index.json");
 
     // 加载现有索引，或创建新索引
@@ -602,6 +629,33 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
 
     let now = Utc::now().to_rfc3339();
 
+    // 从 frontmatter 解析 `source_paths`（逗号分隔的相对项目根路径），
+    // 为每个路径计算当前磁盘内容的 sha256，生成 source_refs 列表。
+    // 解析失败或文件不存在时跳过那条路径（warn），不阻塞整个条目写入。
+    let source_refs: Vec<SourceRef> = fm
+        .get("source_paths")
+        .map(|s| {
+            s.split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .filter_map(|p| {
+                    let full = project_root.join(&p);
+                    match compute_file_sha256(&full) {
+                        Ok(sha) => Some(SourceRef { path: p, sha256: sha }),
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %p,
+                                error = %e,
+                                "source_paths 中的文件不存在或不可读，跳过"
+                            );
+                            None
+                        }
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     // 解析 archived 字段（frontmatter 可写 archived: true，默认 false）
     let archived = fm.get("archived").map(|s| s.trim().eq_ignore_ascii_case("true")).unwrap_or(false);
 
@@ -622,6 +676,7 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
         updated: Some(now.clone()),
         query_count: 0,
         last_query_at: None,
+        source_refs,
     };
 
     // 增量优化：若条目已存在且元数据完全一致（仅 updated 时间戳不同），
@@ -639,7 +694,8 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
             && existing.depends_on == entry.depends_on
             && existing.supersedes == entry.supersedes
             && existing.author == entry.author
-            && existing.created == entry.created;
+            && existing.created == entry.created
+            && existing.source_refs == entry.source_refs;
         if unchanged {
             debug!(id = %id, "KB 索引条目无变化，跳过写盘");
             return Ok(());
@@ -667,6 +723,49 @@ pub(crate) fn update_index_entry(kb_root: &Path, entry_path: &str, content: &str
 // ---------------------------------------------------------------------------
 // 检索算法
 // ---------------------------------------------------------------------------
+
+/// 计算文件内容的 SHA-256，返回小写 hex 字符串。
+///
+/// 文件不存在或读失败时返回 `AppError::Io`。
+pub fn compute_file_sha256(path: &Path) -> Result<String, AppError> {
+    let bytes = fs::read(path).map_err(|e| {
+        AppError::Io(std::io::Error::other(format!(
+            "Failed to read source file '{}' for sha256: {}",
+            path.display(),
+            e
+        )))
+    })?;
+    Ok(compute_bytes_sha256(&bytes))
+}
+
+/// 直接对字节切片计算 SHA-256，返回小写 hex（测试和内存数据通用）。
+pub fn compute_bytes_sha256(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    hex::encode(digest)
+}
+
+/// 检查一条 KB 条目有多少个 source_refs 已过期。
+///
+/// 过期 = 磁盘上文件不存在或 sha256 不匹配。
+/// 无 source_refs 的条目返回 0（无从检查）。
+pub fn count_stale_refs(entry: &KbIndexEntry, project_root: &Path) -> usize {
+    if entry.source_refs.is_empty() {
+        return 0;
+    }
+    entry
+        .source_refs
+        .iter()
+        .filter(|r| {
+            let full = project_root.join(&r.path);
+            match compute_file_sha256(&full) {
+                Ok(current) => current != r.sha256,
+                Err(_) => true, // 文件被删也算过期
+            }
+        })
+        .count()
+}
 
 /// 判断字符是否为 CJK 字符（中文/日文/韩文）。
 fn is_cjk_char(c: char) -> bool {
@@ -1227,5 +1326,103 @@ mod tests {
             "update_index": true
         }));
         kb_store_handler(&args, ctx).unwrap();
+    }
+
+    // ── source_refs / sha256 / count_stale_refs 相关测试 ──────────────────
+
+    #[test]
+    fn kb_old_index_deserializes_without_source_refs() {
+        // 旧 index.json 不含 source_refs 字段，serde default 应产出空 Vec，不报错。
+        let old_json = r#"{
+            "version": 1,
+            "updated": "2026-09-01T00:00:00Z",
+            "entries": {
+                "ADR-OLD": {
+                    "path": "decisions/ADR-OLD.md",
+                    "type": "decision",
+                    "title": "Old Entry",
+                    "tags": ["legacy"],
+                    "status": "accepted"
+                }
+            }
+        }"#;
+        let index: KbIndex = serde_json::from_str(old_json).unwrap();
+        assert!(index.entries.contains_key("ADR-OLD"));
+        // source_refs 应通过 #[serde(default)] 初始化为空 Vec
+        assert!(index.entries["ADR-OLD"].source_refs.is_empty());
+    }
+
+    #[test]
+    fn compute_bytes_sha256_is_deterministic() {
+        let a = compute_bytes_sha256(b"hello");
+        let b = compute_bytes_sha256(b"hello");
+        let c = compute_bytes_sha256(b"world");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        // SHA-256 hex 长度固定 64 字符
+        assert_eq!(a.len(), 64);
+    }
+
+    #[test]
+    fn count_stale_refs_returns_zero_when_no_refs() {
+        let dir = tempdir().unwrap();
+        let entry = KbIndexEntry {
+            path: "decisions/foo.md".into(),
+            entry_type: "decision".into(),
+            title: "Foo".into(),
+            tags: vec![],
+            status: "accepted".into(),
+            archived: false,
+            relates_to: None,
+            depends_on: None,
+            supersedes: None,
+            author: None,
+            created: None,
+            updated: None,
+            #[allow(deprecated)]
+            query_count: 0,
+            last_query_at: None,
+            source_refs: vec![],
+        };
+        assert_eq!(count_stale_refs(&entry, dir.path()), 0);
+    }
+
+    #[test]
+    fn count_stale_refs_detects_modified_source() {
+        let dir = tempdir().unwrap();
+        let src_path = dir.path().join("src/foo.rs");
+        std::fs::create_dir_all(src_path.parent().unwrap()).unwrap();
+        std::fs::write(&src_path, b"original content").unwrap();
+        let sha = compute_file_sha256(&src_path).unwrap();
+
+        let entry = KbIndexEntry {
+            path: "kb/foo.md".into(),
+            entry_type: "decision".into(),
+            title: "About foo".into(),
+            tags: vec![],
+            status: "accepted".into(),
+            archived: false,
+            relates_to: None,
+            depends_on: None,
+            supersedes: None,
+            author: None,
+            created: None,
+            updated: None,
+            #[allow(deprecated)]
+            query_count: 0,
+            last_query_at: None,
+            source_refs: vec![SourceRef { path: "src/foo.rs".into(), sha256: sha }],
+        };
+
+        // 文件未改 → 0 stale
+        assert_eq!(count_stale_refs(&entry, dir.path()), 0);
+
+        // 文件被修改 → 1 stale
+        std::fs::write(&src_path, b"modified content").unwrap();
+        assert_eq!(count_stale_refs(&entry, dir.path()), 1);
+
+        // 文件被删除 → 也算 stale
+        std::fs::remove_file(&src_path).unwrap();
+        assert_eq!(count_stale_refs(&entry, dir.path()), 1);
     }
 }

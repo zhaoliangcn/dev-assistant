@@ -229,6 +229,7 @@ mod tests {
             updated: Some(updated),
             query_count: 0,
             last_query_at: None,
+                source_refs: Vec::new(),
         }
     }
 

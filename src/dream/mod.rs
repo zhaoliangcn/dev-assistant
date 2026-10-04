@@ -263,7 +263,8 @@ fn reindex_new_entries(kb_root: &std::path::Path) -> Result<(), AppError> {
             .to_string_lossy()
             .to_string();
         let content = std::fs::read_to_string(&path).map_err(AppError::Io)?;
-        crate::tools::kb::update_index_entry(kb_root, &rel, &content)?;
+        let project_root = kb_root.parent().unwrap_or(kb_root);
+        crate::tools::kb::update_index_entry(kb_root, project_root, &rel, &content)?;
         count += 1;
     }
     tracing::info!(count, "⑤ 索引重构完成");
@@ -344,6 +345,7 @@ mod tests {
             updated: Some(updated),
             query_count: 0,
             last_query_at: None,
+                source_refs: Vec::new(),
         };
         let mut index = crate::tools::kb::KbIndex::default();
         index.entries.insert("OLD-001".to_string(), old);

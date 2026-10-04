@@ -1531,11 +1531,39 @@ impl Agent {
         let name = tool_call.function.name.as_str();
         match name {
             "context_budget" => {
-                let report = self.context.budget_report_json();
-                Ok(ToolResult::success(format!(
-                    "当前上下文预算使用情况：\n{}",
-                    report
-                )))
+                let mut report = self.context.get_budget_report();
+
+                // 附加 KB 条目陈旧度：加载 .kb/index.json，遍历条目检查
+                // source_refs 的 sha256 是否已过期（源文件被改动/删除）。
+                // index.json 不存在时 KB 未初始化，返回 0。
+                let kb_root = self.working_dir().join(".kb");
+                let index_path = kb_root.join("index.json");
+                if let Ok(content) = std::fs::read_to_string(&index_path) {
+                    if let Ok(index) = serde_json::from_str::<crate::tools::kb::KbIndex>(&content) {
+                        let project_root = self.working_dir();
+                        let (stale, total) = index.entries.values().fold(
+                            (0usize, 0usize),
+                            |(s, t), entry| {
+                                let has_refs = !entry.source_refs.is_empty();
+                                let st = crate::tools::kb::count_stale_refs(entry, &project_root);
+                                (s + st, t + if has_refs { 1 } else { 0 })
+                            },
+                        );
+                        report.kb_stale_entries = stale;
+                        report.kb_total_injected = total;
+                    }
+                }
+
+                let json = serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string());
+                let mut msg = format!("当前上下文预算使用情况：\n{}", json);
+                if report.kb_stale_entries > 0 {
+                    msg.push_str(&format!(
+                        "\n\n⚠️ KB 中有 {}/{} 条条目已过期（源文件已修改），\
+                         需重新验证或运行检查命令确认。",
+                        report.kb_stale_entries, report.kb_total_injected
+                    ));
+                }
+                Ok(ToolResult::success(msg))
             }
             "compress_context" => {
                 // 解析策略参数：auto=根据压力等级自动选择，summarize=摘要压缩，truncate=截断

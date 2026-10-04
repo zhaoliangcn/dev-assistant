@@ -403,6 +403,8 @@ mod tests {
             utilization: total as f64 / max as f64,
             estimated_room: max.saturating_sub(total),
             pressure,
+            kb_stale_entries: 0,
+            kb_total_injected: 0,
         }
     }
 

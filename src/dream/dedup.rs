@@ -418,6 +418,7 @@ mod tests {
                 updated: Some(updated.to_string()),
                 query_count: 0,
                 last_query_at: None,
+                source_refs: Vec::new(),
             },
         )
     }
@@ -597,6 +598,7 @@ mod tests {
                     updated: Some(updated),
                     query_count: 0,
                     last_query_at: None,
+                source_refs: Vec::new(),
                 },
             );
         }

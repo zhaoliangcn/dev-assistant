@@ -76,6 +76,15 @@ pub struct ContextBudget {
     /// 工具 schema 占用的 tokens
     #[serde(default)]
     pub tool_schema_tokens: usize,
+    /// KB 注入条目中有多少条已过期（源文件 sha256 不匹配）。
+    ///
+    /// Agent 调 context_budget 时返回。>0 时需注意：KB 里的部分事实
+    /// 可能基于已修改的源文件，应重新验证或运行验证命令确认。
+    #[serde(default)]
+    pub kb_stale_entries: usize,
+    /// 本次注入的 KB 记忆条目总数（用来与 kb_stale_entries 对比）。
+    #[serde(default)]
+    pub kb_total_injected: usize,
 }
 
 /// 上下文预算管理器。
@@ -161,6 +170,8 @@ impl ContextBudgetManager {
             estimated_room,
             pressure,
             tool_schema_tokens: self.tool_schema_tokens,
+            kb_stale_entries: 0,
+            kb_total_injected: 0,
         }
     }
 

@@ -167,6 +167,10 @@ impl ContextCompressor {
     /// 摘要压缩：用 LLM 将旧消息压缩为摘要，保留最近 `summary_keep_rounds()` 轮完整对话（环境变量 `AGENT_SUMMARY_KEEP_ROUNDS` 可配置）。
     ///
     /// `llm` 用于生成摘要。若 LLM 调用失败，则回退到截断压缩。
+    ///
+    /// **前置处理**：构建 old_text 之前，先把 role=="tool" 的消息内容降级为一行
+    /// 结构化摘要（[tool:{name}] 首200字... ({N}B, {M}L)），避免 summarizer LLM
+    /// 看到完整工具输出、浪费 token。降级发生在 join 之前，否则无意义。
     pub async fn summarize(
         history: &mut ConversationHistory,
         llm: &LlmClient,
@@ -181,6 +185,25 @@ impl ContextCompressor {
         if old_messages.is_empty() {
             return Ok(Self::no_op(history));
         }
+
+        // 前置：把 tool 消息内容降级为一行摘要
+        let tool_name_map = build_tool_name_map(&old_messages);
+        let old_messages: Vec<LlmMessage> = old_messages
+            .into_iter()
+            .map(|mut m| {
+                if m.role == "tool" {
+                    let name = m
+                        .tool_call_id
+                        .as_deref()
+                        .and_then(|id| tool_name_map.get(id).map(|s| s.as_str()))
+                        .unwrap_or("unknown");
+                    let original = m.content.as_deref().unwrap_or("");
+                    let degraded = summarize_tool_result(original, name);
+                    m.content = Some(degraded);
+                }
+                m
+            })
+            .collect();
 
         // 构建摘要 prompt（使用纯文本 chat 调用，需要 LlmResponse）
         let old_text: Vec<String> = old_messages
@@ -280,6 +303,50 @@ impl ContextCompressor {
     }
 }
 
+/// 从一串消息里构建 `tool_call_id → tool_name` 映射。
+///
+/// 遍历 assistant 消息的 tool_calls，每个 call 的 `id` → `function.name`。
+/// 后续 tool 消息可以通过自己的 `tool_call_id` 查出对应的工具名。
+fn build_tool_name_map(messages: &[LlmMessage]) -> std::collections::HashMap<String, String> {
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for m in messages {
+        if m.role == "assistant" {
+            if let Some(calls) = &m.tool_calls {
+                for call in calls {
+                    map.insert(call.id.clone(), call.function.name.clone());
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 把工具结果内容压缩为一行结构化摘要。
+///
+/// 格式：`[tool:{name}] {首200字}... ({N}B, {M}L)`
+/// - 超过 200 字符时截断并加 `...`
+/// - 空内容返回 `[tool:{name}] (empty)`
+/// - 统计字节数和行数方便后续追查原始大小
+fn summarize_tool_result(content: &str, tool_name: &str) -> String {
+    if content.is_empty() {
+        return format!("[tool:{}] (empty)", tool_name);
+    }
+    let total_bytes = content.len();
+    let total_lines = content.lines().count();
+    let prefix = if content.chars().count() > 200 {
+        // 安全边界：按字符截断避免切半个 UTF-8 码点
+        let cut = content
+            .char_indices()
+            .nth(200)
+            .map(|(i, _)| i)
+            .unwrap_or(content.len());
+        format!("{}...", &content[..cut])
+    } else {
+        content.to_string()
+    };
+    format!("[tool:{}] {} ({}B, {}L)", tool_name, prefix, total_bytes, total_lines)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +395,89 @@ mod tests {
         std::env::set_var("AGENT_SUMMARY_KEEP_ROUNDS", "5");
         assert_eq!(summary_keep_rounds(), 5);
         std::env::remove_var("AGENT_SUMMARY_KEEP_ROUNDS");
+    }
+
+    // ── summarize_tool_result / build_tool_name_map 测试 ──────────────────
+
+    #[test]
+    fn summarize_tool_result_empty() {
+        let out = summarize_tool_result("", "read_file");
+        assert_eq!(out, "[tool:read_file] (empty)");
+    }
+
+    #[test]
+    fn summarize_tool_result_short_content_kept_intact() {
+        let short = "hello world";
+        let out = summarize_tool_result(short, "exec_command");
+        assert!(out.starts_with("[tool:exec_command] hello world"));
+        // 短内容不应有省略号
+        assert!(!out.contains("..."));
+        // 结尾含字节/行数统计
+        assert!(out.contains("B, 1L)"));
+    }
+
+    #[test]
+    fn summarize_tool_result_long_content_truncates_to_200_chars() {
+        let long = "x".repeat(500);
+        let out = summarize_tool_result(&long, "exec_command");
+        assert!(out.starts_with("[tool:exec_command] "));
+        assert!(out.contains("...")); // 应被截断
+        // 首段（不含 tool:name 前缀和结尾统计）最多 200 char + "..."
+        // 完整输出应为格式："[tool:name] {200 chars}... ({500}B, 1L)"
+        assert!(out.contains("500B"));
+    }
+
+    #[test]
+    fn build_tool_name_map_collects_all_tool_call_ids() {
+        use crate::llm::{ToolCall, ToolCallFunction};
+
+        let calls = vec![
+            ToolCall {
+                id: "call_1".into(),
+                function: ToolCallFunction {
+                    name: "read_file".into(),
+                    arguments: serde_json::json!({}),
+                },
+            },
+            ToolCall {
+                id: "call_2".into(),
+                function: ToolCallFunction {
+                    name: "exec_command".into(),
+                    arguments: serde_json::json!({}),
+                },
+            },
+        ];
+
+        let messages = vec![LlmMessage {
+            role: "assistant".into(),
+            content: Some("calling tools".into()),
+            tool_calls: Some(calls),
+            tool_call_id: None,
+        }];
+
+        let map = build_tool_name_map(&messages);
+        assert_eq!(map.get("call_1").map(|s| s.as_str()), Some("read_file"));
+        assert_eq!(map.get("call_2").map(|s| s.as_str()), Some("exec_command"));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn build_tool_name_map_ignores_non_assistant_messages() {
+        let messages = vec![
+            LlmMessage {
+                role: "user".into(),
+                content: Some("do something".into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            LlmMessage {
+                role: "tool".into(),
+                content: Some("result".into()),
+                tool_calls: None,
+                tool_call_id: Some("call_1".into()),
+            },
+        ];
+        let map = build_tool_name_map(&messages);
+        assert!(map.is_empty());
     }
 }

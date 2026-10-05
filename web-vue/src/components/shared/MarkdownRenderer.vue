@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { marked } from 'marked'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Marked, Renderer } from 'marked'
+import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 
 const props = withDefaults(defineProps<{
@@ -10,12 +11,11 @@ const props = withDefaults(defineProps<{
   breaks: true,
 })
 
-marked.setOptions({
-  breaks: props.breaks,
-  gfm: true,
-})
+// 用独立实例而非全局 marked.setOptions/use：全局配置会被其他模块
+// （如 useMarkdown.ts）覆盖，import 顺序决定生效者，行为不可预测。
+const md = new Marked({ breaks: props.breaks, gfm: true })
 
-const renderer = new marked.Renderer()
+const renderer = new Renderer()
 renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   const validLang = lang && hljs.getLanguage(lang) ? lang : 'plaintext'
   let highlighted: string
@@ -34,14 +34,16 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   </div>`
 }
 
-marked.use({ renderer })
+md.use({ renderer })
 
+// marked 默认不消毒：LLM/工具输出经 v-html 注入，必须过 DOMPurify。
+// catch 分支同样消毒——原始内容不能直达 v-html。
 const html = computed(() => {
   if (!props.content) return ''
   try {
-    return marked.parse(props.content) as string
+    return DOMPurify.sanitize(md.parse(props.content) as string)
   } catch {
-    return props.content
+    return DOMPurify.sanitize(props.content)
   }
 })
 
@@ -63,10 +65,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   containerRef.value?.removeEventListener('click', handleCopyClick)
-})
-
-watch(html, () => {
-  // 内容更新后重新高亮
 })
 </script>
 

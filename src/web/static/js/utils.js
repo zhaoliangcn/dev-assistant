@@ -83,11 +83,7 @@ export function highlightCode(code, lang, collapseThreshold = 20) {
     const actions = (collapsible
         ? '<button type="button" class="copy-btn" onclick="window._daToggleCodeBlock(this)">展开</button>'
         : '') +
-        '<button type="button" class="copy-btn" onclick="window._daCopyCode(this)">📋 复制</button>' +
-        // P5: 代码块运行按钮（仅 JavaScript）
-        (lang === 'javascript' || lang === 'js'
-            ? ' <button type="button" class="run-btn" onclick="window._daRunCode(this)">▶ 运行</button>'
-            : '');
+        '<button type="button" class="copy-btn" onclick="window._daCopyCode(this)">📋 复制</button>';
     return '<div class="code-block' + (collapsible ? ' code-block-collapsed' : '') + '">' +
         '<div class="code-block-header">' +
         '<span class="code-block-lang">' + escapeHtml(langLabel) + '</span>' +
@@ -355,39 +351,6 @@ export function toggleCodeBlock(btn) {
     if (!block) return;
     const collapsed = block.classList.toggle('code-block-collapsed');
     btn.textContent = collapsed ? '展开' : '收起';
-}
-
-/**
- * 运行 JavaScript 代码块（P5）。
- * @param {HTMLButtonElement} btn
- */
-export function runCode(btn) {
-    // F1: 安全确认门 —— 阻止误触执行未知代码
-    if (!confirm('确认执行这段代码？')) return;
-
-    const block = btn.closest('.code-block');
-    if (!block) return;
-    const codeEl = block.querySelector('pre code');
-    if (!codeEl) return;
-    
-    const code = codeEl.textContent || '';
-    const outputEl = document.createElement('div');
-    outputEl.className = 'code-run-output';
-    
-    try {
-        const result = eval(code);
-        outputEl.textContent = typeof result !== 'undefined' ? String(result) : 'undefined';
-        outputEl.className += ' code-run-success';
-    } catch (e) {
-        outputEl.textContent = '错误: ' + e.message;
-        outputEl.className += ' code-run-error';
-    }
-    
-    // 移除旧输出
-    const oldOutput = block.querySelector('.code-run-output');
-    if (oldOutput) oldOutput.remove();
-    
-    block.appendChild(outputEl);
 }
 
 // ── LCS Diff ──

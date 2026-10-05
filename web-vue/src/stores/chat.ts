@@ -136,7 +136,6 @@ export const useChatStore = defineStore('chat', () => {
             }, 50)
           }
         }
-        messages.value = [...messages.value]
         break
       }
 
@@ -309,6 +308,16 @@ export const useChatStore = defineStore('chat', () => {
 
   function sendMessage(content: string) {
     if (busy.value || !_ws) return
+
+    // 断线时 send() 会静默丢弃消息：若不做此守卫，用户气泡已插入且
+    // busy=true 永远等不到 done/error，界面卡死直到刷新。
+    if (!connected.value) {
+      messages.value = [
+        ...messages.value,
+        createEmptyMessage('error', '连接已断开，请等待重连后再发送'),
+      ]
+      return
+    }
 
     _flushStream()
     _flushReasoning()

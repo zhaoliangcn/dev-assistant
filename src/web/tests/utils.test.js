@@ -61,10 +61,10 @@ describe('highlightCode', () => {
         expect(html).toContain('复制');
     });
 
-    test('JS 代码块带运行按钮', () => {
+    test('JS 代码块不再带运行按钮（安全：模型输出不可在页面执行）', () => {
         const html = highlightCode('console.log(1)', 'js');
-        expect(html).toContain('run-btn');
-        expect(html).toContain('▶ 运行');
+        expect(html).not.toContain('run-btn');
+        expect(html).not.toContain('▶ 运行');
     });
 
     test('长代码块折叠（超 20 行）', () => {

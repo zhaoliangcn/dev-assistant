@@ -28,21 +28,9 @@
     --diff-add-fg: #21a453;
     --diff-del-fg: #d33;
 
-    /* 代码块运行结果 */
-    --run-success-bg: #d1fae5;
-    --run-success-fg: #065f46;
-    --run-success-border: #10b981;
-    --run-error-bg: #fee2e2;
-    --run-error-fg: #991b1b;
-    --run-error-border: #ef4444;
-
     /* 状态点（在线/离线） */
     --status-online: #22c55e;
     --status-offline: #ef4444;
-
-    /* 运行按钮（语义成功色） */
-    --run-btn-bg: #10b981;
-    --run-btn-bg-hover: #059669;
 
     /* 高对比/焦点色（暗色下加亮） */
     --focus-color: var(--pico-primary);
@@ -419,58 +407,6 @@ footer {
 .copy-btn.small {
     font-size: 0.7em;
     padding: 0.0625rem 0.375rem;
-}
-
-/* P5: 代码块运行按钮 */
-.run-btn {
-    font-size: 0.75em;
-    padding: 0.125rem 0.5rem;
-    background: var(--run-btn-bg);
-    color: #fff;
-    border: none;
-    border-radius: 0.25rem;
-    cursor: pointer;
-    line-height: 1.4;
-    width: auto;
-    margin: 0;
-}
-
-.run-btn:hover {
-    background: var(--run-btn-bg-hover);
-}
-
-.code-run-output {
-    margin: 0.5rem;
-    padding: 0.75rem;
-    border-radius: 0.375rem;
-    font-family: var(--pico-font-family-monospace, monospace);
-    font-size: 0.85em;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-.code-run-success {
-    background: var(--run-success-bg);
-    color: var(--run-success-fg);
-    border: 1px solid var(--run-success-border);
-}
-
-.code-run-error {
-    background: var(--run-error-bg);
-    color: var(--run-error-fg);
-    border: 1px solid var(--run-error-border);
-}
-
-[data-theme="dark"] .code-run-success {
-    background: var(--run-success-bg);
-    color: var(--run-success-fg);
-    border-color: var(--run-success-border);
-}
-
-[data-theme="dark"] .code-run-error {
-    background: var(--run-error-bg);
-    color: var(--run-error-fg);
-    border-color: var(--run-error-border);
 }
 
 .code-block pre {

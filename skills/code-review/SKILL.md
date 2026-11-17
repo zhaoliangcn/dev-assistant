@@ -32,6 +32,8 @@ metadata:
 | Go | — | go mod | `go.mod`, `go.sum` |
 | Java | `target/`, `build/` | Maven/Gradle | `pom.xml`, `build.gradle` |
 
+> 构建目录的完整清单以主系统提示词的安全策略为准，此处不再重复维护（避免两处不一致）。
+
 ## 审查要点清单
 
 ### 安全

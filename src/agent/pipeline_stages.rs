@@ -11,6 +11,10 @@ use super::identity::AgentIdentity;
 ///
 /// 模板顺序与 `STAGE_WEIGHTS` 权重数组一一对应：
 /// 设计(0) → 编码(1) → 测试(2) → 审查(3) → 修复(4) → 记录(5)
+///
+/// 注：阶段 1-3（设计/编码/测试）需原始需求定位范围，保留 `{task_ref}`；
+/// 阶段 4-6（审查/修复/记录）只需前一阶段输出（`{context}`），不再重复注入完整原始需求，
+/// 减少冗余、节省上下文预算（v2 报告 P2#6）。
 pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static str, &'static str); 6] = [
     (
         "🏗 架构设计",
@@ -54,8 +58,6 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
         "🔍 代码审查",
         AgentIdentity::Reviewer,
         "这是流水线第四阶段：代码审查。\n\n\
-         原始需求：\n\
-         {task_ref}\n\n\
          上一阶段输出（测试结果和代码实现）：\n\
          {context}\n\n\
          请用 kb_store 将审查结果保存到 pipeline/stage-3/。\n\n\
@@ -67,8 +69,6 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
         "🔧 问题修复",
         AgentIdentity::Debugger,
         "这是流水线第五阶段：问题修复。\n\n\
-         原始需求：\n\
-         {task_ref}\n\n\
          上一阶段输出（审查报告）：\n\
          {context}\n\n\
          注意：只修复审查中提出的问题，不要引入新的功能变更。\n\
@@ -81,8 +81,6 @@ pub const STAGE_TEMPLATES: [(&'static str, AgentIdentity, &'static str, &'static
         "📋 进度记录",
         AgentIdentity::General,
         "这是流水线最终阶段：进度记录。\n\n\
-         原始需求：\n\
-         {task_ref}\n\n\
          已完成的工作：\n\
          {context}\n\n\
          请用 kb_store 记录到 pipeline/stage-5/：\n\

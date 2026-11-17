@@ -62,7 +62,7 @@ impl AgentIdentity {
 
     /// 通用规则（工具优先级、输出规范、终止规则合并，各身份共用）
     fn shared_guide() -> &'static str {
-        "通用规则\n工具：kb_query→batch_read_files→kb_store→finish\n输出：finish(summary=...)含完成内容、关键发现、修改文件\n终止：批量读、不重读、不写中间文件、完成即finish"
+        "通用规则\n循环：分析→思考→行动→观察→迭代，直到目标达成再 finish；未确认工具结果前不假设成功。\n工具优先级：先 kb_query 查已有决策 → 用 batch_read_files 批量读（必要时 read_symbol 定位符号）→ 完成后 kb_store 沉淀关键结论 → 调 finish 收尾。\n输出：finish(summary=...) 须含 ①完成内容 ②关键发现/决策 ③修改的文件列表 ④遗留问题。\n完成条件：本阶段目标已达成、无待办子任务时方可 finish；未达成则继续迭代。\n终止：批量一次读完、已读不重读；除非生成大型交付物（如报告/文档）否则不写中间文件；完成即 finish。"
     }
 
     /// 提示词中工具的固定展示顺序（阅读友好，`finish` 保持在末尾）。
@@ -540,6 +540,23 @@ mod tests {
             assert!(
                 prompt.contains(&format!("可用工具：\n- {}", identity.tool_list())),
                 "{} prompt tool section mismatch",
+                identity.to_str()
+            );
+        }
+    }
+
+    #[test]
+    fn shared_guide_includes_completion_condition_and_tool_priority() {
+        for identity in AgentIdentity::all() {
+            let prompt = identity.system_prompt();
+            assert!(
+                prompt.contains("完成条件"),
+                "{} shared_guide missing completion condition",
+                identity.to_str()
+            );
+            assert!(
+                prompt.contains("工具优先级"),
+                "{} shared_guide missing tool priority",
                 identity.to_str()
             );
         }
